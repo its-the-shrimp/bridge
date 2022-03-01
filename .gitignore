@@ -1,0 +1,6 @@
+*.brf
+nobuild
+nobuild.old
+build
+.vscode
+.DS_Store
