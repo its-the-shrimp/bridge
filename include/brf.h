@@ -6,18 +6,31 @@
 typedef enum {
 	OP_NONE,
 	OP_END,
-	OP_MARK,
-	OP_SET,
-	OP_SETR,
-	OP_SETD,
-	OP_SETC,
-	OP_SETM,
-	OP_ADD,
-	OP_ADDR,
-	OP_SUB,
-	OP_SUBR,
-	OP_SYSCALL,
-	OP_GOTO,
+	OP_MARK, // uses Op::mark_name
+	OP_SET, // uses Op::dst_reg and Op::value
+	OP_SETR, // uses Op::dst_reg and Op::src_reg
+	OP_SETD, // uses Op::dst_reg and Op::symbol_id
+	OP_SETC, // uses Op::dst_reg and Op::symbol_id
+	OP_SETM, // uses Op::dst_reg and Op::symbol_id
+	OP_ADD, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_ADDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SUB, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_SUBR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SYSCALL, // uses Op::syscall_id
+	OP_GOTO, // uses Op::symbol_id
+	OP_CGOTO, // uses Op::src_reg and Op::symbol_id
+	OP_EQ, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_EQR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_NEQ, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_NEQR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_LT, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_LTR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_GT, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_GTR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_LE, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_LER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_GE, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_GER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	N_OPS
 } OpType;
 
@@ -35,7 +48,20 @@ typedef enum {
 	fromcstr("sub"), \
 	fromcstr("subr"), \
 	fromcstr("sys"), \
-	fromcstr("goto") \
+	fromcstr("goto"), \
+	fromcstr("cgoto"), \
+	fromcstr("eq"), \
+	fromcstr("eqr"), \
+	fromcstr("neq"), \
+	fromcstr("neqr"), \
+	fromcstr("lt"), \
+	fromcstr("ltr"), \
+	fromcstr("gt"), \
+	fromcstr("gtr"), \
+	fromcstr("le"), \
+	fromcstr("ler"), \
+	fromcstr("ge"), \
+	fromcstr("ger") \
 
 sbuf opNames[] = { _opNames };
 
@@ -70,15 +96,15 @@ const sbuf EXECMARK_SEGMENT_START = fromcstr("S\n");
 const sbuf SEP = fromcstr(":");
 
 typedef struct op {
-	char type;
-	char dst_reg;
-	int8_t src_reg; // for OP_*R or OP_ADD*
+	int8_t type;
+	int8_t dst_reg;
+	int8_t src_reg;
 	union {
-		int64_t value; // for OP_SET and OP_ADD
-		int32_t symbol_id; // for OP_*D or OP_*M or OP_*C or OP_GOTO
-		char* mark_name; // for OP_MARK
-		uint8_t syscall_id; // for OP_SYSCALL
-		int8_t src2_reg; // for OP_ADDR
+		int64_t value;
+		int32_t symbol_id;
+		char* mark_name;
+		uint8_t syscall_id; 
+		int8_t src2_reg;
 	};
 } Op;
 defArray(Op);

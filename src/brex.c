@@ -2,29 +2,37 @@
 #include "stdio.h"
 #include "errno.h"
 #include "unistd.h"
+#include "signal.h"
 
-int8_t fetchInt8(sbuf* input)
+bool interrupt = false;
+
+void handleExecInt(int sig)
+{
+	interrupt = true;
+}
+
+int8_t loadInt8(sbuf* input)
 {
 	int8_t res = input->data[0];
 	sbufpshift(input, 1);
 	return res;
 }
 
-int16_t fetchInt16(sbuf* input)
+int16_t loadInt16(sbuf* input)
 {
 	int16_t res = *(int16_t*)BRByteOrder(input->data, 2);
 	sbufpshift(input, 2);
 	return res; 
 }
 
-int32_t fetchInt32(sbuf* input)
+int32_t loadInt32(sbuf* input)
 {
 	int32_t res = *(int32_t*)BRByteOrder(input->data, 4);
 	sbufpshift(input, 4);
 	return res;
 }
 
-int64_t fetchInt64(sbuf* input)
+int64_t loadInt64(sbuf* input)
 {
 	int64_t res = *(int64_t*)BRByteOrder(input->data, 8);
 	sbufpshift(input, 8);
@@ -53,19 +61,19 @@ typedef struct {
 	};
 } BRFError;
 
-typedef BRFError (*OpFetcher) (sbuf*, Program*, heapctx_t);
+typedef BRFError (*OpLoader) (sbuf*, Program*, heapctx_t);
 
-BRFError fetchNop(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadNop(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	return (BRFError){0};
 }
 
-BRFError fetchOpEnd(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpEnd(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	return (BRFError){0};
 }
 
-BRFError fetchOpMark(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpMark(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	sbuf new;
@@ -76,7 +84,7 @@ BRFError fetchOpMark(sbuf* input, Program* dst, heapctx_t ctx)
 	return (BRFError){0};
 }
 
-BRFError fetchOpSet(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSet(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 10) {
@@ -85,12 +93,12 @@ BRFError fetchOpSet(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_SET
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->value = fetchInt64(input);	
+	op->dst_reg = loadInt8(input);
+	op->value = loadInt64(input);	
 	return (BRFError){0};
 }
 
-BRFError fetchOpSetr(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSetr(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 3) {
@@ -99,12 +107,12 @@ BRFError fetchOpSetr(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_SETR
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->src_reg = fetchInt8(input);
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpSetd(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSetd(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 4) {
@@ -113,12 +121,12 @@ BRFError fetchOpSetd(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_SETD
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->symbol_id = fetchInt32(input);
+	op->dst_reg = loadInt8(input);
+	op->symbol_id = loadInt32(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpSetm(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSetm(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 4) {
@@ -127,12 +135,12 @@ BRFError fetchOpSetm(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_SETM
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->symbol_id = fetchInt32(input);
+	op->dst_reg = loadInt8(input);
+	op->symbol_id = loadInt32(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpSetc(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSetc(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 4) {
@@ -141,12 +149,12 @@ BRFError fetchOpSetc(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_SETC
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->symbol_id = fetchInt32(input);
+	op->dst_reg = loadInt8(input);
+	op->symbol_id = loadInt32(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpAdd(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpAdd(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 11) {
@@ -155,13 +163,13 @@ BRFError fetchOpAdd(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_ADD
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->src_reg = fetchInt8(input);
-	op->value = fetchInt64(input);
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->value = loadInt64(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpAddr(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpAddr(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 4) {
@@ -170,13 +178,13 @@ BRFError fetchOpAddr(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_ADDR
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->src_reg = fetchInt8(input);
-	op->src2_reg = fetchInt8(input);
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->src2_reg = loadInt8(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpSub(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSub(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 11) {
@@ -185,13 +193,13 @@ BRFError fetchOpSub(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_SUB
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->src_reg = fetchInt8(input);
-	op->value = fetchInt64(input);
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->value = loadInt64(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpSubr(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSubr(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 4) {
@@ -200,13 +208,13 @@ BRFError fetchOpSubr(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_SUBR
 		};
 	}
-	op->dst_reg = fetchInt8(input);
-	op->src_reg = fetchInt8(input);
-	op->src2_reg = fetchInt8(input);
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->src2_reg = loadInt8(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpSyscall(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSyscall(sbuf* input, Program* dst, heapctx_t ctx)
 {	
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 2) {
@@ -215,11 +223,11 @@ BRFError fetchOpSyscall(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_SYSCALL
 		};
 	}
-	op->syscall_id = fetchInt8(input);
+	op->syscall_id = loadInt8(input);
 	return (BRFError){0};
 }
 
-BRFError fetchOpGoto(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpGoto(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 5) {
@@ -228,27 +236,234 @@ BRFError fetchOpGoto(sbuf* input, Program* dst, heapctx_t ctx)
 			.opcode = OP_GOTO
 		};
 	}
-	op->symbol_id = fetchInt32(input);
+	op->symbol_id = loadInt32(input);
 	return (BRFError){0};
 }
 
-OpFetcher op_fetchers[] = {
-	&fetchNop,
-	&fetchOpEnd,
-	&fetchOpMark,
-	&fetchOpSet,
-	&fetchOpSetr,
-	&fetchOpSetd,
-	&fetchOpSetc,
-	&fetchOpSetm,
-	&fetchOpAdd,
-	&fetchOpAddr,
-	&fetchOpSub,
-	&fetchOpSubr,
-	&fetchOpSyscall,
-	&fetchOpGoto
+BRFError loadOpCgoto(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 6) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG, 
+			.opcode = OP_CGOTO
+		};
+	}
+	op->src_reg = loadInt8(input);
+	op->symbol_id = loadInt32(input);
+	return (BRFError){0};
+}
+
+BRFError loadOpEq(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 11) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_EQ
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->value = loadInt64(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpEqr(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 4) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_EQR
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->src2_reg = loadInt8(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpNeq(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 11) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_NEQ
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->value = loadInt64(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpNeqr(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 4) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_NEQR
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->src2_reg = loadInt8(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpLt(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 11) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_LT
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->value = loadInt64(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpLtr(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 4) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_LTR
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->src2_reg = loadInt8(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpGt(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 11) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_GT
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->value = loadInt64(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpGtr(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 4) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_GTR
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->src2_reg = loadInt8(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpLe(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 11) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_LE
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->value = loadInt64(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpLer(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 4) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_LER
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->src2_reg = loadInt8(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpGe(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 11) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_GE
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->value = loadInt64(input);	
+	return (BRFError){0};
+}
+
+BRFError loadOpGer(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 4) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG,
+			.opcode = OP_GER
+		};
+	}
+	op->dst_reg = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	op->src2_reg = loadInt8(input);	
+	return (BRFError){0};
+}
+
+OpLoader op_loaders[] = {
+	&loadNop,
+	&loadOpEnd,
+	&loadOpMark,
+	&loadOpSet,
+	&loadOpSetr,
+	&loadOpSetd,
+	&loadOpSetc,
+	&loadOpSetm,
+	&loadOpAdd,
+	&loadOpAddr,
+	&loadOpSub,
+	&loadOpSubr,
+	&loadOpSyscall,
+	&loadOpGoto,
+	&loadOpCgoto,
+	&loadOpEq,
+	&loadOpEqr,
+	&loadOpNeq,
+	&loadOpNeqr,
+	&loadOpLt,
+	&loadOpLtr,
+	&loadOpGt,
+	&loadOpGtr,
+	&loadOpLe,
+	&loadOpLer,
+	&loadOpGe,
+	&loadOpGer
 };
-static_assert(N_OPS == 14, "handling all defined BRF operations");
+static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRF operations have unmatched loaders");
 
 BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 {
@@ -265,7 +480,7 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 	while (input.length) {
 		if (sbufcut(&input, ENTRYSPEC_SEGMENT_START).data) {
 			if (input.length < 2) return (BRFError){.code = BRF_ERR_NO_ENTRY_SPEC};
-			dst->entry_opid = fetchInt32(&input);
+			dst->entry_opid = loadInt32(&input);
 		} else if (sbufcut(&input, DATA_SEGMENT_START).data) {
 			while (true) {
 				if (!sbufsplit(&input, &new, SEP).data) return (BRFError){.code = BRF_ERR_NO_BLOCK_NAME};
@@ -277,7 +492,7 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 				datablock->name = tostr(ctx, new);
 
 				if (input.length < 5) return (BRFError){.code = BRF_ERR_NO_BLOCK_SIZE};
-				datablock->spec.length = fetchInt32(&input);
+				datablock->spec.length = loadInt32(&input);
 
 				if (input.length < datablock->spec.length + 1) {
 					return (BRFError){.code = BRF_ERR_NO_BLOCK_SPEC};
@@ -296,7 +511,7 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 				memblock->name = tostr(ctx, new);
 
 				if (input.length < 5) return (BRFError){.code = BRF_ERR_NO_BLOCK_SIZE};
-				memblock->size = fetchInt32(&input);
+				memblock->size = loadInt32(&input);
 			}
 		} else if (sbufcut(&input, EXEC_SEGMENT_START).data) {
 			do {
@@ -305,12 +520,12 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 				}
 				if (input.length < 1) return (BRFError){.code = BRF_ERR_NO_OPCODE};
 
-				op->type = fetchInt8(&input);
+				op->type = loadInt8(&input);
 				if (!inRange(op->type, 0, N_OPS)) {
 					return (BRFError){.code = BRF_ERR_INVALID_OPCODE, .opcode = op->type};
 				}
 
-				BRFError err = op_fetchers[op->type](&input, dst, ctx);
+				BRFError err = op_loaders[op->type](&input, dst, ctx);
 				if (err.code != BRF_ERR_OK) return err;
 			} while (op->type != OP_END);
 		} else {
@@ -469,6 +684,113 @@ bool handleOpGoto(ExecEnv* env, Program* program)
 	return false;
 }
 
+bool handleOpCgoto(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	if (env->registers[op.src_reg]) {
+		env->op_id = op.symbol_id;
+	} else {
+		env->op_id++;
+	}
+	return false;
+}
+
+bool handleOpEq(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] == op.value;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpEqr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] == env->registers[op.src2_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpNeq(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] != op.value;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpNeqr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] != env->registers[op.src2_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLt(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] < op.value;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLtr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] < env->registers[op.src2_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpGt(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] > op.value;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpGtr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] > env->registers[op.src2_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLe(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] <= op.value;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLer(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] <= env->registers[op.src2_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpGe(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] >= op.value;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpGer(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] >= env->registers[op.src2_reg];
+	env->op_id++;
+	return false;
+}
+
 BRFFunc op_handlers[] = {
 	&handleNop,
 	&handleOpEnd,
@@ -483,14 +805,27 @@ BRFFunc op_handlers[] = {
 	&handleOpSub,
 	&handleOpSubr,
 	&handleOpSyscall,
-	&handleOpGoto
+	&handleOpGoto,
+	&handleOpCgoto,
+	&handleOpEq,
+	&handleOpEqr,
+	&handleOpNeq,
+	&handleOpNeqr,
+	&handleOpLt,
+	&handleOpLtr,
+	&handleOpGt,
+	&handleOpGtr,
+	&handleOpLe,
+	&handleOpLer,
+	&handleOpGe,
+	&handleOpGer
 };
-static_assert(N_OPS == 14, "handling all defined BRF operations");
+static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRF operations have unmatched execution handlers");
 
 ExecEnv execProgram(Program* program)
 {
 	ExecEnv env = initExecEnv(program);
-	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) { }
+	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) { if (interrupt) break; }
 	return env;
 }
 
@@ -578,7 +913,10 @@ int main(int argc, char* argv[]) {
 			return 1;
 	}
 
+	signal(SIGINT, &handleExecInt);
 	ExecEnv res = execProgram(&program);
+	signal(SIGINT, SIG_DFL);
+
 	if (dump_registers) {
 		printf("registers:\n");
 		for (int i = 0; i < 8; i++) {
