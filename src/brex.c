@@ -219,6 +219,19 @@ BRFError fetchOpSyscall(sbuf* input, Program* dst, heapctx_t ctx)
 	return (BRFError){0};
 }
 
+BRFError fetchOpGoto(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 5) {
+		return (BRFError){
+			.code = BRF_ERR_NO_OP_ARG, 
+			.opcode = OP_GOTO
+		};
+	}
+	op->symbol_id = fetchInt32(input);
+	return (BRFError){0};
+}
+
 OpFetcher op_fetchers[] = {
 	&fetchNop,
 	&fetchOpEnd,
@@ -232,9 +245,10 @@ OpFetcher op_fetchers[] = {
 	&fetchOpAddr,
 	&fetchOpSub,
 	&fetchOpSubr,
-	&fetchOpSyscall
+	&fetchOpSyscall,
+	&fetchOpGoto
 };
-static_assert(N_OPS == 13, "handling all defined BRF operations");
+static_assert(N_OPS == 14, "handling all defined BRF operations");
 
 BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 {
@@ -449,6 +463,12 @@ bool handleOpSyscall(ExecEnv* env, Program* program)
 	return syscall_handlers[program->execblock.data[env->op_id++].syscall_id](env, program);
 }
 
+bool handleOpGoto(ExecEnv* env, Program* program)
+{
+	env->op_id = program->execblock.data[env->op_id].symbol_id;
+	return false;
+}
+
 BRFFunc op_handlers[] = {
 	&handleNop,
 	&handleOpEnd,
@@ -463,13 +483,14 @@ BRFFunc op_handlers[] = {
 	&handleOpSub,
 	&handleOpSubr,
 	&handleOpSyscall,
+	&handleOpGoto
 };
-static_assert(N_OPS == 13, "handling all defined BRF operations");
+static_assert(N_OPS == 14, "handling all defined BRF operations");
 
 ExecEnv execProgram(Program* program)
 {
 	ExecEnv env = initExecEnv(program);
-	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) {}
+	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) { }
 	return env;
 }
 

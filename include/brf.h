@@ -17,6 +17,7 @@ typedef enum {
 	OP_SUB,
 	OP_SUBR,
 	OP_SYSCALL,
+	OP_GOTO,
 	N_OPS
 } OpType;
 
@@ -33,7 +34,8 @@ typedef enum {
 	fromcstr("addr"), \
 	fromcstr("sub"), \
 	fromcstr("subr"), \
-	fromcstr("sys") \
+	fromcstr("sys"), \
+	fromcstr("goto") \
 
 sbuf opNames[] = { _opNames };
 
@@ -73,7 +75,7 @@ typedef struct op {
 	int8_t src_reg; // for OP_*R or OP_ADD*
 	union {
 		int64_t value; // for OP_SET and OP_ADD
-		int32_t symbol_id; // for OP_*D or OP_*M or OP_*C
+		int32_t symbol_id; // for OP_*D or OP_*M or OP_*C or OP_GOTO
 		char* mark_name; // for OP_MARK
 		uint8_t syscall_id; // for OP_SYSCALL
 		int8_t src2_reg; // for OP_ADDR
