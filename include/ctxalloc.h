@@ -8,9 +8,6 @@
 #include "math.h"
 #include "stdio.h"
 
-#define CTXALLOC_OPT_EXPANDDOWN   0b00000001
-#define CTXALLOC_OPT_CLEAR        0b00000100
-
 struct heapspec {
 	struct heapspec* prev;
 	struct heapspec* next;
@@ -142,9 +139,6 @@ void* ctxalloc_new(long size, heapctx_t ctx)
 	struct heapspec* res_chunk = sbrk(size + sizeof(struct heapspec));
 	res_chunk->capacity = size;
 	_appendchunk(res_chunk, ctx);
-	if (ctx->options & CTXALLOC_OPT_CLEAR) {
-		memset(res_chunk + 1, 0, res_chunk->capacity);
-	}
 	return res_chunk + 1;
 }
 
@@ -165,29 +159,13 @@ void* ctxalloc_resize(void* obj, long size)
 		if ((long)sbrk(size - cur_chunk->capacity) == -1) {
 			return NULL;
 		}
-		if (ctx->options & CTXALLOC_OPT_EXPANDDOWN) {
-			memmove(obj + size - cur_chunk->capacity, obj, cur_chunk->capacity);
-			if (ctx->options & CTXALLOC_OPT_CLEAR) {
-				memset(obj, 0, size - cur_chunk->capacity);
-			}
-		}
 		cur_chunk->capacity = size;
 		return obj;
 	}
 
 	void* new = ctxalloc_new(size, ctx);
 	if (!new) { return NULL; }
-	if (ctx->options & CTXALLOC_OPT_EXPANDDOWN) {
-		memmove(new + size - cur_chunk->capacity, obj, cur_chunk->capacity);
-		if (ctx->options & CTXALLOC_OPT_CLEAR) {
-			memset(new, 0, size - cur_chunk->capacity); 
-		}
-	} else {
-		memmove(new, obj, cur_chunk->capacity);
-		if (ctx->options & CTXALLOC_OPT_CLEAR) {
-			memset(new + cur_chunk->capacity, 0, size - cur_chunk->capacity);
-		}
-	}
+	memmove(new, obj, cur_chunk->capacity);
 	ctxalloc_free(obj); 
 	return new;
 }

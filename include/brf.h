@@ -31,6 +31,8 @@ typedef enum {
 	OP_LER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_GE, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_GER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_PUSH64, // uses Op::src_reg
+	OP_POP64, // uses Op::dst_reg
 	N_OPS
 } OpType;
 
@@ -61,7 +63,9 @@ typedef enum {
 	fromcstr("le"), \
 	fromcstr("ler"), \
 	fromcstr("ge"), \
-	fromcstr("ger") \
+	fromcstr("ger"), \
+	fromcstr("push64"), \
+	fromcstr("pop64") \
 
 sbuf opNames[] = { _opNames };
 
@@ -80,19 +84,19 @@ typedef enum {
 } SysOpCode;
 
 typedef enum {
-	EC_OK,
-	EC_FAILURE,
-	EC_UNKNOWN_OP,
-	EC_STACK_UNDERFLOW,
-	EC_UNKNOWN_MARK,
-	EC_UNKNOWN_SYS_OP
+	EC_STACK_OVERFLOW = -4,
+	EC_STACK_UNDERFLOW, 
+	EC_UNKNOWN_SYSCALL,
+	EC_STACK_MISALIGNMENT,
+	EC_OK
 } ExitCode;
+static_assert(EC_OK == 0, "all special exit codes must have a value below 0");
 
 const sbuf DATA_SEGMENT_START = fromcstr("D\n");
 const sbuf MEMBLOCK_SEGMENT_START = fromcstr("M\n");
 const sbuf EXEC_SEGMENT_START = fromcstr("X\n");
-const sbuf ENTRYSPEC_SEGMENT_START = fromcstr("E:");
-const sbuf EXECMARK_SEGMENT_START = fromcstr("S\n");
+const sbuf ENTRYSPEC_SEGMENT_START = fromcstr("e:");
+const sbuf STACKSIZE_SEGMENT_START = fromcstr("s:");
 const sbuf SEP = fromcstr(":");
 
 typedef struct op {
@@ -112,7 +116,7 @@ static_assert(sizeof(Op) == 16, "checking compactness of operations' storage");
 
 typedef struct {
 	char* name;
-	int64_t value;
+	int32_t value;
 } BRConst;
 
 BRConst consts[] = {
@@ -142,23 +146,59 @@ typedef struct {
 } DataBlock;
 defArray(DataBlock);
 
-typedef struct {
+typedef struct program {
 	OpArray execblock;
 	MemBlockArray memblocks;
 	DataBlockArray datablocks;
 	int32_t entry_opid;
+	int64_t stack_size;
 } Program;
 
 #define N_REGISTERS 8
+#define DEFAULT_STACK_SIZE 512 * 1024 // 512 Kb, just like in JVM
+
+#define BREX_TRACE_REGS  0x00000001
+#define BREX_TRACE_STACK 0x00000010
+
+typedef enum {
+	TRACER_VOID,
+	TRACER_BOOL,
+	TRACER_INT64,
+	TRACER_INT32,
+	TRACER_INT16,
+	TRACER_INT8,
+	TRACER_DATAPTR,
+	TRACER_MEMPTR,
+	TRACER_CONST,
+	N_TRACER_TYPES
+} TracerType;
+
+char TracerTypeSizes[N_TRACER_TYPES] = { 0, 1, 8, 4, 2, 1, 8, 8, 4 };
+#define isIntTracer(tracer) \
+	( (tracer).type == TRACER_INT8 || (tracer).type == TRACER_INT16 || (tracer).type == TRACER_INT32 || (tracer).type == TRACER_INT64 )
+
+typedef struct {
+	int8_t type;
+	int32_t symbol_id; // for SI_CONST, SI_MEMPTR, SI_DATAPTR
+} Tracer;
+defArray(Tracer);
 
 typedef struct {
 	heapctx_t ctx;
 	sbuf heap;
-	sbuf stack;
+	void* stack_brk;
+	void* stack_head;
 	sbufArray memblocks;
-	uint8_t exitcode;
+	int8_t exitcode;
 	int32_t op_id;
 	int64_t* registers;
+	union {
+		int8_t err_pop_size; // for OP_POP*
+		int8_t err_push_size; // for OP_PUSH*
+	};
+	int8_t flags;
+	Tracer* regs_trace; // initialized only if BREX_TRACE_REGS flag is set
+	TracerArray stack_trace; // initialized only if BREX_TRACE_STACK flag is set
 } ExecEnv;
 
 typedef bool (*BRFFunc) (ExecEnv*, Program*);

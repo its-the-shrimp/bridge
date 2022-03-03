@@ -35,6 +35,8 @@ typedef enum {
 	KW_LER,
 	KW_GE,
 	KW_GER,
+	KW_PUSH64,
+	KW_POP64,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -44,7 +46,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRF_KWS
 } VBRFKeyword;
-static_assert(N_OPS == 27, "Some BRF operations have unmatched keywords");
+static_assert(N_OPS == 29, "Some BRF operations have unmatched keywords");
 static_assert(N_SYS_OPS == 3, "there might be system ops with unmatched keywords");
 
 // special value for error reporting
@@ -301,6 +303,18 @@ void writeOpGer(FILE* fd, Op op)
 	fputc(op.src2_reg, fd);
 }
 
+void writeOpPush64(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.src_reg, fd);
+}
+
+void writeOpPop64(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.dst_reg, fd);
+}
+
 OpWriter op_writers[] = {
 	&writeNop,
 	&writeOpEnd,
@@ -328,7 +342,9 @@ OpWriter op_writers[] = {
 	&writeOpLe,
 	&writeOpLer,
 	&writeOpGe,
-	&writeOpGer
+	&writeOpGer,
+	&writeOpPush64,
+	&writeOpPop64
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRF operations have unmatched writers");
 
@@ -885,6 +901,28 @@ VBRFError compileOpGer(Parser* parser, TokenChain* src, Program* dst, CompilerCt
 	return (VBRFError){0};
 }
 
+VBRFError compileOpPush64(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	op->type = OP_PUSH64;
+
+	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_PUSH64, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
+VBRFError compileOpPop64(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	op->type = OP_POP64;
+	
+	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_POP64, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
 OpCompiler op_compilers[] = {
 	&compileNop,
 	&compileOpEnd,
@@ -913,6 +951,8 @@ OpCompiler op_compilers[] = {
 	&compileOpLer,
 	&compileOpGe,
 	&compileOpGer,
+	&compileOpPush64,
+	&compileOpPop64
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRF operations have unmatched compilers");
 
