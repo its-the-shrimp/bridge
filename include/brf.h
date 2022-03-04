@@ -84,10 +84,13 @@ typedef enum {
 } SysOpCode;
 
 typedef enum {
-	EC_STACK_OVERFLOW = -4,
+	EC_STACK_OVERFLOW = -7,
+	EC_NEGATIVE_SIZE_ACCESS,
+	EC_ACCESS_FAILURE,
 	EC_STACK_UNDERFLOW, 
 	EC_UNKNOWN_SYSCALL,
 	EC_STACK_MISALIGNMENT,
+	EC_ACCESS_MISALIGNMENT,
 	EC_OK
 } ExitCode;
 static_assert(EC_OK == 0, "all special exit codes must have a value below 0");
@@ -191,10 +194,15 @@ typedef struct {
 	sbufArray memblocks;
 	int8_t exitcode;
 	int32_t op_id;
-	int64_t* registers;
+	uint64_t* registers;
 	union {
 		int8_t err_pop_size; // for OP_POP*
 		int8_t err_push_size; // for OP_PUSH*
+		struct {
+			int64_t err_access_length;
+			DataBlock err_buf;
+			void* err_ptr;
+		};
 	};
 	int8_t flags;
 	Tracer* regs_trace; // initialized only if BREX_TRACE_REGS flag is set

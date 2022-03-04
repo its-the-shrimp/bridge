@@ -63,7 +63,7 @@ bool sbufeq(sbuf item1, sbuf item2);
 bool sbufint(sbuf src);
 long sbuftoint(sbuf obj);
 sbuf_size_t sbufstripl(sbuf* src, sbuf items);
-char fputcesc(FILE* fd, char obj, unsigned char format);
+char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format);
 sbuf_size_t sbufindex(sbuf obj, sbuf sub);
 sbuf_size_t sbufcount(sbuf obj, sbuf items);
@@ -397,26 +397,28 @@ bool sbufint(sbuf src)
 // use the `sbufint` function
 long sbuftoint(sbuf obj)
 {
+	if (!obj.length) return 0;
+	bool is_negative = obj.data[0] == '-';
+	if (is_negative) { sbufshift(obj, 1); }
 	long res = 0;
 	char base = 10;
-	if (obj.length > 2 && *obj.data == '0')
-	{
-		switch (obj.data[1])
-		{
-			case 'b': base = 2;  obj.length -= 2; obj.data += 2; break;
-			case 'o': base = 8;  obj.length -= 2; obj.data += 2; break;
-			case 'x': base = 16; obj.length -= 2; obj.data += 2; break;
+	if (obj.length > 2 && *obj.data == '0') {
+		switch (obj.data[1]) {
+			case 'b': base = 2;  sbufshift(obj, 2); break;
+			case 'o': base = 8;  sbufshift(obj, 2); break;
+			case 'x': base = 16; sbufshift(obj, 2); break;
 		}
 	}
 
 	char cur_char;
 	sbuf_size_t coef = 1;
-	for (sbuf_size_t i = obj.length - 1; i >= 0 ; i--){
-		cur_char = lowerchar(obj.data[i]);
+	for (sbuf_size_t i = obj.length - 1; i >= 0 ; i--) {
+		cur_char = obj.data[i] >= 'A' ? obj.data[i] | 0b00100000 : obj.data[i];
 		res += ((cur_char > '9' ? cur_char - ('a' - '9' - 1) : cur_char) - '0') * coef;
 		coef *= base;
 	}
 
+	if (is_negative) res *= -1;
 	return res;
 }
 
@@ -440,7 +442,7 @@ sbuf_size_t sbufstripl(sbuf* src, sbuf items)
 //      BYTEFMT_RAW - write all characters as is, equivalent to fputc(obj, fd)
 //	BYTEFMT_ESC_QUOTE - escape single quote character ("\'" instead of "'")
 //	BYTEFMT_ESC_DQUOTE = escape double quote character ( "\"" instead of """)
-char fputcesc(FILE* fd, char obj, unsigned char format)
+char fputcesc(FILE* fd, unsigned char obj, unsigned char format)
 {
 	char n = 0;
 	if (format == BYTEFMT_HEX_LITERAL) { 
@@ -470,7 +472,7 @@ char fputcesc(FILE* fd, char obj, unsigned char format)
 		n += fputc((obj & 0b11000000 >> 6) + '0', fd);
 	} else if (format & BYTEFMT_HEX) {
 		n += fwrite("\\x", 2, 1, fd);
-		char temp = obj & 0xf0 >> 8; 
+		char temp = (obj & 0xf0) >> 8;
 		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);
 		temp = obj & 0xf;
 		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);

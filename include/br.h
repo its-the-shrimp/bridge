@@ -112,6 +112,9 @@ void* BRByteOrder(void* src, long length);
 bool startTimer(void);
 float endTimer(void);
 
-#define inRange(x, start, end) ( (x) >= (start) && (x) < (end) )
+#define inRange(x, start, end) ( (int64_t)(x) >= (int64_t)(start) && (int64_t)(x) < (int64_t)(end) )
+#define isSlice(sub_start, sub_size, start, size) \
+	( (int64_t)(sub_start) >= (int64_t)(start) && ((int64_t)(sub_start) + (int64_t)(sub_size)) <= ((int64_t)(start) + (int64_t)(size)) ) 
+// assumes that sub_size > 0 and size > 0
 
 #endif

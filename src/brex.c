@@ -549,6 +549,72 @@ ExecEnv initExecEnv(Program* program, int8_t flags)
 	return res;
 }
 
+DataBlock getBufferByPtr(ExecEnv* env, Program* program, void* ptr)
+{
+	array_foreach(DataBlock, block, program->datablocks,
+		if (inRange(ptr, block.spec.data, block.spec.data + block.spec.length)) {
+			return block;
+		}
+	);
+
+	array_foreach(sbuf, block, env->memblocks, 
+		if (inRange(ptr, block.data, block.data + block.length)) {
+			return ((DataBlock){ .name = program->memblocks.data[_block].name, .spec = block });
+		}
+	);
+
+	return (DataBlock){0};
+}
+
+bool validateMemoryAccess(ExecEnv* env, Program* program, Tracer tracer, void* ptr, int64_t size)
+{
+	if (size < 0) {
+		env->exitcode = EC_NEGATIVE_SIZE_ACCESS;
+		env->err_ptr = ptr,
+		env->err_access_length = size;
+		return true;
+	}
+	if (tracer.type == TRACER_DATAPTR) {
+		DataBlock block = program->datablocks.data[tracer.symbol_id];
+		if (!isSlice(ptr, size, block.spec.data, block.spec.length)) {
+			env->exitcode = EC_ACCESS_MISALIGNMENT;
+			env->err_buf = block;
+			env->err_access_length = size;
+			env->err_ptr = ptr;
+			return true;
+		}
+	} else if (tracer.type == TRACER_MEMPTR) {
+		sbuf block = env->memblocks.data[tracer.symbol_id];
+		if (!isSlice(ptr, size, block.data, block.length)) {
+			env->exitcode = EC_ACCESS_MISALIGNMENT;
+			env->err_buf = (DataBlock){ 
+				.name = program->memblocks.data[tracer.symbol_id].name,
+				.spec = block
+			};
+			env->err_access_length = size;
+			env->err_ptr = ptr;
+			return true;
+		}
+	} else {
+		DataBlock block = getBufferByPtr(env, program, (char*)ptr);
+		if (!block.name) {
+			env->exitcode = EC_ACCESS_FAILURE;
+			env->err_ptr = ptr;
+			env->err_access_length = size;
+			return true;
+		}
+		if (!isSlice(ptr, size, block.spec.data, block.spec.length)) {
+			env->exitcode = EC_ACCESS_MISALIGNMENT;
+			env->err_buf = block;
+			env->err_access_length = size;
+			env->err_ptr = ptr;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 bool handleInvalidSyscall(ExecEnv* env, Program* program)
 {
 	env->exitcode = EC_UNKNOWN_SYSCALL;
@@ -563,9 +629,13 @@ bool handleExitSyscall(ExecEnv* env, Program* program)
 
 bool handleWriteSyscall(ExecEnv* env, Program* program)
 {
+	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+		if (validateMemoryAccess(env, program, env->regs_trace[1], (char*)env->registers[1], env->registers[2])) return true;
+	}
+
 	env->registers[0] = write(env->registers[0], (char*)env->registers[1], env->registers[2]);
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
 		if (env->registers[0] >= (1L << 32)) {
 			env->regs_trace[0].type = TRACER_INT64;
 		} else if (env->registers[0] >= (1 << 16)) {
@@ -577,6 +647,7 @@ bool handleWriteSyscall(ExecEnv* env, Program* program)
 		}
 	}
 
+	env->op_id++;
 	return false;
 }
 
@@ -800,7 +871,7 @@ bool handleOpSubr(ExecEnv* env, Program* program)
 bool handleOpSyscall(ExecEnv* env, Program* program)
 {
 	// NOTE: shifting the operation index before calling the function might cause a problem, its ok for now
-	return syscall_handlers[program->execblock.data[env->op_id++].syscall_id](env, program);
+	return syscall_handlers[program->execblock.data[env->op_id].syscall_id](env, program);
 }
 
 bool handleOpGoto(ExecEnv* env, Program* program)
@@ -1121,7 +1192,8 @@ void printUsageMsg(FILE* fd, char* exec_name)
 
 int8_t exec_flags = 0;
 
-char parseCmdFlags(char* src, char* execname) {
+char parseCmdFlags(char* src, char* execname)
+{
 	for (src++; *src != '\0'; src++) {
 		switch (*src) {
 			case 'h': printUsageMsg(stdout, execname); return 1;
@@ -1224,6 +1296,22 @@ int main(int argc, char* argv[]) {
 			eprintf("\tstack head size: %hhd bytes\n", res.err_pop_size);
 			eprintf("\tattempted to pop %hhd bytes\n", TracerTypeSizes[arrayhead(res.stack_trace)->type]);
 			break;
+		case EC_ACCESS_FAILURE:
+			eprintf("%x:\n\tBRF runtime error: memory access failure\n", res.op_id);
+			eprintf(
+				"\tattempted to access %lld bytes from %p, which is not in bounds of the stack, the heap or any of the buffers\n",
+				res.err_access_length,
+				res.err_ptr
+			);
+			break;
+		case EC_NEGATIVE_SIZE_ACCESS:
+			eprintf("%x:\n\tBRF runtime error: negative sized memory access\n", res.op_id);
+			eprintf(
+				"\tattempted to access %lld bytes at %p; accessing memory by negative size is not allowed\n",
+				res.err_access_length, 
+				res.err_ptr
+			);
+			break;
 		case EC_STACK_OVERFLOW:
 			eprintf("%x:\n\tBRF runtime error: stack overflow\n", res.op_id);
 			break;
@@ -1232,6 +1320,20 @@ int main(int argc, char* argv[]) {
 			break;
 		case EC_UNKNOWN_SYSCALL:
 			eprintf("%x:\n\tBRF runtime error: invalid system call\n", res.op_id - 1);
+			break;
+		case EC_ACCESS_MISALIGNMENT:
+			eprintf("%x:\n\tBRF runtime error: misaligned memory access\n", res.op_id);
+			eprintf("\tbuffer `%s` is at %p\n", res.err_buf.name, res.err_buf.spec.data);
+			eprintf("\tbuffer size: %ld\n", res.err_buf.spec.length);
+			eprintf("\tattempted to access %lld bytes from %p\n", res.err_access_length, res.err_ptr);
+			if ((void*)res.err_ptr < (void*)res.err_buf.spec.data) {
+				eprintf("\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(res.err_buf.spec.data - (int64_t)res.err_ptr));
+			} else if ((void*)(res.err_ptr + res.err_access_length) > (void*)(res.err_buf.spec.data + res.err_buf.spec.length)) {
+				eprintf(
+					"\tthe accessed field exceeds the buffer by %lld bytes\n", 
+					(int64_t)(res.err_ptr + res.err_access_length - ((int64_t)res.err_buf.spec.data + res.err_buf.spec.length))
+				);
+			}
 			break;
 	}
 
