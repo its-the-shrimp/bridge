@@ -33,6 +33,12 @@ typedef enum {
 	OP_GER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_PUSH64, // uses Op::src_reg
 	OP_POP64, // uses Op::dst_reg
+	OP_PUSH32, // uses Op::src_reg
+	OP_POP32, // uses Op::dst_reg
+	OP_PUSH16, // uses Op::src_reg
+	OP_POP16, // uses Op::dst_reg
+	OP_PUSH8, // uses Op::src_reg
+	OP_POP8, // uses Op::dst_reg
 	N_OPS
 } OpType;
 
@@ -65,7 +71,13 @@ typedef enum {
 	fromcstr("ge"), \
 	fromcstr("ger"), \
 	fromcstr("push64"), \
-	fromcstr("pop64") \
+	fromcstr("pop64"), \
+	fromcstr("push32"), \
+	fromcstr("pop32"), \
+	fromcstr("push16"), \
+	fromcstr("pop16"), \
+	fromcstr("push8"), \
+	fromcstr("pop8") \
 
 sbuf opNames[] = { _opNames };
 

@@ -408,6 +408,66 @@ BRFError loadOpPop64(sbuf* input, Program* dst, heapctx_t ctx)
 	return (BRFError){0};
 }
 
+BRFError loadOpPush32(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	if (input->length < 2) return (BRFError){
+		.code = BRF_ERR_NO_OP_ARG,
+		.opcode = OP_PUSH32
+	};
+	arrayhead(dst->execblock)->src_reg = loadInt8(input);
+	return (BRFError){0};
+}
+
+BRFError loadOpPop32(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	if (input->length < 2) return (BRFError){
+		.code = BRF_ERR_NO_OP_ARG,
+		.opcode = OP_POP32
+	};
+	arrayhead(dst->execblock)->dst_reg = loadInt8(input);
+	return (BRFError){0};
+}
+
+BRFError loadOpPush16(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	if (input->length < 2) return (BRFError){
+		.code = BRF_ERR_NO_OP_ARG,
+		.opcode = OP_PUSH16
+	};
+	arrayhead(dst->execblock)->src_reg = loadInt8(input);
+	return (BRFError){0};
+}
+
+BRFError loadOpPop16(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	if (input->length < 2) return (BRFError){
+		.code = BRF_ERR_NO_OP_ARG,
+		.opcode = OP_POP16
+	};
+	arrayhead(dst->execblock)->dst_reg = loadInt8(input);
+	return (BRFError){0};
+}
+
+BRFError loadOpPush8(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	if (input->length < 2) return (BRFError){
+		.code = BRF_ERR_NO_OP_ARG,
+		.opcode = OP_PUSH8
+	};
+	arrayhead(dst->execblock)->src_reg = loadInt8(input);
+	return (BRFError){0};
+}
+
+BRFError loadOpPop8(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	if (input->length < 2) return (BRFError){
+		.code = BRF_ERR_NO_OP_ARG,
+		.opcode = OP_POP8
+	};
+	arrayhead(dst->execblock)->dst_reg = loadInt8(input);
+	return (BRFError){0};
+}
+
 OpLoader op_loaders[] = {
 	&loadNop,
 	&loadOpEnd,
@@ -437,7 +497,13 @@ OpLoader op_loaders[] = {
 	&loadOpGe,
 	&loadOpGer,
 	&loadOpPush64,
-	&loadOpPop64
+	&loadOpPop64,
+	&loadOpPush32,
+	&loadOpPop32,
+	&loadOpPush16,
+	&loadOpPop16,
+	&loadOpPush8,
+	&loadOpPop8
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRF operations have unmatched loaders");
 
@@ -630,21 +696,13 @@ bool handleExitSyscall(ExecEnv* env, Program* program)
 bool handleWriteSyscall(ExecEnv* env, Program* program)
 {
 	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
-		if (validateMemoryAccess(env, program, env->regs_trace[1], (char*)env->registers[1], env->registers[2])) return true;
+		if (validateMemoryAccess(env, program, env->regs_trace[1], (char*)env->registers[1], env->registers[2])) { return true; }
 	}
 
 	env->registers[0] = write(env->registers[0], (char*)env->registers[1], env->registers[2]);
 
 	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
-		if (env->registers[0] >= (1L << 32)) {
-			env->regs_trace[0].type = TRACER_INT64;
-		} else if (env->registers[0] >= (1 << 16)) {
-			env->regs_trace[0].type = TRACER_INT32;
-		} else if (env->registers[0] >= (1 << 8)) {
-			env->regs_trace[0].type = TRACER_INT16;
-		} else {
-			env->regs_trace[0].type = TRACER_INT8;
-		}
+		env->regs_trace[0].type = TRACER_INT64;
 	}
 
 	env->op_id++;
@@ -681,15 +739,7 @@ bool handleOpSet(ExecEnv* env, Program* program)
 	env->registers[op.dst_reg] = op.value;
 
 	if (env->flags & BREX_TRACE_REGS) {
-		if (env->registers[op.dst_reg] >= (1L << 32)) {
-			env->regs_trace[op.dst_reg].type = TRACER_INT64;
-		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-			env->regs_trace[op.dst_reg].type = TRACER_INT32;
-		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-			env->regs_trace[op.dst_reg].type = TRACER_INT16;
-		} else {
-			env->regs_trace[op.dst_reg].type = TRACER_INT8;
-		}
+		env->regs_trace[op.dst_reg].type = TRACER_INT64;
 	}
 
 	env->op_id++;
@@ -1092,6 +1142,141 @@ bool handleOpPop64(ExecEnv* env, Program* program)
 	return false;
 }
 
+bool handleOpPush32(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->stack_head -= 4;
+
+	if (env->stack_brk > env->stack_head) {
+		env->exitcode = EC_STACK_OVERFLOW;
+		env->err_push_size = 4;
+		return true;
+	}
+
+	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+		TracerArray_append(&env->stack_trace, (Tracer){ .type = TRACER_INT32 });
+	}
+
+	*(int32_t*)env->stack_head = (int32_t)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpPop32(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->stack_head + 4 > env->stack_brk + program->stack_size) {
+		env->exitcode = EC_STACK_UNDERFLOW;
+		env->err_pop_size = 4;
+		return true;
+	}
+
+	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+		if (TracerTypeSizes[arrayhead(env->stack_trace)->type] != 4) {
+			env->exitcode = EC_STACK_MISALIGNMENT;
+			env->err_pop_size = 4;
+			return true;
+		}
+		env->regs_trace[op.dst_reg] = TracerArray_pop(&env->stack_trace, -1);
+	}
+
+	env->registers[op.dst_reg] = *(int32_t*)env->stack_head;
+	env->stack_head += 4;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpPush16(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->stack_head -= 2;
+
+	if (env->stack_brk > env->stack_head) {
+		env->exitcode = EC_STACK_OVERFLOW;
+		env->err_push_size = 2;
+		return true;
+	}
+
+	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+		TracerArray_append(&env->stack_trace, (Tracer){ .type = TRACER_INT16 });
+	}
+
+	*(int16_t*)env->stack_head = (int16_t)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpPop16(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->stack_head + 2 > env->stack_brk + program->stack_size) {
+		env->exitcode = EC_STACK_UNDERFLOW;
+		env->err_pop_size = 2;
+		return true;
+	}
+
+	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+		if (TracerTypeSizes[arrayhead(env->stack_trace)->type] != 2) {
+			env->exitcode = EC_STACK_MISALIGNMENT;
+			env->err_pop_size = 2;
+			return true;
+		}
+		env->regs_trace[op.dst_reg] = TracerArray_pop(&env->stack_trace, -1);
+	}
+
+	env->registers[op.dst_reg] = *(int16_t*)env->stack_head;
+	env->stack_head += 2;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpPush8(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->stack_head--;
+
+	if (env->stack_brk > env->stack_head) {
+		env->exitcode = EC_STACK_OVERFLOW;
+		env->err_push_size = 1;
+		return true;
+	}
+
+	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+		TracerArray_append(&env->stack_trace, (Tracer){ .type = TRACER_INT8 });
+	}
+
+	*(int8_t*)env->stack_head = (int8_t)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpPop8(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->stack_head + 1 > env->stack_brk + program->stack_size) {
+		env->exitcode = EC_STACK_UNDERFLOW;
+		env->err_pop_size = 1;
+		return true;
+	}
+
+	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+		if (TracerTypeSizes[arrayhead(env->stack_trace)->type] != 1) {
+			env->exitcode = EC_STACK_MISALIGNMENT;
+			env->err_pop_size = 1;
+			return true;
+		}
+		env->regs_trace[op.dst_reg] = TracerArray_pop(&env->stack_trace, -1);
+	}
+
+	env->registers[op.dst_reg] = *(int8_t*)env->stack_head;
+	env->stack_head++;
+	env->op_id++;
+	return false;
+}
+
 BRFFunc op_handlers[] = {
 	&handleNop,
 	&handleOpEnd,
@@ -1121,7 +1306,13 @@ BRFFunc op_handlers[] = {
 	&handleOpGe,
 	&handleOpGer,
 	&handleOpPush64,
-	&handleOpPop64
+	&handleOpPop64,
+	&handleOpPush32,
+	&handleOpPop32,
+	&handleOpPush16,
+	&handleOpPop16,
+	&handleOpPush8,
+	&handleOpPop8
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRF operations have unmatched execution handlers");
 
@@ -1146,15 +1337,15 @@ void printTracer(FILE* fd, Program* program, ExecEnv* env, Tracer tracer, int64_
 				fprintf(fd, "(int64_t)%lld\n", value);
 				break;
 			case TRACER_INT32:
-				fprintf(fd, "(int32_t)%d\n", (int32_t)value);
+				fprintf(fd, "(int32_t)%lld\n", value);
 				break;
 			case TRACER_INT16:
-				fprintf(fd, "(int16_t)%hd\n", (int16_t)value);
+				fprintf(fd, "(int16_t)%lld\n", value);
 				break;
 			case TRACER_INT8:
 				fprintf(fd, "(char)'");
 				fputcesc(fd, value, BYTEFMT_HEX);
-				fprintf(fd, "' // %hhd\n", (int8_t)value);
+				fprintf(fd, "' // %lld\n", value);
 				break;
 			case TRACER_DATAPTR:
 				fprintf(fd, "(void*)%s ", program->datablocks.data[tracer.symbol_id].name);

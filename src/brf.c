@@ -37,6 +37,12 @@ typedef enum {
 	KW_GER,
 	KW_PUSH64,
 	KW_POP64,
+	KW_PUSH32,
+	KW_POP32,
+	KW_PUSH16,
+	KW_POP16,
+	KW_PUSH8,
+	KW_POP8,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -46,7 +52,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRF_KWS
 } VBRFKeyword;
-static_assert(N_OPS == 29, "Some BRF operations have unmatched keywords");
+static_assert(N_OPS == 35, "Some BRF operations have unmatched keywords");
 static_assert(N_SYS_OPS == 3, "there might be system ops with unmatched keywords");
 
 // special value for error reporting
@@ -315,6 +321,42 @@ void writeOpPop64(FILE* fd, Op op)
 	fputc(op.dst_reg, fd);
 }
 
+void writeOpPush32(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.src_reg, fd);
+}
+
+void writeOpPop32(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.dst_reg, fd);
+}
+
+void writeOpPush16(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.src_reg, fd);
+}
+
+void writeOpPop16(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.dst_reg, fd);
+}
+
+void writeOpPush8(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.src_reg, fd);
+}
+
+void writeOpPop8(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.dst_reg, fd);
+}
+
 OpWriter op_writers[] = {
 	&writeNop,
 	&writeOpEnd,
@@ -344,7 +386,13 @@ OpWriter op_writers[] = {
 	&writeOpGe,
 	&writeOpGer,
 	&writeOpPush64,
-	&writeOpPop64
+	&writeOpPop64,
+	&writeOpPush32,
+	&writeOpPop32,
+	&writeOpPush16,
+	&writeOpPop16,
+	&writeOpPush8,
+	&writeOpPop8
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRF operations have unmatched writers");
 
@@ -923,6 +971,72 @@ VBRFError compileOpPop64(Parser* parser, TokenChain* src, Program* dst, Compiler
 	return (VBRFError){0};
 }
 
+VBRFError compileOpPush32(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	op->type = OP_PUSH32;
+
+	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_PUSH32, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
+VBRFError compileOpPop32(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	op->type = OP_POP32;
+	
+	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_POP32, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
+VBRFError compileOpPush16(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	op->type = OP_PUSH16;
+
+	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_PUSH16, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
+VBRFError compileOpPop16(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	op->type = OP_POP16;
+	
+	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_POP16, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
+VBRFError compileOpPush8(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	op->type = OP_PUSH8;
+
+	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_PUSH8, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
+VBRFError compileOpPop8(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	op->type = OP_POP8;
+	
+	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_POP8, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
 OpCompiler op_compilers[] = {
 	&compileNop,
 	&compileOpEnd,
@@ -952,7 +1066,13 @@ OpCompiler op_compilers[] = {
 	&compileOpGe,
 	&compileOpGer,
 	&compileOpPush64,
-	&compileOpPop64
+	&compileOpPop64,
+	&compileOpPush32,
+	&compileOpPop32,
+	&compileOpPush16,
+	&compileOpPop16,
+	&compileOpPush8,
+	&compileOpPop8
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRF operations have unmatched compilers");
 

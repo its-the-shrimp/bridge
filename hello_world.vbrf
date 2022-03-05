@@ -4,6 +4,8 @@ data {
 exec {
 	setc r0 stdout
 	setd r1 helloworld
-	set  r2 13
+	set  r3 65537
+	push8 r3
+	pop8  r2
 	sys  write
 }
