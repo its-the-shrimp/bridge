@@ -254,6 +254,14 @@ OpLoader op_loaders[] = {
 	&load3RegOp, // OP_LER
 	&load2RegImmOp, // OP_GE
 	&load3RegOp, // OP_GER
+	&load2RegImmOp, // OP_LTS
+	&load3RegOp, // OP_LTSR
+	&load2RegImmOp, // OP_GTS
+	&load3RegOp, // OP_GTSR
+	&load2RegImmOp, // OP_LES
+	&load3RegOp, // OP_LESR
+	&load2RegImmOp, // OP_GES
+	&load3RegOp, // OP_GESR
 	&loadPushOp, // OP_PUSH64
 	&loadPopOp, // OP_POP64
 	&loadPushOp, // OP_PUSH32
@@ -765,7 +773,7 @@ bool handleOpNeqr(ExecEnv* env, Program* program)
 bool handleOpLt(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
-	env->registers[op.dst_reg] = env->registers[op.src_reg] < op.value;
+	env->registers[op.dst_reg] = env->registers[op.src_reg] < (uint64_t)op.value;
 
 	if (env->flags & BREX_TRACE_REGS) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
@@ -791,7 +799,7 @@ bool handleOpLtr(ExecEnv* env, Program* program)
 bool handleOpGt(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
-	env->registers[op.dst_reg] = env->registers[op.src_reg] > op.value;
+	env->registers[op.dst_reg] = env->registers[op.src_reg] > (uint64_t)op.value;
 
 	if (env->flags & BREX_TRACE_REGS) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
@@ -817,7 +825,7 @@ bool handleOpGtr(ExecEnv* env, Program* program)
 bool handleOpLe(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
-	env->registers[op.dst_reg] = env->registers[op.src_reg] <= op.value;
+	env->registers[op.dst_reg] = env->registers[op.src_reg] <= (uint64_t)op.value;
 
 	if (env->flags & BREX_TRACE_REGS) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
@@ -843,7 +851,7 @@ bool handleOpLer(ExecEnv* env, Program* program)
 bool handleOpGe(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
-	env->registers[op.dst_reg] = env->registers[op.src_reg] >= op.value;
+	env->registers[op.dst_reg] = env->registers[op.src_reg] >= (uint64_t)op.value;
 
 	if (env->flags & BREX_TRACE_REGS) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
@@ -857,6 +865,110 @@ bool handleOpGer(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >= env->registers[op.src2_reg];
+
+	if (env->flags & BREX_TRACE_REGS) {
+		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLts(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] < op.value;
+
+	if (env->flags & BREX_TRACE_REGS) {
+		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLtsr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] < (int64_t)env->registers[op.src2_reg];
+
+	if (env->flags & BREX_TRACE_REGS) {
+		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpGts(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] > op.value;
+
+	if (env->flags & BREX_TRACE_REGS) {
+		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpGtsr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] > (int64_t)env->registers[op.src2_reg];
+
+	if (env->flags & BREX_TRACE_REGS) {
+		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLes(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] <= op.value;
+
+	if (env->flags & BREX_TRACE_REGS) {
+		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLesr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] <= (int64_t)env->registers[op.src2_reg];
+
+	if (env->flags & BREX_TRACE_REGS) {
+		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpGes(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >= op.value;
+
+	if (env->flags & BREX_TRACE_REGS) {
+		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpGesr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >= (int64_t)env->registers[op.src2_reg];
 
 	if (env->flags & BREX_TRACE_REGS) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
@@ -1352,6 +1464,14 @@ BRFFunc op_handlers[] = {
 	&handleOpLer,
 	&handleOpGe,
 	&handleOpGer,
+	&handleOpLts,
+	&handleOpLtsr,
+	&handleOpGts,
+	&handleOpGtsr,
+	&handleOpLes,
+	&handleOpLesr,
+	&handleOpGes,
+	&handleOpGesr,
 	&handleOpPush64,
 	&handleOpPop64,
 	&handleOpPush32,

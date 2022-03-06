@@ -35,6 +35,14 @@ typedef enum {
 	KW_LER,
 	KW_GE,
 	KW_GER,
+	KW_LTS,
+	KW_LTSR,
+	KW_GTS,
+	KW_GTSR,
+	KW_LES,
+	KW_LESR,
+	KW_GES,
+	KW_GESR,
 	KW_PUSH64,
 	KW_POP64,
 	KW_PUSH32,
@@ -63,7 +71,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRF_KWS
 } VBRFKeyword;
-static_assert(N_OPS == 46, "Some BRF operations have unmatched keywords");
+static_assert(N_OPS == 54, "Some BRF operations have unmatched keywords");
 static_assert(N_SYS_OPS == 3, "there might be system ops with unmatched keywords");
 
 // special value for error reporting
@@ -248,6 +256,14 @@ OpWriter op_writers[] = {
 	&write3RegOp, // OP_LER
 	&write2RegImmOp, // OP_GE
 	&write3RegOp, // OP_GER
+	&write2RegImmOp, // OP_LTS
+	&write3RegOp, // OP_LTSR
+	&write2RegImmOp, // OP_GTS
+	&write3RegOp, // OP_GTSR
+	&write2RegImmOp, // OP_LES
+	&write3RegOp, // OP_LESR
+	&write2RegImmOp, // OP_GES
+	&write3RegOp, // OP_GESR
 	&writePushOp, // OP_PUSH64
 	&writePopOp, // OP_POP64
 	&writePushOp, // OP_PUSH32
@@ -621,6 +637,14 @@ OpCompiler op_compilers[] = {
 	&compile3RegOp, // OP_LER
 	&compile2RegImmOp, // OP_GE
 	&compile3RegOp, // OP_GER
+	&compile2RegImmOp, // OP_LTS
+	&compile3RegOp, // OP_LTSR
+	&compile2RegImmOp, // OP_GTS
+	&compile3RegOp, // OP_GTSR
+	&compile2RegImmOp, // OP_LES
+	&compile3RegOp, // OP_LESR
+	&compile2RegImmOp, // OP_GES
+	&compile3RegOp, // OP_GESR
 	&compilePushOp, // OP_PUSH64
 	&compilePopOp, // OP_POP64
 	&compilePushOp, // OP_PUSH32

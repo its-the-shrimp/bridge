@@ -31,6 +31,14 @@ typedef enum {
 	OP_LER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_GE, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_GER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_LTS, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_LTSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_GTS, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_GTSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_LES, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_LESR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_GES, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_GESR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_PUSH64, // uses Op::src_reg
 	OP_POP64, // uses Op::dst_reg
 	OP_PUSH32, // uses Op::src_reg
@@ -81,6 +89,14 @@ typedef enum {
 	fromcstr("ler"), \
 	fromcstr("ge"), \
 	fromcstr("ger"), \
+	fromcstr("lts"), \
+	fromcstr("ltsr"), \
+	fromcstr("gts"), \
+	fromcstr("gtsr"), \
+	fromcstr("les"), \
+	fromcstr("lesr"), \
+	fromcstr("ges"), \
+	fromcstr("gesr"), \
 	fromcstr("push64"), \
 	fromcstr("pop64"), \
 	fromcstr("push32"), \
