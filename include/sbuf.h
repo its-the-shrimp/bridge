@@ -38,16 +38,10 @@ typedef struct sbuf {
 	char* data;
 } sbuf;
 
-typedef struct sfile {
-	sbuf name;
-	sbuf content;
-} sfile;
-
 const sbuf CSTRTERM = { .data = "\0", .length = 1 };
 
 sbuf _sbufconcat(heapctx_t ctx, ...);
 sbuf filecontent(FILE* fd, heapctx_t ctx);
-sfile openfile(sbuf filename, heapctx_t ctx);
 char lowerchar(char src);
 sbuf _sbufsplitesc(sbuf* src, sbuf* dst, ...);
 int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[]);
@@ -91,6 +85,8 @@ long sctxalloc_free(sbuf* obj);
 #define putsbuf(obj) fputsbuf(stdout, obj)
 #define fputsbufln(fd, obj) fputsbuf(fd, obj); fputc('\n', fd)
 #define putsbufln(obj) fputsbufln(stdout, obj)
+
+#define lowerchar(ch) ( ch >= 'A' ? ch | 32 : ch )
 
 #endif  // _SBUF_
 
@@ -140,28 +136,6 @@ sbuf filecontent(FILE* fd, heapctx_t ctx)
 	fclose(fd);
 	return res;
 }
-
-// utility wrapper for `filecontent` function, it opens a file, checks for errors, fetches its content
-// closes the file descriptor and returns a sized file object.
-// if an error occurs, a zero-initialized file is returned.
-sfile openfile(sbuf filename, heapctx_t ctx) {
-	enter_tempctx(funcctx, 0);
-	char* temp = tostr(TEMP_CTX, filename); 
-	FILE* fd = fopen(temp, "r");
-
-	if (fd == NULL)
-	{
-		exit_tempctx(funcctx);
-		return (sfile){0};
-	}
-	exit_tempctx(funcctx);
-	return (sfile){
-		.name = filename,
-		.content = filecontent(fd, ctx)
-	};
-}
-
-char lowerchar(char src) { return src >= 65 && src <= 90 ? src + 32 : src; }
 
 // returns a bool, indicating whether `item` is in sbuf object `src`
 bool sbufcontains(sbuf src, char item)
@@ -266,7 +240,7 @@ int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[])
 	return -1;
 }
 
-// returns a sized string with data from the sized string `src` unescaped in-place.
+// returns a newly allocated string with data from the sized string `src` unescaped.
 sbuf sbufunesc(sbuf src, heapctx_t ctx)
 {
 	sbuf res = sctxalloc_new(src.length, ctx);

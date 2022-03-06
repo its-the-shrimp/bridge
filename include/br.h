@@ -30,9 +30,6 @@ const sbuf POSIX_NEWLINE = fromcstr("\n");
 const sbuf SPACE = fromcstr(" ");
 const sbuf TAB = fromcstr("\t");
 
-typedef char* str;
-defArray(str);
-
 typedef enum {
 	TOKEN_NONE,
 	TOKEN_WORD,
@@ -69,33 +66,55 @@ typedef struct {
 		int64_t symbol_id; // for TOKEN_SYMBOL
 	};
 } Token;
-defChain(Token);
 defArray(sbuf);
 
 typedef enum {
-	PARSER_ERR_OK,
-	PARSER_ERR_UNCLOSED_STR,
-	PARSER_ERR_NO_MEMORY,
+	PREP_ERR_OK,
+	PREP_ERR_UNCLOSED_STR,
+	PREP_ERR_NO_NEWLINE_DELIM,
+	PREP_ERR_NO_MEMORY,
+	PREP_ERR_FILE_NOT_FOUND,
 	N_PARSER_ERRORS
-} ParserError;
+} PreprocError;
+
+typedef struct {
+	char* name;
+	sbuf content;
+	TokenLoc cur_loc;
+} InputCtx;
+defArray(InputCtx);
 
 typedef struct {
 	sbuf* keywords;
 	sbuf* delims;
-	int nl_delim_id;
-	int tab_delim_id;
-	int space_delim_id;
-	TokenLoc error_loc;
-	strArray sources;
-} Parser;
+	PreprocError error_code;
+	union {
+		TokenLoc error_loc;
+		char* error_filename;
+	};
+	InputCtxArray sources;
+	int _nl_delim_id;
+	Token pending;
+} Preprocessor;
 
-Parser newParser(sbuf delims[], sbuf keywords[], heapctx_t ctx);
-ParserError parseText(Parser* parser, TokenChain* dst, char* src_name, sbuf input);
-int fprintTokenLoc(FILE* fd, TokenLoc loc, Parser* parser);
-int fprintTokenStr(FILE* fd, Token token, Parser* parser);
-int fprintToken(FILE* fd, Token token, Parser* parser);
-char* getTokenWord(Parser* parser, Token token);
+Preprocessor newPreprocessor(sbuf delims[], sbuf keywords[], heapctx_t ctx);
+bool setInputFrom(Preprocessor* obj, char* name, sbuf input);
+bool setInput(Preprocessor* obj, char* name);
+Token fetchToken(Preprocessor* obj);
 
+int fprintTokenLoc(FILE* fd, TokenLoc loc, Preprocessor* obj);
+int fprintTokenStr(FILE* fd, Token token, Preprocessor* obj);
+int fprintToken(FILE* fd, Token token, Preprocessor* obj);
+char* getTokenWord(Preprocessor* obj, Token token);
+char* getErrorStr(Preprocessor* obj);
+
+
+#define setPrepError(prep, code, loc) \
+	if ((prep)->error_code == PREP_ERR_OK) { \
+		(prep)->error_code = code; \
+		(prep)->error_loc = loc; \
+	}
+#define isPrepEOF(prep) ( (prep)->sources.length ? (prep)->sources.data[0].content.length == 0 : true )
 #define printTokenLoc(loc, parser) fprintTokenLoc(stdout, loc, parser)
 #define printTokenStr(token, parser) fprintTokenStr(stdout, token, parser)
 #define printToken(token, parser) fprintToken(stdout, token, parser)
@@ -116,5 +135,7 @@ float endTimer(void);
 #define isSlice(sub_start, sub_size, start, size) \
 	( (int64_t)(sub_start) >= (int64_t)(start) && ((int64_t)(sub_start) + (int64_t)(sub_size)) <= ((int64_t)(start) + (int64_t)(size)) ) 
 // assumes that sub_size > 0 and size > 0
+#define maxInt(a, b) ( a > b ? a : b )
+#define minInt(a, b) ( a < b ? a : b )
 
 #endif

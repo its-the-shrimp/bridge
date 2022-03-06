@@ -39,6 +39,17 @@ typedef enum {
 	OP_POP16, // uses Op::dst_reg
 	OP_PUSH8, // uses Op::src_reg
 	OP_POP8, // uses Op::dst_reg
+	OP_AND, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_ANDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_OR, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_ORR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_NOT, // uses Op::dst_reg and Op::src_reg
+	OP_XOR, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_XORR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SHL, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_SHLR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SHR, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_SHRR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	N_OPS
 } OpType;
 
@@ -77,7 +88,18 @@ typedef enum {
 	fromcstr("push16"), \
 	fromcstr("pop16"), \
 	fromcstr("push8"), \
-	fromcstr("pop8") \
+	fromcstr("pop8"), \
+	fromcstr("and"), \
+	fromcstr("andr"), \
+	fromcstr("or"), \
+	fromcstr("orr"), \
+	fromcstr("not"), \
+	fromcstr("xor"), \
+	fromcstr("xorr"), \
+	fromcstr("shl"), \
+	fromcstr("shlr"), \
+	fromcstr("shr"), \
+	fromcstr("shrr") \
 
 sbuf opNames[] = { _opNames };
 
@@ -178,10 +200,10 @@ typedef struct program {
 typedef enum {
 	TRACER_VOID,
 	TRACER_BOOL,
-	TRACER_INT64,
-	TRACER_INT32,
-	TRACER_INT16,
 	TRACER_INT8,
+	TRACER_INT16,
+	TRACER_INT32,
+	TRACER_INT64,
 	TRACER_DATAPTR,
 	TRACER_MEMPTR,
 	TRACER_CONST,

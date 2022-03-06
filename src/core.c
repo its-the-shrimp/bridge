@@ -11,144 +11,178 @@ const sbuf DQUOTE = fromcstr("\"");
 bool IS_BIG_ENDIAN, IS_LITTLE_ENDIAN;
 static struct timespec TIME;
 
-Parser newParser(sbuf delims[], sbuf keywords[], heapctx_t ctx)
+Preprocessor newPreprocessor(sbuf delims[], sbuf keywords[], heapctx_t ctx)
 {
-	Parser res = {
+	Preprocessor res = {
 		.delims = delims,
 		.keywords = keywords,
-		.sources = strArray_new(ctx, -1),
-		.nl_delim_id = -1,
-		.tab_delim_id = -1,
-		.space_delim_id = -1,
-		.error_loc = (TokenLoc){0}
+		.sources = InputCtxArray_new(ctx, -1),
+		.error_code = PREP_ERR_OK,
+		.error_loc = (TokenLoc){0},
+		._nl_delim_id = 1
 	};
-	res.error_loc = (TokenLoc){0};
-	for (int i = 0; delims[i].data; i++) {
+
+	for (int i = 0; delims[i].data; i++)
+	{
 		if (sbufeq(delims[i], NEWLINE)) {
-			res.nl_delim_id = i;
-		} else if (sbufeq(delims[i], TAB)) {
-			res.tab_delim_id = i;
-		} else if (sbufeq(delims[i], SPACE)) {
-			res.space_delim_id = i;
+			res._nl_delim_id = i;
+			break;
 		}
 	}
+
 	return res;
 }
 
-ParserError parseText(Parser* parser, TokenChain* dst, char* src_name, sbuf input)
+bool setInputFrom(Preprocessor *obj, char *name, sbuf input)
 {
-	TokenLoc loc = {
-		.lineno = 1,
-		.colno = 1,
-		.src_id = parser->sources.length
-	};
-	if (!strArray_append(&parser->sources, src_name)) return PARSER_ERR_NO_MEMORY;
-
-	sbuf new, delim;
-	int delim_id;
-	Token* last_token = NULL;
-	char* tmp;
-	while (input.length) {
-		if (input.data[0] == '"') {
-			sbufshift(input, 1);
-			delim = sbufsplitesc(&input, &new, DQUOTE, NEWLINE);
-			if (!sbufeq(delim, DQUOTE)) {
-				parser->error_loc = loc;
-				return PARSER_ERR_UNCLOSED_STR;
-			}
-
-			if (last_token ? last_token->type == TOKEN_STRING : false) {
-				tmp = tostr(chainctx(*dst), fromstr(last_token->word), new);
-				ctxalloc_free(last_token->word);
-				last_token->word = tmp;
-			} else {
-				if (!(last_token = TokenChain_append(
-					dst,
-					(Token){
-						.type = TOKEN_STRING,
-						.loc = loc,
-						.word = tostr(chainctx(*dst), new)
-					}
-				))) return PARSER_ERR_NO_MEMORY;
-			}
-			
-			loc.colno += sbufutf8len(new) + 2;
-		} else {
-			delim_id = sbufsplitv(&input, &new, parser->delims);
-			if (new.length) {
-				if (!(last_token = TokenChain_append(
-					dst,
-					(Token){
-						.type = TOKEN_WORD,
-						.loc = loc
-					}
-				))) return PARSER_ERR_NO_MEMORY;
-
-				for (int i = 0; parser->keywords[i].data; i++) {
-					if (sbufeq(new, parser->keywords[i])) {
-						last_token->type = TOKEN_KEYWORD;
-						last_token->keyword_id = i;
-						break;
-					}
-				}
-				if (last_token->type == TOKEN_WORD) {
-					if (sbufint(new)) {
-						last_token->type = TOKEN_INT;
-						last_token->value = sbuftoint(new);
-					} else {
-						last_token->word = tostr(chainctx(*dst), new);
-					}
-				}
-			}
-
-			if (delim_id == parser->nl_delim_id) {
-				loc.colno = 1; loc.lineno++;
-			} else {
-				loc.colno += sbufutf8len(new);
-				if (delim_id != parser->space_delim_id && delim_id != parser->tab_delim_id) {
-					if (!(last_token = TokenChain_append(
-						dst,
-						(Token){
-							.type = TOKEN_SYMBOL,
-							.loc = loc,
-							.symbol_id = delim_id
-						}
-					))) return PARSER_ERR_NO_MEMORY;
-				}
-				loc.colno += sbufutf8len(parser->delims[delim_id]);
+	if (!InputCtxArray_append(
+		&obj->sources,
+		(InputCtx){
+			.name = name,
+			.content = input,
+			.cur_loc = (TokenLoc){
+				.src_id = obj->sources.length,
+				.lineno = 1,
+				.colno = 1
 			}
 		}
+	)) {
+		obj->error_code = PREP_ERR_NO_MEMORY;
+		return false;
 	}
-	return PARSER_ERR_OK;
+
+	return true;
 }
 
-int fprintTokenLoc(FILE* fd, TokenLoc loc, Parser* parser)
+bool setInput(Preprocessor* obj, char* name)
 {
-	return fprintf(fd, "[ %s:%hd:%hd ] ", parser->sources.data[loc.src_id], loc.lineno, loc.colno);
+	FILE* fd = fopen(name, "r");
+	if (!fd) {
+		obj->error_code = PREP_ERR_FILE_NOT_FOUND;
+		return false;
+	}
+	sbuf input = filecontent(fd, arrayctx(obj->sources));
+	if (!input.data) {
+		obj->error_code = PREP_ERR_NO_MEMORY;
+		return false;
+	}
+
+	fclose(fd);
+	return setInputFrom(obj, name, input);
 }
 
-int fprintTokenStr(FILE* fd, Token token, Parser* parser)
+Token fetchToken(Preprocessor* obj)
+{
+	Token res;
+	if (obj->pending.type && !sbufspace(fromstr(getTokenWord(obj, obj->pending)))) {
+		res = obj->pending;
+		obj->pending.type = TOKEN_NONE;
+		return res;
+	}
+
+	InputCtx* input = NULL;
+	for (int i = obj->sources.length - 1; i >= 0; i--) {
+		input = obj->sources.data + i;
+		if (input->content.length) { break; }
+	}
+	if (!input) { return (Token){0}; }
+
+	char* orig_ptr = input->content.data;
+	while (input->content.length > 0) {
+		if (input->content.data[0] == '\n') { input->cur_loc.lineno++; input->cur_loc.colno = 1; }
+		else if (input->content.data[0] > 32) { break; }
+		else { input->cur_loc.colno++; }
+		sbufshift(input->content, 1);
+	}
+
+	if (sbufcut(&input->content, DQUOTE).data) {
+		sbuf new;
+		sbuf delim = sbufsplitesc(&input->content, &new, DQUOTE, NEWLINE);
+		if (!sbufeq(delim, DQUOTE)) {
+			obj->error_code = PREP_ERR_UNCLOSED_STR;
+			obj->error_loc = input->cur_loc;
+			return (Token){0};
+		}
+
+		res.type = TOKEN_STRING;
+		res.loc = input->cur_loc;
+		res.word = tostr(arrayctx(obj->sources), new);
+
+		input->cur_loc.colno += sbufutf8len(delim) + 2;
+		return res;
+	} else {
+		res.type = TOKEN_WORD;
+		sbuf new;
+		int delim_id = sbufsplitv(&input->content, &new, obj->delims);
+
+		if (new.length) {
+			for (int i = 0; obj->keywords[i].data; i++) {
+				if (sbufeq(obj->keywords[i], new)) {
+					res.type = TOKEN_KEYWORD;
+					res.keyword_id = i;
+					break;
+				}
+			}
+			if (res.type == TOKEN_WORD) {
+				if (sbufint(new)) {
+					res.type = TOKEN_INT;
+					res.value = sbuftoint(new);
+				}
+			}
+			if (res.type == TOKEN_WORD) {
+				res.word = tostr(arrayctx(obj->sources), new);
+			}
+
+			res.loc = input->cur_loc;
+			input->cur_loc.colno += new.length;
+
+			obj->pending.type = delim_id == -1 ? TOKEN_NONE : TOKEN_SYMBOL;
+			obj->pending.loc = input->cur_loc;
+			obj->pending.symbol_id = delim_id;
+		} else {
+			res.type = delim_id == -1 ? TOKEN_NONE : TOKEN_SYMBOL;
+			res.loc = input->cur_loc;
+			res.symbol_id = delim_id;
+		}
+
+		if (delim_id == obj->_nl_delim_id) {
+			input->cur_loc.lineno++;
+			input->cur_loc.colno = 1;
+		} else {
+			input->cur_loc.colno += obj->delims[delim_id].length;
+		}
+
+		return res;
+	}
+}
+
+int fprintTokenLoc(FILE* fd, TokenLoc loc, Preprocessor* obj)
+{
+	return fprintf(fd, "[ %s:%hd:%hd ] ", obj->sources.data[loc.src_id].name, loc.lineno, loc.colno);
+}
+
+int fprintTokenStr(FILE* fd, Token token, Preprocessor* obj)
 {
 	switch (token.type) {
 		case TOKEN_WORD: return fprintf(fd, "word `%s`", token.word);
 		case TOKEN_INT: return fprintf(fd, "integer %lld", token.value);
 		case TOKEN_STRING: 
 			return fprintf(fd, "string \"") + fputsbufesc(fd, fromstr(token.word), BYTEFMT_HEX) + fputc('"', fd);
-		case TOKEN_KEYWORD: return fprintf(fd, "keyword `"sbuf_format"`", unpack(parser->keywords[token.keyword_id]));
-		case TOKEN_SYMBOL: return fprintf(fd, "symbol `"sbuf_format"`", unpack(parser->delims[token.symbol_id]));
+		case TOKEN_KEYWORD: return fprintf(fd, "keyword `"sbuf_format"`", unpack(obj->keywords[token.keyword_id]));
+		case TOKEN_SYMBOL: return fprintf(fd, "symbol `"sbuf_format"`", unpack(obj->delims[token.symbol_id]));
 		default: return fprintf(fd, "nothing");
 	}
 }
 
-int fprintToken(FILE* fd, Token token, Parser* parser)
+int fprintToken(FILE* fd, Token token, Preprocessor* obj)
 {
-	int res = fprintTokenLoc(fd, token.loc, parser);
-	res += fprintTokenStr(fd, token, parser);
+	int res = fprintTokenLoc(fd, token.loc, obj);
+	res += fprintTokenStr(fd, token, obj);
 	res += fputc('\n', fd);
 	return res;
 }
 
-char* getTokenWord(Parser* parser, Token token)
+char* getTokenWord(Preprocessor* obj, Token token)
 {
 	char intlit_size;
 	switch (token.type) {
@@ -158,12 +192,12 @@ char* getTokenWord(Parser* parser, Token token)
 		case TOKEN_STRING:
 			return token.word;
 		case TOKEN_KEYWORD:
-			return parser->keywords[token.keyword_id].data;
+			return obj->keywords[token.keyword_id].data;
 		case TOKEN_SYMBOL:
-			return parser->delims[token.symbol_id].data;
+			return obj->delims[token.symbol_id].data;
 		case TOKEN_INT:
 			intlit_size = floorf(logf(token.value));
-			char* res = ctxalloc_new(intlit_size + 2, arrayctx(parser->sources));
+			char* res = ctxalloc_new(intlit_size + 2, arrayctx(obj->sources));
 			res[intlit_size + 1] = '\0';
 			for (char i = 0; i <= intlit_size; i++) {
 				res[intlit_size - i] = token.value % 10 + '0';
@@ -171,6 +205,16 @@ char* getTokenWord(Parser* parser, Token token)
 			}
 			return res;
 		default: return NULL;
+	}
+}
+
+char* getErrorStr(Preprocessor* obj) {
+	switch (obj->error_code) {
+		case PREP_ERR_UNCLOSED_STR: return "unclosed string literal";
+		case PREP_ERR_NO_NEWLINE_DELIM: return "no newline delimiter provided";
+		case PREP_ERR_NO_MEMORY: return "memory allocation failure";
+		case PREP_ERR_FILE_NOT_FOUND: return "could not open provided file";
+		default: return "unreachable";
 	}
 }
 

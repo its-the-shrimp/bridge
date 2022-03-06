@@ -43,6 +43,17 @@ typedef enum {
 	KW_POP16,
 	KW_PUSH8,
 	KW_POP8,
+	KW_AND,
+	KW_ANDR,
+	KW_OR,
+	KW_ORR,
+	KW_NOT,
+	KW_XOR,
+	KW_XORR,
+	KW_SHL,
+	KW_SHLR,
+	KW_SHR,
+	KW_SHRR,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -52,7 +63,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRF_KWS
 } VBRFKeyword;
-static_assert(N_OPS == 35, "Some BRF operations have unmatched keywords");
+static_assert(N_OPS == 46, "Some BRF operations have unmatched keywords");
 static_assert(N_SYS_OPS == 3, "there might be system ops with unmatched keywords");
 
 // special value for error reporting
@@ -134,7 +145,7 @@ void writeOpSet(FILE* fd, Op op)
 	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
 }
 
-void writeOpSetr(FILE* fd, Op op)
+void write2RegOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
@@ -162,38 +173,6 @@ void writeOpSetc(FILE* fd, Op op)
 	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
 }
 
-void writeOpAdd(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
-}
-
-void writeOpAddr(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
-void writeOpSub(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
-}
-
-void writeOpSubr(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
 void writeOpSyscall(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
@@ -213,7 +192,7 @@ void writeOpCgoto(FILE* fd, Op op)
 	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
 }
 
-void writeOpEq(FILE* fd, Op op)
+void write2RegImmOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
@@ -221,7 +200,7 @@ void writeOpEq(FILE* fd, Op op)
 	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
 }
 
-void writeOpEqr(FILE* fd, Op op)
+void write3RegOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
@@ -229,129 +208,13 @@ void writeOpEqr(FILE* fd, Op op)
 	fputc(op.src2_reg, fd);
 }
 
-void writeOpNeq(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
-}
-
-void writeOpNeqr(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
-void writeOpLt(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
-}
-
-void writeOpLtr(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
-void writeOpGt(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
-}
-
-void writeOpGtr(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
-void writeOpLe(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
-}
-
-void writeOpLer(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
-void writeOpGe(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
-}
-
-void writeOpGer(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
-void writeOpPush64(FILE* fd, Op op)
+void writePushOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.src_reg, fd);
 }
 
-void writeOpPop64(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-}
-
-void writeOpPush32(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.src_reg, fd);
-}
-
-void writeOpPop32(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-}
-
-void writeOpPush16(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.src_reg, fd);
-}
-
-void writeOpPop16(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.dst_reg, fd);
-}
-
-void writeOpPush8(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-	fputc(op.src_reg, fd);
-}
-
-void writeOpPop8(FILE* fd, Op op)
+void writePopOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
@@ -362,37 +225,48 @@ OpWriter op_writers[] = {
 	&writeOpEnd,
 	&writeOpMark,
 	&writeOpSet,
-	&writeOpSetr,
+	&write2RegOp, // OP_SETR
 	&writeOpSetd,
 	&writeOpSetc,
 	&writeOpSetm,
-	&writeOpAdd,
-	&writeOpAddr,
-	&writeOpSub,
-	&writeOpSubr,
+	&write2RegImmOp, // OP_ADD
+	&write3RegOp, // OP_ADDR
+	&write2RegImmOp, // OP_SUB
+	&write3RegOp, // OP_SUBR
 	&writeOpSyscall,
 	&writeOpGoto,
 	&writeOpCgoto,
-	&writeOpEq,
-	&writeOpEqr,
-	&writeOpNeq,
-	&writeOpNeqr,
-	&writeOpLt,
-	&writeOpLtr,
-	&writeOpGt,
-	&writeOpGtr,
-	&writeOpLe,
-	&writeOpLer,
-	&writeOpGe,
-	&writeOpGer,
-	&writeOpPush64,
-	&writeOpPop64,
-	&writeOpPush32,
-	&writeOpPop32,
-	&writeOpPush16,
-	&writeOpPop16,
-	&writeOpPush8,
-	&writeOpPop8
+	&write2RegImmOp, // OP_EQ
+	&write3RegOp, // OP_EQR
+	&write2RegImmOp, // OP_NEQ
+	&write3RegOp, // OP_NEQR
+	&write2RegImmOp, // OP_LT
+	&write3RegOp, // OP_LTR
+	&write2RegImmOp, // OP_GT
+	&write3RegOp, // OP_GTR
+	&write2RegImmOp, // OP_LE
+	&write3RegOp, // OP_LER
+	&write2RegImmOp, // OP_GE
+	&write3RegOp, // OP_GER
+	&writePushOp, // OP_PUSH64
+	&writePopOp, // OP_POP64
+	&writePushOp, // OP_PUSH32
+	&writePopOp, // OP_POP32
+	&writePushOp, // OP_PUSH16
+	&writePopOp, // OP_POP16
+	&writePushOp, // OP_PUSH8
+	&writePopOp, // OP_POP8
+	&write2RegImmOp, // OP_AND
+	&write3RegOp, // OP_ANDR
+	&write2RegImmOp, // OP_OR
+	&write3RegOp, // OP_ORR
+	&write2RegOp, // OP_NOT
+	&write2RegImmOp, // OP_XOR
+	&write3RegOp, // OP_XORR
+	&write2RegImmOp, // OP_SHL
+	&write3RegOp, // OP_SHLR
+	&write2RegImmOp, // OP_SHR
+	&write3RegOp // OP_SHRR
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRF operations have unmatched writers");
 
@@ -512,20 +386,18 @@ typedef struct {
 	ExecMarkArray exec_unresolved;
 	ExecMarkArray marks;
 } CompilerCtx;
-typedef VBRFError (*OpCompiler) (Parser*, TokenChain*, Program*, CompilerCtx*);
+typedef VBRFError (*OpCompiler) (Preprocessor*, Program*, CompilerCtx*);
 
-VBRFError compileNop(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileNop(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
-	arrayhead(dst->execblock)->type = OP_NONE;
 	return (VBRFError){0};
 }
 
-VBRFError compileOpEnd(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpEnd(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
-	arrayhead(dst->execblock)->type = OP_END;
 	Token new = {0};
-	while (src->end && getTokenSymbolId(new) != SYMBOL_SEGMENT_END) {
-		new = TokenChain_popstart(src);
+	while (!isPrepEOF(obj) && getTokenSymbolId(new) != SYMBOL_SEGMENT_END) {
+		new = fetchToken(obj);
 	}
 
 	if (getTokenSymbolId(new) != SYMBOL_SEGMENT_END) {
@@ -537,79 +409,88 @@ VBRFError compileOpEnd(Parser* parser, TokenChain* src, Program* dst, CompilerCt
 	return (VBRFError){0};
 }
 
-VBRFError compileOpMark(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpMark(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_MARK;
 
-	VBRFError err = getExecMarkArg(TokenChain_popstart(src), dst->execblock.length - 1, &ctx->marks, OP_MARK, 0);
+	VBRFError err = getExecMarkArg(fetchToken(obj), dst->execblock.length - 1, &ctx->marks, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
-	op->mark_name = getTokenWord(parser, arrayhead(ctx->marks)->name);
+	op->mark_name = getTokenWord(obj, arrayhead(ctx->marks)->name);
 
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSet(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpSet(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->type = OP_SET;
 
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_SET, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, OP_SET, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_SET, 1);
+	err = getIntArg(fetchToken(obj), &op->value, OP_SET, 1);
 	if (err.code != VBRF_ERR_OK) return err;
 
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSetr(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compile2RegOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_SETR;
 	
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_SETR, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_SETR, 1);
+	err = getRegIdArg(fetchToken(obj), &op->src_reg, op->type, 1);
 	if (err.code != VBRF_ERR_OK) return err;
 	
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSetd(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpSetd(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_SETD;
 
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_SETD, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	err = getExecMarkArg(TokenChain_popstart(src), dst->execblock.length - 1, &ctx->data_unresolved, OP_SETD, 1);
+	err = getExecMarkArg(fetchToken(obj), dst->execblock.length - 1, &ctx->data_unresolved, op->type, 1);
 	if (err.code != VBRF_ERR_OK) return err;
 
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSetc(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpSetm(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_SETC;
 
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_SETC, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	Token arg = TokenChain_popstart(src);
+	err = getExecMarkArg(fetchToken(obj), dst->execblock.length - 1, &ctx->mem_unresolved, op->type, 1);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
+VBRFError compileOpSetc(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, op->type, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	Token arg = fetchToken(obj);
 	if (!isWordToken(arg)) {
 		return (VBRFError){
 			.code = VBRF_ERR_INVALID_ARG,
 			.loc = arg,
 			.arg_id = 1,
-			.op_type = OP_SETC,
+			.op_type = op->type,
 			.expected_token_type = TOKEN_WORD
 		};
 	}
-	op->symbol_id = getBRConstValue(getTokenWord(parser, arg));
+	op->symbol_id = getBRConstValue(getTokenWord(obj, arg));
 	if (op->symbol_id == -1) {
 		return (VBRFError){
 			.code = VBRF_ERR_UNKNOWN_CONST,
@@ -620,59 +501,10 @@ VBRFError compileOpSetc(Parser* parser, TokenChain* src, Program* dst, CompilerC
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSetm(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpSyscall(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_SETM;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_SETM, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getExecMarkArg(TokenChain_popstart(src), dst->execblock.length - 1, &ctx->mem_unresolved, OP_SETM, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpAddr(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_ADDR;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_ADDR, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_ADDR, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src2_reg, OP_ADDR, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpAdd(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_ADD;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_ADD, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_ADD, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_ADD, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpSyscall(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_SYSCALL;
-	Token arg = TokenChain_popstart(src);
+	Token arg = fetchToken(obj);
 	if (
 		arg.type != TOKEN_KEYWORD || 
 		!inRange(arg.keyword_id, N_OPS, N_OPS + N_SYS_OPS)
@@ -687,351 +519,75 @@ VBRFError compileOpSyscall(Parser* parser, TokenChain* src, Program* dst, Compil
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSub(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compile2RegImmOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_SUB;
 
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_SUB, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_SUB, 1);
+	err = getRegIdArg(fetchToken(obj), &op->src_reg, op->type, 1);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_SUB, 2);
+	err = getIntArg(fetchToken(obj), &op->value, op->type, 2);
 	if (err.code != VBRF_ERR_OK) return err;
 
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSubr(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compile3RegOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_SUBR;
 	
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_SUBR, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_SUBR, 1);
+	err = getRegIdArg(fetchToken(obj), &op->src_reg, op->type, 1);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	err = getRegIdArg(TokenChain_popstart(src), &op->src2_reg, OP_SUBR, 2);
+	err = getRegIdArg(fetchToken(obj), &op->src2_reg, op->type, 2);
 	if (err.code != VBRF_ERR_OK) return err;
 
 	return (VBRFError){0};
 }
 
-VBRFError compileOpGoto(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpGoto(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_GOTO;
 
-	VBRFError err = getExecMarkArg(TokenChain_popstart(src), dst->execblock.length - 1, &ctx->exec_unresolved, OP_GOTO, 0);
+	VBRFError err = getExecMarkArg(fetchToken(obj), dst->execblock.length - 1, &ctx->exec_unresolved, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 	return (VBRFError){0};
 }
 
-VBRFError compileOpCgoto(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpCgoto(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_CGOTO;
 
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_CGOTO, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->src_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 	
-	err = getExecMarkArg(TokenChain_popstart(src), dst->execblock.length - 1, &ctx->exec_unresolved, OP_CGOTO, 1);
+	err = getExecMarkArg(fetchToken(obj), dst->execblock.length - 1, &ctx->exec_unresolved, op->type, 1);
 	if (err.code != VBRF_ERR_OK) return err;
 
 	return (VBRFError){0};
 }
 
-VBRFError compileOpEq(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compilePushOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_EQ;
 
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_EQ, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_EQ, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_EQ, 2);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->src_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
 	return (VBRFError){0};
 }
 
-VBRFError compileOpEqr(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
+VBRFError compilePopOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_EQR;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_EQR, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_EQR, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src2_reg, OP_EQR, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpNeq(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_NEQ;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_NEQ, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_NEQ, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_NEQ, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpNeqr(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_NEQR;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_NEQR, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_NEQR, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src2_reg, OP_NEQR, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpLt(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_LT;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_LT, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_LT, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_LT, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpLtr(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_LTR;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_LTR, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_LTR, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src2_reg, OP_LTR, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpGt(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_GT;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_GT, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_GT, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_GT, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpGtr(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_GTR;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_GTR, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_GTR, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src2_reg, OP_GTR, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpLe(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_LE;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_LE, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_LE, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_LE, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpLer(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_LER;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_LER, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_LER, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src2_reg, OP_LER, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpGe(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_GE;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_GE, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_GE, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getIntArg(TokenChain_popstart(src), &op->value, OP_GE, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpGer(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_GER;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_GER, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_GER, 1);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	err = getRegIdArg(TokenChain_popstart(src), &op->src2_reg, OP_GER, 2);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpPush64(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_PUSH64;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_PUSH64, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpPop64(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_POP64;
 	
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_POP64, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpPush32(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_PUSH32;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_PUSH32, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpPop32(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_POP32;
-	
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_POP32, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpPush16(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_PUSH16;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_PUSH16, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpPop16(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_POP16;
-	
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_POP16, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpPush8(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_PUSH8;
-
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->src_reg, OP_PUSH8, 0);
-	if (err.code != VBRF_ERR_OK) return err;
-
-	return (VBRFError){0};
-}
-
-VBRFError compileOpPop8(Parser* parser, TokenChain* src, Program* dst, CompilerCtx* ctx)
-{
-	Op* op = arrayhead(dst->execblock);
-	op->type = OP_POP8;
-	
-	VBRFError err = getRegIdArg(TokenChain_popstart(src), &op->dst_reg, OP_POP8, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
 	return (VBRFError){0};
@@ -1042,41 +598,52 @@ OpCompiler op_compilers[] = {
 	&compileOpEnd,
 	&compileOpMark,
 	&compileOpSet,
-	&compileOpSetr,
+	&compile2RegOp, // OP_SETR
 	&compileOpSetd,
 	&compileOpSetc,
 	&compileOpSetm,
-	&compileOpAdd,
-	&compileOpAddr,
-	&compileOpSub,
-	&compileOpSubr,
-	&compileOpSyscall,
+	&compile2RegImmOp, // OP_ADD
+	&compile3RegOp, // OP_ADDR
+	&compile2RegImmOp, // OP_SUB
+	&compile3RegOp, // OP_SUBR
+	&compileOpSyscall, // OP_SYSCALL
 	&compileOpGoto,
 	&compileOpCgoto,
-	&compileOpEq,
-	&compileOpEqr,
-	&compileOpNeq,
-	&compileOpNeqr,
-	&compileOpLt,
-	&compileOpLtr,
-	&compileOpGt,
-	&compileOpGtr,
-	&compileOpLe,
-	&compileOpLer,
-	&compileOpGe,
-	&compileOpGer,
-	&compileOpPush64,
-	&compileOpPop64,
-	&compileOpPush32,
-	&compileOpPop32,
-	&compileOpPush16,
-	&compileOpPop16,
-	&compileOpPush8,
-	&compileOpPop8
+	&compile2RegImmOp, // OP_EQ
+	&compile3RegOp, // OP_EQR
+	&compile2RegImmOp, // OP_NEQ
+	&compile3RegOp, // OP_NEQR
+	&compile2RegImmOp, // OP_LT
+	&compile3RegOp, // OP_LTR
+	&compile2RegImmOp, // OP_GT
+	&compile3RegOp, // OP_GTR
+	&compile2RegImmOp, // OP_LE
+	&compile3RegOp, // OP_LER
+	&compile2RegImmOp, // OP_GE
+	&compile3RegOp, // OP_GER
+	&compilePushOp, // OP_PUSH64
+	&compilePopOp, // OP_POP64
+	&compilePushOp, // OP_PUSH32
+	&compilePopOp, // OP_POP32
+	&compilePushOp, // OP_PUSH16
+	&compilePopOp, // OP_POP16
+	&compilePushOp, // OP_PUSH8
+	&compilePopOp, // OP_POP8
+	&compile2RegImmOp, // OP_AND
+	&compile3RegOp, // OP_ANDR
+	&compile2RegImmOp, // OP_OR
+	&compile3RegOp, // OP_ORR
+	&compile2RegOp, // OP_NOT
+	&compile2RegImmOp, // OP_XOR
+	&compile3RegOp, // OP_XORR
+	&compile2RegImmOp, // OP_SHL
+	&compile3RegOp, // OP_SHLR
+	&compile2RegImmOp, // OP_SHR
+	&compile3RegOp, // OP_SHRR
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRF operations have unmatched compilers");
 
-VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapctx_t ctx)
+VBRFError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 {
 	enter_tempctx(funcctx, 0);
 	dst->entry_opid = 0;
@@ -1092,11 +659,12 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 	};
 	Token entry_name = {0};
 
-	while (src->end) {
-		Token segment_spec = TokenChain_popstart(src);
+	while (!isPrepEOF(obj)) {
+		Token segment_spec = fetchToken(obj);
+		if (segment_spec.type == TOKEN_NONE) { break; }
 		switch (getTokenKeywordId(segment_spec)) {
 			case KW_ENTRY: {
-				Token entry_symbol = TokenChain_popstart(src);
+				Token entry_symbol = fetchToken(obj);
 				if (entry_symbol.type == TOKEN_INT) {
 					dst->entry_opid = entry_symbol.value;
 				} else if (isWordToken(entry_symbol)) {
@@ -1110,7 +678,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 				}
 				break;
 			} case KW_DATA: {
-				Token block_start = TokenChain_popstart(src);
+				Token block_start = fetchToken(obj);
 				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
 					exit_tempctx(funcctx);
 					return (VBRFError){
@@ -1120,8 +688,8 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 				}
 
 				Token block_name, block_spec;
-				while (src->end) {
-					block_name = TokenChain_popstart(src);
+				while (!isPrepEOF(obj)) {
+					block_name = fetchToken(obj);
 					if (getTokenSymbolId(block_name) == SYMBOL_SEGMENT_END) {
 						break;
 					} else if (!isWordToken(block_name)) {
@@ -1132,7 +700,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 						};
 					}
 
-					block_spec = TokenChain_popstart(src);
+					block_spec = fetchToken(obj);
 					if (block_spec.type != TOKEN_STRING) {
 						exit_tempctx(funcctx);
 						return (VBRFError){
@@ -1144,7 +712,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 					if (!DataBlockArray_append(
 						&dst->datablocks,
 						(DataBlock){
-							.name = getTokenWord(parser, block_name),
+							.name = getTokenWord(obj, block_name),
 							.spec = sbufunesc(fromstr(block_spec.word), ctx)
 						}
 					)) {
@@ -1158,7 +726,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 
 				break;
 			} case KW_MEMORY: {
-				Token block_start = TokenChain_popstart(src);
+				Token block_start = fetchToken(obj);
 				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
 					exit_tempctx(funcctx);
 					return (VBRFError){
@@ -1168,8 +736,8 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 				}
 
 				Token block_name, block_spec;
-				while (src->end) {
-					block_name = TokenChain_popstart(src);
+				while (!isPrepEOF(obj)) {
+					block_name = fetchToken(obj);
 					if (getTokenSymbolId(block_name) == SYMBOL_SEGMENT_END) {
 						break;
 					} else if (!isWordToken(block_name)) {
@@ -1180,7 +748,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 						};
 					}
 
-					block_spec = TokenChain_popstart(src);
+					block_spec = fetchToken(obj);
 					if (block_spec.type != TOKEN_INT) {
 						exit_tempctx(funcctx);
 						return (VBRFError){
@@ -1192,7 +760,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 					if (!MemBlockArray_append(
 						&dst->memblocks,
 						(MemBlock){
-							.name = getTokenWord(parser, block_name),
+							.name = getTokenWord(obj, block_name),
 							.size = block_spec.value
 						}
 					)) {
@@ -1205,7 +773,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 				}
 				break;
 			} case KW_EXEC: {
-				Token block_start = TokenChain_popstart(src);
+				Token block_start = fetchToken(obj);
 				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
 					exit_tempctx(funcctx);
 					return (VBRFError){
@@ -1215,8 +783,8 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 				}
 
 				Op* new_op;
-				while (src->end) {
-					Token op_name = TokenChain_popstart(src);
+				while (!isPrepEOF(obj)) {
+					Token op_name = fetchToken(obj);
 					if (getTokenSymbolId(op_name) == SYMBOL_SEGMENT_END) break; 
 
 					if (!(new_op = OpArray_append(&dst->execblock, (Op){0}))) {
@@ -1235,7 +803,9 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 							.loc = op_name
 						};
 					}
-					VBRFError err = op_compilers[kw_id](parser, src, dst, &compctx);
+
+					new_op->type = kw_id;
+					VBRFError err = op_compilers[kw_id](obj, dst, &compctx);
 					if (err.code != VBRF_ERR_OK) {
 						exit_tempctx(funcctx);
 						return err;
@@ -1256,7 +826,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 	if (entry_name.type != TOKEN_NONE) {
 		bool resolved = false;
 		array_foreach(ExecMark, mark, compctx.marks,
-			if (streq(getTokenWord(parser, mark.name), entry_name.word)) {
+			if (streq(getTokenWord(obj, mark.name), entry_name.word)) {
 				dst->entry_opid = mark.id; 
 				resolved = true;
 				break;
@@ -1274,7 +844,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 	bool resolved = false;
 	array_foreach(ExecMark, unresolved, compctx.data_unresolved, {
 		array_foreach(DataBlock, block, dst->datablocks,
-			if (streq(block.name, getTokenWord(parser, unresolved.name))) {
+			if (streq(block.name, getTokenWord(obj, unresolved.name))) {
 				dst->execblock.data[unresolved.id].symbol_id = _block;
 				resolved = true;
 				break;
@@ -1293,7 +863,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 	array_foreach(ExecMark, unresolved, compctx.mem_unresolved,
 		bool resolved = false;
 		array_foreach(MemBlock, block, dst->memblocks,
-			if (streq(block.name, getTokenWord(parser, unresolved.name))) {
+			if (streq(block.name, getTokenWord(obj, unresolved.name))) {
 				dst->execblock.data[unresolved.id].symbol_id = _block;
 				resolved = true;
 				break;
@@ -1310,7 +880,7 @@ VBRFError compileSourceCode(Parser* parser, TokenChain* src, Program* dst, heapc
 	// resolving code jumps
 	array_foreach(ExecMark, unresolved, compctx.exec_unresolved, {
 		array_foreach(ExecMark, mark, compctx.marks,
-			if (streq(getTokenWord(parser, mark.name), getTokenWord(parser, unresolved.name))) {
+			if (streq(getTokenWord(obj, mark.name), getTokenWord(obj, unresolved.name))) {
 				dst->execblock.data[unresolved.id].symbol_id = mark.id;
 				resolved = true;
 				break;
@@ -1397,49 +967,28 @@ int main(int argc, char* argv[])
 	};
 
 	startTimer();
-	Parser parser = newParser(delims, kws, GLOBAL_CTX);
-	TokenChain tokens = TokenChain_new(GLOBAL_CTX, 0);
-
-	FILE* input_fd = fopen(input_path, "r");
-	if (!input_fd) {
-		fprintf(stderr, "error: could not open file `%s` (reason: %s)\n", input_path, strerror(errno));
+	Preprocessor prep = newPreprocessor(delims, kws, GLOBAL_CTX);
+	if (!setInput(&prep, input_path)) {
+		eprintf("preprocessing error: %s\n", getErrorStr(&prep));
 		return 1;
 	}
-	sbuf input = filecontent(input_fd, GLOBAL_CTX);
-	if (!input.data) {
-		fprintf(stderr, "error: could not fetch the content of file `%s`\n", input_path);
-		return 1;
-	}
-	fclose(input_fd);
-
-	switch (parseText(&parser, &tokens, input_path, input)) {
-		case PARSER_ERR_NO_MEMORY:
-			fprintf(stderr,"error: could not parse contents of file `%s`, memory failure\n", input_path);
-			return 1;
-		case PARSER_ERR_UNCLOSED_STR:
-			fprintTokenLoc(stderr, parser.error_loc, &parser);
-			fprintf(stderr, "error: unclosed string literal in file `%s`\n", input_path);
-			return 1;
-		default: break;
-	}
-	sctxalloc_free(&input);
 
 	Program res;
-	VBRFError err = compileSourceCode(&parser, &tokens, &res, ctxalloc_newctx(0));
+	VBRFError err = compileSourceCode(&prep, &res, ctxalloc_newctx(0));
 
 	if (err.code != VBRF_ERR_OK) {
-		fprintTokenLoc(stderr, err.loc.loc, &parser);
+		fprintTokenLoc(stderr, err.loc.loc, &prep);
 		eprintf("error: ");
 		switch (err.code) {
 			case VBRF_ERR_OK: break;
 			case VBRF_ERR_ENTRY_NAME_EXPECTED:
 				eprintf("expected a word or integer as the entry mark, instead got ");
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
 				return 1;
 			case VBRF_ERR_BLOCK_NAME_EXPECTED:
 				eprintf("expected a word as the block name, instead got ");
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
 				return 1;
 			case VBRF_ERR_NO_MEMORY:
@@ -1450,23 +999,23 @@ int main(int argc, char* argv[])
 				fprintTokenStr(
 					stderr, 
 					(Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_SEGMENT_START }, 
-					&parser
+					&prep
 				);
 				eprintf(" as the segment start, instead got ");
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
 				return 1;
 			case VBRF_ERR_BLOCK_SPEC_EXPECTED:
 				eprintf("expected a string as the data block specifier, instead got ");
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				return 1;
 			case VBRF_ERR_BLOCK_SIZE_EXPECTED:
 				eprintf("expected an integer as the memory block size, instead got ");
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				return 1;
 			case VBRF_ERR_UNKNOWN_SEGMENT_SPEC:
 				eprintf("expected a segment specifier, instead got ");
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
 				return 1;
 			case VBRF_ERR_UNCLOSED_SEGMENT:
@@ -1474,25 +1023,25 @@ int main(int argc, char* argv[])
 				fprintTokenStr(
 					stderr, 
 					(Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_SEGMENT_END }, 
-					&parser
+					&prep
 				);
 				eprintf(", instead got ");
-				fprintTokenStr(stderr, (Token){ .type = TOKEN_NONE }, &parser);
+				fprintTokenStr(stderr, (Token){ .type = TOKEN_NONE }, &prep);
 				fputc('\n', stderr);
 				return 1;
 			case VBRF_ERR_INVALID_ARG:
 				eprintf(
 					sbuf_format" operation expects %s as argument %hhd, instead got ",
-					unpack(parser.keywords[err.op_type]),
+					unpack(prep.keywords[err.op_type]),
 					getTokenTypeName(err.expected_token_type),
 					err.arg_id
 				);
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
 				return 1;
 			case VBRF_ERR_INVALID_OP:
 				eprintf("expected operation name, instead got ");
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
 				return 1;
 			case VBRF_ERR_UNKNOWN_SYSCALL:
@@ -1500,23 +1049,23 @@ int main(int argc, char* argv[])
 					"expected%s a syscall identifier, instead got ",
 					( isWordToken(err.loc) ? "" : "a word as" )
 				);
-				fprintTokenStr(stderr, err.loc, &parser);
+				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
 				return 1;
 			case VBRF_ERR_EXEC_MARK_NOT_FOUND:
-				eprintf("execution mark `%s` not found\n", getTokenWord(&parser, err.loc));
+				eprintf("execution mark `%s` not found\n", getTokenWord(&prep, err.loc));
 				return 1;
 			case VBRF_ERR_DATA_BLOCK_NOT_FOUND:
-				eprintf("data block `%s` not found\n", getTokenWord(&parser, err.loc));
+				eprintf("data block `%s` not found\n", getTokenWord(&prep, err.loc));
 				return 1;
 			case VBRF_ERR_MEM_BLOCK_NOT_FOUND:
-				eprintf("memory block `%s` not found\n", getTokenWord(&parser, err.loc));
+				eprintf("memory block `%s` not found\n", getTokenWord(&prep, err.loc));
 				return 1;
 			case VBRF_ERR_INVALID_REG_ID:
 				eprintf("invalid register index %lld\n", err.loc.value);
 				return 1;
 			case VBRF_ERR_UNKNOWN_CONST:
-				eprintf("unknown constant `%s`\n", getTokenWord(&parser, err.loc));
+				eprintf("unknown constant `%s`\n", getTokenWord(&prep, err.loc));
 				return 1;
 		}
 	}
