@@ -1,6 +1,6 @@
 # BRidge
 
-BRidge is a compiler ecosystem as well as an execution environment.
+BRidge is a compiler ecosystem as well as an execution environment, providing exhaustive and verbose debugging and error checking.
 Yet to be cross-platform tho, it's still very early in development.
 
 ## Getting started
@@ -16,8 +16,8 @@ $ ./nobuild
 - [brf](src/brf.c) - BRidge assembler, translates BRidge assembly `.vbrf` files to executable bytecode `.brf` files.
 
 ## Example
-'Hello World' in BRidge assembly is [there](./hello_world.vbrf) and can be compiled and executed with these commands:
+'Hello World' in BRidge assembly is [there](examples/hello_world.vbrf) and can be compiled and executed with these commands:
 ```console
-$ brf hello_world.vbrf
-$ brex hello_world.brf
+$ brf examples/hello_world.vbrf
+$ brex examples/hello_world.brf
 ```
