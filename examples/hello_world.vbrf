@@ -2,8 +2,12 @@ data {
     helloworld "Hello, World\n"
 }
 exec {
-    setb r0 stdout
-    setd r1 helloworld
-    set r2 13
-    sys write
+    mark hello
+        setb r0 stdout
+        setd r1 helloworld
+        set r2 13
+        sys write
+        ret
+    mark main
+        call hello
 }
