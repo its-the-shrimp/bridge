@@ -14,7 +14,7 @@ typedef enum {
 	KW_SET,
 	KW_SETR,
 	KW_SETD,
-	KW_SETC,
+	KW_SETB,
 	KW_SETM,
 	KW_ADD,
 	KW_ADDR,
@@ -68,6 +68,7 @@ typedef enum {
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
 	KW_ENTRY,
+	KW_STACKSIZE,
 	KW_EXEC,
 	KW_DATA,
 	KW_MEMORY,
@@ -171,7 +172,7 @@ void writeOpSetm(FILE* fd, Op op)
 	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
 }
 
-void writeOpSetc(FILE* fd, Op op)
+void writeOpSetb(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
@@ -232,7 +233,7 @@ OpWriter op_writers[] = {
 	&writeOpSet,
 	&write2RegOp, // OP_SETR
 	&writeOpSetd,
-	&writeOpSetc,
+	&writeOpSetb,
 	&writeOpSetm,
 	&write2RegImmOp, // OP_ADD
 	&write3RegOp, // OP_ADDR
@@ -292,10 +293,18 @@ bool setEntryPoint(FILE* fd, int64_t mark_id)
 	return true;
 }
 
+bool setStackSize(FILE* fd, int64_t stack_size)
+{
+	fputsbuf(fd, STACKSIZE_SEGMENT_START);
+	fwrite(BRByteOrder(&stack_size, sizeof(stack_size)), sizeof(stack_size), 1, fd);
+	return true;
+}
+
 typedef enum {
 	VBRF_ERR_OK,
 	VBRF_ERR_BLOCK_NAME_EXPECTED,
 	VBRF_ERR_ENTRY_NAME_EXPECTED,
+	VBRF_ERR_STACK_SIZE_EXPECTED,
 	VBRF_ERR_NO_MEMORY,
 	VBRF_ERR_SEGMENT_START_EXPECTED,
 	VBRF_ERR_BLOCK_SPEC_EXPECTED,
@@ -330,9 +339,9 @@ typedef struct {
 } ExecMark;
 defArray(ExecMark);
 
-int getBRConstValue(char* name)
+int64_t getBRBuiltinValue(char* name)
 {
-	for (int i = 0; i < sizeof(consts); i++) {
+	for (int64_t i = 0; i < sizeof(consts); i++) {
 		if (streq(consts[i].name, name)) return i;
 	}
 	return -1;
@@ -472,7 +481,7 @@ VBRFError compileOpSetm(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSetc(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRFError compileOpSetb(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -489,7 +498,7 @@ VBRFError compileOpSetc(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 			.expected_token_type = TOKEN_WORD
 		};
 	}
-	op->symbol_id = getBRConstValue(getTokenWord(obj, arg));
+	op->symbol_id = getBRBuiltinValue(getTokenWord(obj, arg));
 	if (op->symbol_id == -1) {
 		return (VBRFError){
 			.code = VBRF_ERR_UNKNOWN_CONST,
@@ -599,7 +608,7 @@ OpCompiler op_compilers[] = {
 	&compileOpSet,
 	&compile2RegOp, // OP_SETR
 	&compileOpSetd,
-	&compileOpSetc,
+	&compileOpSetb,
 	&compileOpSetm,
 	&compile2RegImmOp, // OP_ADD
 	&compile3RegOp, // OP_ADDR
@@ -659,6 +668,7 @@ VBRFError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 	dst->execblock = OpArray_new(ctx, -1);
 	dst->memblocks = MemBlockArray_new(ctx, 0);
 	dst->datablocks = DataBlockArray_new(ctx, 0);
+	dst->stack_size = DEFAULT_STACK_SIZE;
 
 	CompilerCtx compctx = {
 		.exec_unresolved = ExecMarkArray_new(TEMP_CTX, 0),
@@ -685,6 +695,18 @@ VBRFError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 						.loc = entry_symbol
 					};
 				}
+				break;
+			} case KW_STACKSIZE: {
+				Token size_spec = fetchToken(obj);
+				if (size_spec.type != TOKEN_INT) {
+					exit_tempctx(funcctx);
+					return (VBRFError){
+						.code = VBRF_ERR_STACK_SIZE_EXPECTED,
+						.loc = size_spec
+					};
+				}
+
+				dst->stack_size = size_spec.value * 1024;
 				break;
 			} case KW_DATA: {
 				Token block_start = fetchToken(obj);
@@ -969,6 +991,7 @@ int main(int argc, char* argv[])
 		_opNames,
 		_syscallNames,
 		fromcstr("entry"), 
+		fromcstr("stacksize"),
 		fromcstr("exec"),
 		fromcstr("data"),
 		fromcstr("memory"),
@@ -1000,6 +1023,11 @@ int main(int argc, char* argv[])
 				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
 				return 1;
+			case VBRF_ERR_STACK_SIZE_EXPECTED:
+				eprintf("expected integer as the stack size specifier, instead got ");
+				fprintTokenStr(stderr, err.loc, &prep);
+				fputc('\n', stderr);
+				break;
 			case VBRF_ERR_NO_MEMORY:
 				eprintf("memory allocation failure\n");
 				return 1;
@@ -1086,6 +1114,9 @@ int main(int argc, char* argv[])
 	}
 
 	setEntryPoint(output_fd, res.entry_opid);
+	if (res.stack_size != DEFAULT_STACK_SIZE) {
+		setStackSize(output_fd, res.stack_size);
+	}
 
 	if (res.datablocks.length) {
 		startDataSegment(output_fd);

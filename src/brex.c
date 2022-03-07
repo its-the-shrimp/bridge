@@ -129,7 +129,7 @@ BRFError loadOpSetm(sbuf* input, Program* dst, heapctx_t ctx)
 	return (BRFError){0};
 }
 
-BRFError loadOpSetc(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadOpSetb(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 4) return (BRFError){
@@ -228,7 +228,7 @@ OpLoader op_loaders[] = {
 	&loadOpSet,
 	&load2RegOp, // OP_SETR
 	&loadOpSetd,
-	&loadOpSetc,
+	&loadOpSetb,
 	&loadOpSetm,
 	&load2RegImmOp, // OP_ADD
 	&load3RegOp, // OP_ADDR
@@ -641,7 +641,7 @@ bool handleOpSetd(ExecEnv* env, Program* program)
 	return false;
 }
 
-bool handleOpSetc(ExecEnv* env, Program* program)
+bool handleOpSetb(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = consts[op.symbol_id].value;
@@ -1596,7 +1596,7 @@ BRFFunc op_handlers[] = {
 	&handleOpSet,
 	&handleOpSetr,
 	&handleOpSetd,
-	&handleOpSetc,
+	&handleOpSetb,
 	&handleOpSetm,
 	&handleOpAdd,
 	&handleOpAddr,
@@ -1667,32 +1667,20 @@ void printUsageMsg(FILE* fd, char* exec_name)
 	fprintf(fd, "\t-s     Trace stack values and output them after execution of the program\n");
 }
 
-int8_t exec_flags = 0;
-
-char parseCmdFlags(char* src, char* execname)
-{
-	for (src++; *src != '\0'; src++) {
-		switch (*src) {
-			case 'h': printUsageMsg(stdout, execname); return 1;
-			case 'r': exec_flags |= BREX_TRACE_REGS; break;
-			case 's': exec_flags |= BREX_TRACE_STACK; break;
-			default: return *src;
-		}
-	}
-	return 0;
-}
-
 int main(int argc, char* argv[]) {
 	initBREnv();
 	char* input_name = NULL;
+	int8_t exec_flags = 0;
+	bool time_exec = false;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
-			char errloc = parseCmdFlags(argv[i], argv[0]);
-			if (errloc == 1) {
-				return 0;
-			} else if (errloc) {
-				eprintf("error: unknown option `-%c`\n", errloc);
-				return 1;
+			for (argv[i]++; *argv[i] != '\0'; argv[i]++) {
+				switch (*argv[i]) {
+					case 'h': printUsageMsg(stdout, argv[0]); return 0;
+					case 'r': exec_flags |= BREX_TRACE_REGS; break;
+					case 's': exec_flags |= BREX_TRACE_STACK; break;
+					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
+				}
 			}
 		} else {
 			if (input_name) {
@@ -1764,6 +1752,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	signal(SIGINT, &handleExecInt);
+	startTimer();
 	ExecEnv res = execProgram(&program, exec_flags);
 	signal(SIGINT, SIG_DFL);
 

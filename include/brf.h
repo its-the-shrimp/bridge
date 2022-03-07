@@ -10,7 +10,7 @@ typedef enum {
 	OP_SET, // uses Op::dst_reg and Op::value
 	OP_SETR, // uses Op::dst_reg and Op::src_reg
 	OP_SETD, // uses Op::dst_reg and Op::symbol_id
-	OP_SETC, // uses Op::dst_reg and Op::symbol_id
+	OP_SETB, // uses Op::dst_reg and Op::symbol_id
 	OP_SETM, // uses Op::dst_reg and Op::symbol_id
 	OP_ADD, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_ADDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
@@ -70,7 +70,7 @@ typedef enum {
 	fromcstr("set"), \
 	fromcstr("setr"), \
 	fromcstr("setd"), \
-	fromcstr("setc"), \
+	fromcstr("setb"), \
 	fromcstr("setm"), \
 	fromcstr("add"), \
 	fromcstr("addr"), \
@@ -175,21 +175,23 @@ static_assert(sizeof(Op) == 16, "checking compactness of operations' storage");
 typedef struct {
 	char* name;
 	int32_t value;
-} BRConst;
+} BRBuiltin;
 
-BRConst consts[] = {
-	(BRConst){
+BRBuiltin consts[] = {
+	(BRBuiltin){
 		.name = "stdin",
 		.value = 0
 	},
-	(BRConst){
+	(BRBuiltin){
 		.name = "stdout",
 		.value = 1
 	},
-	(BRConst){
+	(BRBuiltin){
 		.name = "stderr",
 		.value = 2
-	}
+	},
+	(BRBuiltin){ .name = "argc" },
+	(BRBuiltin){ .name = "argv" }
 };
 
 typedef struct {
@@ -246,7 +248,6 @@ typedef struct {
 defArray(Tracer);
 
 typedef struct {
-	heapctx_t ctx;
 	sbuf heap;
 	void* stack_brk;
 	void* stack_head;
