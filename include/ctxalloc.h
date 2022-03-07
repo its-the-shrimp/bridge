@@ -43,7 +43,7 @@ void* ctxalloc_delctx(heapctx_t ctx);
 heapctx_t ctxalloc_mergectx(heapctx_t src, heapctx_t dst);
 
 #define isheapchunk(ptr) (((struct heapspec*)ptr - 1)->capacity >= 0)
-#define chunkctx(ptr) (((struct heapspec*)ptr - 1)->ctx)
+#define chunkctx(ptr) ( isheapchunk(ptr) ? ((struct heapspec*)ptr - 1)->ctx : (heapctx_t)ptr )
 
 #define enter_tempctx(ctxname, options) \
 	heapctx_t prev_##ctxname = TEMP_CTX, ctxname = ctxalloc_newctx(options); \

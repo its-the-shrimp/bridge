@@ -446,7 +446,7 @@ char fputcesc(FILE* fd, unsigned char obj, unsigned char format)
 		n += fputc((obj & 0b11000000 >> 6) + '0', fd);
 	} else if (format & BYTEFMT_HEX) {
 		n += fwrite("\\x", 2, 1, fd);
-		char temp = (obj & 0xf0) >> 8;
+		char temp = obj >> 4;
 		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);
 		temp = obj & 0xf;
 		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);

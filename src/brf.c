@@ -62,6 +62,8 @@ typedef enum {
 	KW_SHLR,
 	KW_SHR,
 	KW_SHRR,
+	KW_CALL,
+	KW_RET,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -71,7 +73,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRF_KWS
 } VBRFKeyword;
-static_assert(N_OPS == 54, "Some BRF operations have unmatched keywords");
+static_assert(N_OPS == 56, "Some BRF operations have unmatched keywords");
 static_assert(N_SYS_OPS == 3, "there might be system ops with unmatched keywords");
 
 // special value for error reporting
@@ -129,12 +131,7 @@ bool startExecSegment(FILE* fd)
 
 typedef void (*OpWriter) (FILE*, Op);
 
-void writeNop(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-}
-
-void writeOpEnd(FILE* fd, Op op)
+void writeNoArgOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 }
@@ -187,7 +184,7 @@ void writeOpSyscall(FILE* fd, Op op)
 	fwrite(BRByteOrder(&op.syscall_id, sizeof(op.syscall_id)), sizeof(op.syscall_id), 1, fd);
 }
 
-void writeOpGoto(FILE* fd, Op op)
+void writeJumpOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
@@ -229,8 +226,8 @@ void writePopOp(FILE* fd, Op op)
 }
 
 OpWriter op_writers[] = {
-	&writeNop,
-	&writeOpEnd,
+	&writeNoArgOp, // OP_NONE
+	&writeNoArgOp, // OP_END
 	&writeOpMark,
 	&writeOpSet,
 	&write2RegOp, // OP_SETR
@@ -242,7 +239,7 @@ OpWriter op_writers[] = {
 	&write2RegImmOp, // OP_SUB
 	&write3RegOp, // OP_SUBR
 	&writeOpSyscall,
-	&writeOpGoto,
+	&writeJumpOp, // OP_GOTO
 	&writeOpCgoto,
 	&write2RegImmOp, // OP_EQ
 	&write3RegOp, // OP_EQR
@@ -282,11 +279,13 @@ OpWriter op_writers[] = {
 	&write2RegImmOp, // OP_SHL
 	&write3RegOp, // OP_SHLR
 	&write2RegImmOp, // OP_SHR
-	&write3RegOp // OP_SHRR
+	&write3RegOp, // OP_SHRR
+	&writeJumpOp, // OP_CALL
+	&writeNoArgOp // OP_RET
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRF operations have unmatched writers");
 
-bool setEntryPoint(FILE* fd, int32_t mark_id)
+bool setEntryPoint(FILE* fd, int64_t mark_id)
 {
 	fputsbuf(fd, ENTRYSPEC_SEGMENT_START);
 	fwrite(BRByteOrder(&mark_id, sizeof(mark_id)), sizeof(mark_id), 1, fd);
@@ -404,24 +403,8 @@ typedef struct {
 } CompilerCtx;
 typedef VBRFError (*OpCompiler) (Preprocessor*, Program*, CompilerCtx*);
 
-VBRFError compileNop(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRFError compileNoArgOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
-	return (VBRFError){0};
-}
-
-VBRFError compileOpEnd(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
-{
-	Token new = {0};
-	while (!isPrepEOF(obj) && getTokenSymbolId(new) != SYMBOL_SEGMENT_END) {
-		new = fetchToken(obj);
-	}
-
-	if (getTokenSymbolId(new) != SYMBOL_SEGMENT_END) {
-		return (VBRFError){
-			.code = VBRF_ERR_UNCLOSED_SEGMENT,
-			.loc = new
-		};
-	}
 	return (VBRFError){0};
 }
 
@@ -567,7 +550,7 @@ VBRFError compile3RegOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRFError){0};
 }
 
-VBRFError compileOpGoto(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRFError compileJumpOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -610,8 +593,8 @@ VBRFError compilePopOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 }
 
 OpCompiler op_compilers[] = {
-	&compileNop,
-	&compileOpEnd,
+	&compileNoArgOp, // OP_NONE
+	&compileNoArgOp, // OP_END
 	&compileOpMark,
 	&compileOpSet,
 	&compile2RegOp, // OP_SETR
@@ -623,7 +606,7 @@ OpCompiler op_compilers[] = {
 	&compile2RegImmOp, // OP_SUB
 	&compile3RegOp, // OP_SUBR
 	&compileOpSyscall, // OP_SYSCALL
-	&compileOpGoto,
+	&compileJumpOp, // OP_GOTO
 	&compileOpCgoto,
 	&compile2RegImmOp, // OP_EQ
 	&compile3RegOp, // OP_EQR
@@ -664,6 +647,8 @@ OpCompiler op_compilers[] = {
 	&compile3RegOp, // OP_SHLR
 	&compile2RegImmOp, // OP_SHR
 	&compile3RegOp, // OP_SHRR
+	&compileJumpOp, // OP_CALL
+	&compileNoArgOp // OP_RET
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRF operations have unmatched compilers");
 
@@ -1102,18 +1087,22 @@ int main(int argc, char* argv[])
 
 	setEntryPoint(output_fd, res.entry_opid);
 
-	startDataSegment(output_fd);
-	array_foreach(DataBlock, block, res.datablocks,
-		writeDataBlock(output_fd, block.name, block.spec);
-	);
-	endDataSegment(output_fd);
-
-	startMemorySegment(output_fd);
-	array_foreach(MemBlock, block, res.memblocks,
-		writeMemoryBlock(output_fd, block.name, block.size);
-	);
-	endMemorySegment(output_fd);
-
+	if (res.datablocks.length) {
+		startDataSegment(output_fd);
+		array_foreach(DataBlock, block, res.datablocks,
+			writeDataBlock(output_fd, block.name, block.spec);
+		);
+		endDataSegment(output_fd);
+	}
+	
+	if (res.memblocks.length) {
+		startMemorySegment(output_fd);
+		array_foreach(MemBlock, block, res.memblocks,
+			writeMemoryBlock(output_fd, block.name, block.size);
+		);
+		endMemorySegment(output_fd);
+	}
+	
 	startExecSegment(output_fd);
 	array_foreach(Op, op, res.execblock,
 		op_writers[op.type](output_fd, op);

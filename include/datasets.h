@@ -15,6 +15,14 @@
 		} \
 	} while (0) \
 
+#define array_rev_foreach(t, item, array, body) \
+	do { \
+		for (int _##item = (array).length - 1; _##item >= 0; _##item--) { \
+			t item = (array).data[_##item]; \
+			do { body } while (0); \
+		} \
+	} while (0) \
+
 #define chain_foreach(t, item, chain, body) \
 	do { \
 		for (t##Node* _##item = (chain).start; _##item != NULL; _##item = _##item->next) { \
@@ -35,7 +43,7 @@
 #define _str(t) #t
 
 #define arrayhead(array) ((array).data + (array).length - 1)
-#define arrayctx(array) ( isheapchunk((array).data) ? (heapctx_t)chunkctx((array).data) : (heapctx_t)(array).data )
+#define arrayctx(array) chunkctx((array).data)
 #define defArray(t) \
 	typedef struct { int length; t* data; } t##Array; \
 	t##Array t##Array_new(heapctx_t ctx, int n, ...) { \
@@ -139,7 +147,7 @@
 		return true; \
 	} \
 
-#define chainctx(chain) ((heapctx_t)( isheapchunk((chain).start) ? (heapctx_t)chunkctx((chain).start) : (heapctx_t)(chain).start ))
+#define chainctx(chain) chunkctx((chain).start)
 #define defChain(t) \
 	typedef struct t##_node { struct t##_node* prev; t value; struct t##_node* next; } t##Node; \
 	typedef struct t##_chain { t##Node* start; t##Node* end; } t##Chain; \

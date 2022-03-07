@@ -58,6 +58,8 @@ typedef enum {
 	OP_SHLR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_SHR, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_SHRR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_CALL, // uses Op::symbol_id,
+	OP_RET,
 	N_OPS
 } OpType;
 
@@ -115,7 +117,9 @@ typedef enum {
 	fromcstr("shl"), \
 	fromcstr("shlr"), \
 	fromcstr("shr"), \
-	fromcstr("shrr") \
+	fromcstr("shrr"), \
+	fromcstr("call"), \
+	fromcstr("ret") \
 
 sbuf opNames[] = { _opNames };
 
@@ -134,7 +138,8 @@ typedef enum {
 } SysOpCode;
 
 typedef enum {
-	EC_STACK_OVERFLOW = -7,
+	EC_STACK_OVERFLOW = -8,
+	EC_NO_STACKFRAME,
 	EC_NEGATIVE_SIZE_ACCESS,
 	EC_ACCESS_FAILURE,
 	EC_STACK_UNDERFLOW, 
@@ -158,7 +163,7 @@ typedef struct op {
 	int8_t src_reg;
 	union {
 		int64_t value;
-		int32_t symbol_id;
+		int64_t symbol_id;
 		char* mark_name;
 		uint8_t syscall_id; 
 		int8_t src2_reg;
@@ -203,7 +208,7 @@ typedef struct program {
 	OpArray execblock;
 	MemBlockArray memblocks;
 	DataBlockArray datablocks;
-	int32_t entry_opid;
+	int64_t entry_opid;
 	int64_t stack_size;
 } Program;
 
@@ -222,6 +227,7 @@ typedef enum {
 	TRACER_INT64,
 	TRACER_DATAPTR,
 	TRACER_MEMPTR,
+	TRACER_STACKPTR,
 	TRACER_CONST,
 	N_TRACER_TYPES
 } TracerType;
@@ -229,11 +235,14 @@ typedef enum {
 char TracerTypeSizes[N_TRACER_TYPES] = { 0, 1, 8, 4, 2, 1, 8, 8, 4 };
 #define isIntTracer(tracer) \
 	( (tracer).type == TRACER_INT8 || (tracer).type == TRACER_INT16 || (tracer).type == TRACER_INT32 || (tracer).type == TRACER_INT64 )
+#define isPtrTracer(tracer) \
+	( (tracer).type == TRACER_STACKPTR || (tracer).type == TRACER_DATAPTR || (tracer).type == TRACER_MEMPTR )
 
 typedef struct {
 	int8_t type;
-	int32_t symbol_id; // for SI_CONST, SI_MEMPTR, SI_DATAPTR
+	int64_t symbol_id; // for TRACER_CONST, TRACER_MEMPTR, TRACER_DATAPTR
 } Tracer;
+#define is_stackframe symbol_id
 defArray(Tracer);
 
 typedef struct {
@@ -241,9 +250,10 @@ typedef struct {
 	sbuf heap;
 	void* stack_brk;
 	void* stack_head;
+	void* prev_stack_head;
 	sbufArray memblocks;
 	int8_t exitcode;
-	int32_t op_id;
+	int64_t op_id;
 	uint64_t* registers;
 	union {
 		int8_t err_pop_size; // for OP_POP*
