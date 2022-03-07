@@ -276,8 +276,18 @@ OpLoader op_loaders[] = {
 	&load3RegOp, // OP_SHLR
 	&load2RegImmOp, // OP_SHR
 	&load3RegOp, // OP_SHRR
+	&load2RegImmOp, // OP_SHRS
+	&load3RegOp, // OP_SHRSR
 	&loadJumpOp, // OP_CALL
-	&loadNoArgOp // OP_RET
+	&loadNoArgOp, // OP_RET
+	&load2RegOp, // OP_LD64
+	&load2RegOp, // OP_STR64
+	&load2RegOp, // OP_LD32
+	&load2RegOp, // OP_STR32
+	&load2RegOp, // OP_LD16
+	&load2RegOp, // OP_STR16
+	&load2RegOp, // OP_LD8
+	&load2RegOp // OP_STR8
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRF operations have unmatched loaders");
 
@@ -436,7 +446,7 @@ void printTracer(FILE* fd, Program* program, ExecEnv* env, Tracer tracer, int64_
 				fprintf(fd, "(stackptr_t)sp + %lld // %p\n", value - (int64_t)env->stack_head, (void*)value);
 				break;
 			case TRACER_CONST:
-				fprintf(fd, "(const int)%s // %d\n", consts[tracer.symbol_id].name, (int32_t)value);
+				fprintf(fd, "(const int)%s // %lld\n", consts[tracer.symbol_id].name, value);
 				break;
 	}
 }
@@ -530,6 +540,16 @@ bool validateMemoryAccess(ExecEnv* env, Program* program, Tracer tracer, void* p
 			env->err_ptr = ptr;
 			return true;
 		}
+	} else if (tracer.type == TRACER_STACKPTR) {
+		if (!isSlice(ptr, size, env->stack_head, env->stack_brk + program->stack_size - env->stack_head)) {
+			env->exitcode = EC_ACCESS_MISALIGNMENT;
+			env->err_buf = (DataBlock){
+				.spec = (sbuf){ .data = env->stack_head, .length = env->stack_brk + program->stack_size - env->stack_head }
+			};
+			env->err_access_length = size;
+			env->err_ptr = ptr;
+			return true;
+		}
 	} else {
 		DataBlock block = getBufferByPtr(env, program, (char*)ptr);
 		if (!block.name) {
@@ -564,13 +584,13 @@ bool handleExitSyscall(ExecEnv* env, Program* program)
 
 bool handleWriteSyscall(ExecEnv* env, Program* program)
 {
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (validateMemoryAccess(env, program, env->regs_trace[1], (char*)env->registers[1], env->registers[2])) { return true; }
 	}
 
 	env->registers[0] = write(env->registers[0], (char*)env->registers[1], env->registers[2]);
 
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[0].type = TRACER_INT64;
 	}
 
@@ -607,7 +627,7 @@ bool handleOpSet(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_INT64;
 	}
 
@@ -620,7 +640,7 @@ bool handleOpSetr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 	}
 
@@ -633,7 +653,7 @@ bool handleOpSetd(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)program->datablocks.data[op.symbol_id].spec.data;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg] = (Tracer){ .type = TRACER_DATAPTR, .symbol_id = op.symbol_id };
 	}
 
@@ -646,7 +666,7 @@ bool handleOpSetb(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = consts[op.symbol_id].value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg] = (Tracer){ .type = TRACER_CONST, .symbol_id = op.symbol_id };
 	}
 
@@ -659,7 +679,7 @@ bool handleOpSetm(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->memblocks.data[op.symbol_id].data;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg] = (Tracer){ .type = TRACER_MEMPTR, .symbol_id = op.symbol_id };
 	}
 
@@ -672,7 +692,7 @@ bool handleOpAdd(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] + op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case TRACER_DATAPTR:
 			case TRACER_MEMPTR:
@@ -701,7 +721,7 @@ bool handleOpAddr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] + env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case TRACER_DATAPTR:
 			case TRACER_MEMPTR:
@@ -732,7 +752,7 @@ bool handleOpSub(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] - op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case TRACER_DATAPTR:
 			case TRACER_MEMPTR:
@@ -761,7 +781,7 @@ bool handleOpSubr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] - env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case TRACER_DATAPTR:
 			case TRACER_MEMPTR:
@@ -815,7 +835,7 @@ bool handleOpEq(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] == op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -828,7 +848,7 @@ bool handleOpEqr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] == env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -841,7 +861,7 @@ bool handleOpNeq(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] != op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -854,7 +874,7 @@ bool handleOpNeqr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] != env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -867,7 +887,7 @@ bool handleOpLt(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] < (uint64_t)op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -880,7 +900,7 @@ bool handleOpLtr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] < env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -893,7 +913,7 @@ bool handleOpGt(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] > (uint64_t)op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -906,7 +926,7 @@ bool handleOpGtr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] > env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -919,7 +939,7 @@ bool handleOpLe(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] <= (uint64_t)op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -932,7 +952,7 @@ bool handleOpLer(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] <= env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -945,7 +965,7 @@ bool handleOpGe(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >= (uint64_t)op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -958,7 +978,7 @@ bool handleOpGer(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >= env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -971,7 +991,7 @@ bool handleOpLts(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] < op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -984,7 +1004,7 @@ bool handleOpLtsr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] < (int64_t)env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -997,7 +1017,7 @@ bool handleOpGts(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] > op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -1010,7 +1030,7 @@ bool handleOpGtsr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] > (int64_t)env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -1023,7 +1043,7 @@ bool handleOpLes(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] <= op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -1036,7 +1056,7 @@ bool handleOpLesr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] <= (int64_t)env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -1049,7 +1069,7 @@ bool handleOpGes(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >= op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -1062,7 +1082,7 @@ bool handleOpGesr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >= (int64_t)env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_BOOL;
 	}
 
@@ -1081,7 +1101,7 @@ bool handleOpPush64(ExecEnv* env, Program* program)
 		return true;
 	}
 
-	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (TracerTypeSizes[env->regs_trace[op.src_reg].type] == 8) {
 			TracerArray_append(&env->stack_trace, env->regs_trace[op.src_reg]);
 		} else {
@@ -1104,7 +1124,7 @@ bool handleOpPop64(ExecEnv* env, Program* program)
 		return true;
 	}
 
-	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (TracerTypeSizes[arrayhead(env->stack_trace)->type] != 8) {
 			env->exitcode = EC_STACK_MISALIGNMENT;
 			env->err_pop_size = 8;
@@ -1130,7 +1150,7 @@ bool handleOpPush32(ExecEnv* env, Program* program)
 		return true;
 	}
 
-	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (TracerTypeSizes[env->regs_trace[op.src_reg].type] == 4) {
 			TracerArray_append(&env->stack_trace, env->regs_trace[op.src_reg]);
 		} else {
@@ -1153,7 +1173,7 @@ bool handleOpPop32(ExecEnv* env, Program* program)
 		return true;
 	}
 
-	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (TracerTypeSizes[arrayhead(env->stack_trace)->type] != 4) {
 			env->exitcode = EC_STACK_MISALIGNMENT;
 			env->err_pop_size = 4;
@@ -1179,7 +1199,7 @@ bool handleOpPush16(ExecEnv* env, Program* program)
 		return true;
 	}
 
-	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (TracerTypeSizes[env->regs_trace[op.src_reg].type] == 2) {
 			TracerArray_append(&env->stack_trace, env->regs_trace[op.src_reg]);
 		} else {
@@ -1202,7 +1222,7 @@ bool handleOpPop16(ExecEnv* env, Program* program)
 		return true;
 	}
 
-	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (TracerTypeSizes[arrayhead(env->stack_trace)->type] != 2) {
 			env->exitcode = EC_STACK_MISALIGNMENT;
 			env->err_pop_size = 2;
@@ -1228,7 +1248,7 @@ bool handleOpPush8(ExecEnv* env, Program* program)
 		return true;
 	}
 
-	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (TracerTypeSizes[env->regs_trace[op.src_reg].type] == 1) {
 			TracerArray_append(&env->stack_trace, env->regs_trace[op.src_reg]);
 		} else {
@@ -1251,7 +1271,7 @@ bool handleOpPop8(ExecEnv* env, Program* program)
 		return true;
 	}
 
-	if (env->flags & BREX_TRACE_STACK || env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (TracerTypeSizes[arrayhead(env->stack_trace)->type] != 1) {
 			env->exitcode = EC_STACK_MISALIGNMENT;
 			env->err_pop_size = 1;
@@ -1271,7 +1291,7 @@ bool handleOpAnd(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] & op.value;
 
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (isIntTracer(env->regs_trace[op.src_reg])) {
 			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 		} else {
@@ -1288,7 +1308,7 @@ bool handleOpAndr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] & env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		bool left_reg_int = isIntTracer(env->regs_trace[op.src_reg]), right_reg_int = isIntTracer(env->regs_trace[op.src2_reg]);
 		if (left_reg_int && right_reg_int) {
 			if (env->regs_trace[op.src_reg].type > env->regs_trace[op.src2_reg].type) {
@@ -1314,7 +1334,7 @@ bool handleOpOr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] | op.value;
 
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (isIntTracer(env->regs_trace[op.src_reg])) {
 			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 		} else {
@@ -1331,7 +1351,7 @@ bool handleOpOrr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] | env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		bool left_reg_int = isIntTracer(env->regs_trace[op.src_reg]), right_reg_int = isIntTracer(env->regs_trace[op.src2_reg]);
 		if (left_reg_int && right_reg_int) {
 			if (env->regs_trace[op.src_reg].type < env->regs_trace[op.src2_reg].type) {
@@ -1357,7 +1377,7 @@ bool handleOpNot(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = ~env->registers[op.src_reg];
 
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		env->regs_trace[op.dst_reg].type = TRACER_INT64;
 	}
 
@@ -1370,7 +1390,7 @@ bool handleOpXor(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] ^ op.value;
 
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		if (isIntTracer(env->regs_trace[op.src_reg])) {
 			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 		} else {
@@ -1387,7 +1407,7 @@ bool handleOpXorr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] ^ env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS || env->flags & BREX_TRACE_STACK) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		bool left_reg_int = isIntTracer(env->regs_trace[op.src_reg]), right_reg_int = isIntTracer(env->regs_trace[op.src2_reg]);
 		if (left_reg_int && right_reg_int) {
 			if (env->regs_trace[op.src_reg].type < env->regs_trace[op.src2_reg].type) {
@@ -1413,7 +1433,7 @@ bool handleOpShl(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] << op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case TRACER_DATAPTR:
 			case TRACER_MEMPTR:
@@ -1442,7 +1462,7 @@ bool handleOpShlr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] << env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case TRACER_DATAPTR:
 			case TRACER_MEMPTR:
@@ -1473,7 +1493,7 @@ bool handleOpShr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >> op.value;
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case TRACER_DATAPTR:
 			case TRACER_MEMPTR:
@@ -1502,7 +1522,67 @@ bool handleOpShrr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >> env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACE_REGS) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		switch (env->regs_trace[op.src_reg].type) {
+			case TRACER_DATAPTR:
+			case TRACER_MEMPTR:
+				if (isIntTracer(env->regs_trace[op.src2_reg])) {
+					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
+					break;
+				}
+			default:
+				if (env->registers[op.dst_reg] >= (1L << 32)) {
+					env->regs_trace[op.dst_reg].type = TRACER_INT64;
+				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
+					env->regs_trace[op.dst_reg].type = TRACER_INT32;
+				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
+					env->regs_trace[op.dst_reg].type = TRACER_INT16;
+				} else {
+					env->regs_trace[op.dst_reg].type = TRACER_INT8;
+				}
+				break;
+		}
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpShrs(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >> op.value;
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		switch (env->regs_trace[op.src_reg].type) {
+			case TRACER_DATAPTR:
+			case TRACER_MEMPTR:
+				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
+				break;
+			default:
+				if (env->registers[op.dst_reg] >= (1L << 32)) {
+					env->regs_trace[op.dst_reg].type = TRACER_INT64;
+				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
+					env->regs_trace[op.dst_reg].type = TRACER_INT32;
+				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
+					env->regs_trace[op.dst_reg].type = TRACER_INT16;
+				} else {
+					env->regs_trace[op.dst_reg].type = TRACER_INT8;
+				}
+				break;
+		}
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpShrsr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >> env->registers[op.src2_reg];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case TRACER_DATAPTR:
 			case TRACER_MEMPTR:
@@ -1588,6 +1668,113 @@ bool handleOpRet(ExecEnv* env, Program* program)
 	return false;
 }
 
+bool handleOpLd64(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (validateMemoryAccess(env, program, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8)) { return true; }
+		env->regs_trace[op.dst_reg].type = TRACER_INT64;
+	}
+
+	env->registers[op.dst_reg] = *(int64_t*)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpStr64(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (validateMemoryAccess(env, program, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 8)) { return true; }
+	}
+
+	*(int64_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLd32(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (validateMemoryAccess(env, program, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 4)) { return true; }
+		env->regs_trace[op.dst_reg].type = TRACER_INT32;
+	}
+
+	env->registers[op.dst_reg] = *(int32_t*)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpStr32(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (validateMemoryAccess(env, program, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 4)) { return true; }
+	}
+
+	*(int32_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLd16(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (validateMemoryAccess(env, program, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 2)) { return true; }
+		env->regs_trace[op.dst_reg].type = TRACER_INT16;
+	}
+
+	env->registers[op.dst_reg] = *(int16_t*)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpStr16(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (validateMemoryAccess(env, program, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 2)) { return true; }
+	}
+
+	*(int16_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLd8(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (validateMemoryAccess(env, program, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 1)) { return true; }
+		env->regs_trace[op.dst_reg].type = TRACER_INT8;
+	}
+
+	env->registers[op.dst_reg] = *(int8_t*)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpStr8(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (validateMemoryAccess(env, program, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 1)) { return true; }
+	}
+
+	*(int8_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
 
 BRFFunc op_handlers[] = {
 	&handleNop,
@@ -1644,15 +1831,27 @@ BRFFunc op_handlers[] = {
 	&handleOpShlr,
 	&handleOpShr,
 	&handleOpShrr,
+	&handleOpShrs,
+	&handleOpShrsr,
 	&handleOpCall,
-	&handleOpRet
+	&handleOpRet,
+	&handleOpLd64,
+	&handleOpStr64,
+	&handleOpLd32,
+	&handleOpStr32,
+	&handleOpLd16,
+	&handleOpStr16,
+	&handleOpLd8,
+	&handleOpStr8
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRF operations have unmatched execution handlers");
 
 ExecEnv execProgram(Program* program, int8_t flags)
 {
 	ExecEnv env = initExecEnv(program, flags);
-	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) { if (interrupt) break; }
+	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) { 
+		if (interrupt) break; 
+	}
 	return env;
 }
 
@@ -1665,13 +1864,14 @@ void printUsageMsg(FILE* fd, char* exec_name)
 	fprintf(fd, "\t-h     Output this message and exit\n");
 	fprintf(fd, "\t-r     Trace register values and output them after execution of the program\n");
 	fprintf(fd, "\t-s     Trace stack values and output them after execution of the program\n");
+	fprintf(fd, "\t-h     Output contents of memory blocks after execution of the program\n");
 }
 
 int main(int argc, char* argv[]) {
 	initBREnv();
 	char* input_name = NULL;
 	int8_t exec_flags = 0;
-	bool time_exec = false;
+	bool dump_memblocks = false;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
 			for (argv[i]++; *argv[i] != '\0'; argv[i]++) {
@@ -1679,6 +1879,7 @@ int main(int argc, char* argv[]) {
 					case 'h': printUsageMsg(stdout, argv[0]); return 0;
 					case 'r': exec_flags |= BREX_TRACE_REGS; break;
 					case 's': exec_flags |= BREX_TRACE_STACK; break;
+					case 'm': dump_memblocks = true; break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
 			}
@@ -1757,12 +1958,20 @@ int main(int argc, char* argv[]) {
 	signal(SIGINT, SIG_DFL);
 
 	printExecState(stdout, &res, &program);
+	if (dump_memblocks) {
+		printf("memory blocks:\n");
+		array_foreach(sbuf, block, res.memblocks, 
+			printf("\t%s: \"", program.memblocks.data[_block].name);
+			putsbufesc(block, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
+			printf("\"\n");
+		);
+	}
 
 	switch (res.exitcode) {
 		case EC_STACK_MISALIGNMENT:
 			eprintf("%llx:\n\truntime error: stack misalignment\n", res.op_id);
-			eprintf("\tstack head size: %hhd bytes\n", res.err_pop_size);
-			eprintf("\tattempted to pop %hhd bytes\n", TracerTypeSizes[arrayhead(res.stack_trace)->type]);
+			eprintf("\tstack head size: %hhd bytes\n", TracerTypeSizes[arrayhead(res.stack_trace)->type]);
+			eprintf("\tattempted to pop %hhd bytes\n", res.err_pop_size);
 			break;
 		case EC_NO_STACKFRAME:
 			eprintf("%llx:\n\truntime error: attempted to return from a global stack frame\n", res.op_id);
@@ -1796,8 +2005,13 @@ int main(int argc, char* argv[]) {
 			break;
 		case EC_ACCESS_MISALIGNMENT:
 			eprintf("%llx:\n\truntime error: misaligned memory access\n", res.op_id);
-			eprintf("\tbuffer `%s` is at %p\n", res.err_buf.name, res.err_buf.spec.data);
-			eprintf("\tbuffer size: %ld\n", res.err_buf.spec.length);
+			if (res.err_buf.spec.data == res.stack_head) {
+				eprintf("\tthe stack is at %p\n", res.err_buf.spec.data);
+				eprintf("\tstack size: %ld\n", res.err_buf.spec.length);
+			} else {
+				eprintf("\tbuffer `%s` is at %p\n", res.err_buf.name, res.err_buf.spec.data);
+				eprintf("\tbuffer size: %ld\n", res.err_buf.spec.length);
+			}
 			eprintf("\tattempted to access %lld bytes from %p\n", res.err_access_length, res.err_ptr);
 			if ((void*)res.err_ptr < (void*)res.err_buf.spec.data) {
 				eprintf("\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(res.err_buf.spec.data - (int64_t)res.err_ptr));

@@ -62,8 +62,18 @@ typedef enum {
 	KW_SHLR,
 	KW_SHR,
 	KW_SHRR,
+	KW_SHRS,
+	KW_SHRSR,
 	KW_CALL,
 	KW_RET,
+	KW_LD64,
+	KW_STR64,
+	KW_LD32,
+	KW_STR32,
+	KW_LD16,
+	KW_STR16,
+	KW_LD8,
+	KW_STR8,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -74,7 +84,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRF_KWS
 } VBRFKeyword;
-static_assert(N_OPS == 56, "Some BRF operations have unmatched keywords");
+static_assert(N_OPS == 66, "Some BRF operations have unmatched keywords");
 static_assert(N_SYS_OPS == 3, "there might be system ops with unmatched keywords");
 
 // special value for error reporting
@@ -281,8 +291,18 @@ OpWriter op_writers[] = {
 	&write3RegOp, // OP_SHLR
 	&write2RegImmOp, // OP_SHR
 	&write3RegOp, // OP_SHRR
+	&write2RegImmOp, // OP_SHRS
+	&write3RegOp, // OP_SHRSR
 	&writeJumpOp, // OP_CALL
-	&writeNoArgOp // OP_RET
+	&writeNoArgOp, // OP_RET
+	&write2RegOp, // OP_LD64
+	&write2RegOp, // OP_STR64
+	&write2RegOp, // OP_LD32
+	&write2RegOp, // OP_STR32
+	&write2RegOp, // OP_LD16
+	&write2RegOp, // OP_STR16
+	&write2RegOp, // OP_LD8
+	&write2RegOp // OP_STR8
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRF operations have unmatched writers");
 
@@ -656,8 +676,18 @@ OpCompiler op_compilers[] = {
 	&compile3RegOp, // OP_SHLR
 	&compile2RegImmOp, // OP_SHR
 	&compile3RegOp, // OP_SHRR
+	&compile2RegImmOp, // OP_SHRS
+	&compile3RegOp, // OP_SHRSR
 	&compileJumpOp, // OP_CALL
-	&compileNoArgOp // OP_RET
+	&compileNoArgOp, // OP_RET
+	&compile2RegOp, // OP_LD64
+	&compile2RegOp, // OP_STR64
+	&compile2RegOp, // OP_LD32
+	&compile2RegOp, // OP_STR32
+	&compile2RegOp, // OP_LD16
+	&compile2RegOp, // OP_STR16
+	&compile2RegOp, // OP_LD8
+	&compile2RegOp, // OP_STR8
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRF operations have unmatched compilers");
 

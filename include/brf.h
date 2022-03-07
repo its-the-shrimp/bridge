@@ -58,8 +58,18 @@ typedef enum {
 	OP_SHLR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_SHR, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_SHRR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SHRS, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_SHRSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_CALL, // uses Op::symbol_id,
 	OP_RET,
+	OP_LD64, // uses Op::dst_reg and Op::src_reg
+	OP_STR64, // uses Op::dst_reg and Op::src_reg
+	OP_LD32, // uses Op::dst_reg and Op::src_reg
+	OP_STR32, // uses Op::dst_reg and Op::src_reg
+	OP_LD16, // uses Op::dst_reg and Op::src_reg
+	OP_STR16, // uses Op::dst_reg and Op::src_reg
+	OP_LD8, // uses Op::dst_reg and Op::src_reg
+	OP_STR8, // uses Op::dst_reg and Op::src_reg
 	N_OPS
 } OpType;
 
@@ -118,8 +128,18 @@ typedef enum {
 	fromcstr("shlr"), \
 	fromcstr("shr"), \
 	fromcstr("shrr"), \
+	fromcstr("shrs"), \
+	fromcstr("shrsr"), \
 	fromcstr("call"), \
-	fromcstr("ret") \
+	fromcstr("ret"), \
+	fromcstr("ld64"), \
+	fromcstr("str64"), \
+	fromcstr("ld32"), \
+	fromcstr("str32"), \
+	fromcstr("ld16"), \
+	fromcstr("str16"), \
+	fromcstr("ld8"), \
+	fromcstr("str8") \
 
 sbuf opNames[] = { _opNames };
 
@@ -174,7 +194,7 @@ static_assert(sizeof(Op) == 16, "checking compactness of operations' storage");
 
 typedef struct {
 	char* name;
-	int32_t value;
+	int64_t value;
 } BRBuiltin;
 
 BRBuiltin consts[] = {
@@ -234,7 +254,18 @@ typedef enum {
 	N_TRACER_TYPES
 } TracerType;
 
-char TracerTypeSizes[N_TRACER_TYPES] = { 0, 1, 8, 4, 2, 1, 8, 8, 4 };
+char TracerTypeSizes[N_TRACER_TYPES] = { 
+	0, // TRACER_VOID
+	1, // TRACER_BOOL
+	1, // TRACER_INT8
+	2, // TRACER_INT16
+	4, // TRACER_INT32
+	8, // TRACER_INT64
+	8, // TRACER_DATAPTR
+	8, // TRACER_MEMPTR
+	8, // TRACER_STACKPTR
+	8, // TRACER_CONST
+};
 #define isIntTracer(tracer) \
 	( (tracer).type == TRACER_INT8 || (tracer).type == TRACER_INT16 || (tracer).type == TRACER_INT32 || (tracer).type == TRACER_INT64 )
 #define isPtrTracer(tracer) \

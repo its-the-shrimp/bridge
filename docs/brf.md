@@ -70,13 +70,15 @@
     `shlr` operation writes the value of register `src` shifted left
     by the amount of bits specified in register `src2` to register `dst`.
 
-10. `shr <dst: register> <src: register> <value: integer>` (code: 0x34):\
+10. `shr(s) <dst: register> <src: register> <value: integer>` (code: 0x34 (0x36) ):\
     `shr` operation writes the value of register `src` shifted right
-    by the amount of bits specified by `value` to register `dst`.
+    by the amount of bits specified by `value`, shifting in zeros, to register `dst`.
+    `shrs` is the same operation, but shifts in copies of the sign bit.
 
-11. `shrr <dst: register> <src: register> <value: integer>` (code: 0x35):\
+11. `shr(s)r <dst: register> <src: register> <value: integer>` (code: 0x35 (0x37) ):\
     `shrr` operation writes the value of register `src` shifted right
-    by the amount of bits specified in register `src2` to register `dst`.
+    by the amount of bits specified in register `src2`, shifting in zeros, to register `dst`.
+    `shrsr` is the same operation, but shifts in copies of the sign bit.
 
 ### Comparison operations
 
@@ -208,6 +210,38 @@
 2. `setm <dst: register> <block_name: string>` (code: 0x7):\
     `setm` operation copies address of the memory block `block_name` to
     register `dst`.
+
+3. `ld64 <dst: register> <src: register>` (code: 0x3A):\
+    `ld64` operation loads a 64-bit value from the address in register `src`
+    to register `dst`.
+
+4. `str64 <dst: register> <src: register>` (code: 0x3B):\
+    `str64` operation stores the value of register `src` at the address
+    in register `dst`.
+
+5. `ld32 <dst: register> <src: register>` (code: 0x3C):\
+    `ld32` operation loads a 32-bit value from the address in register `src`
+    to register `dst`. Higher 32 bits of register `dst` are zeroed out.
+
+6. `str32 <dst: register> <src: register>` (code: 0x3D):\
+    `str32` operation stores 32 lower bits of register `src` at the address
+    in register `dst`.
+
+7. `ld16 <dst: register> <src: register>` (code: 0x3E):\
+    `ld16` operation loads a 16-bit value from the address in register `src`
+    to register `dst`. Higher 48 bits of register `dst` are zeroed out.
+
+8. `str16 <dst: register> <src: register>` (code: 0x3F):\
+    `str16` operation stores 16 lower bits of register `src` at the address
+    in register `dst`.
+
+7. `ld8 <dst: register> <src: register>` (code: 0x40):\
+    `ld8` operation loads a 8-bit value from the address in register `src`
+    to register `dst`. Higher 56 bits of register `dst` are zeroed out.
+
+8. `str8 <dst: register> <src: register>` (code: 0x41):\
+    `str8` operation stores 8 lower bits of register `src` at the address
+    in register `dst`.
     
 ### System interaction and platform-specific operations
 
@@ -265,11 +299,11 @@ but a BRF system call is used the same way on any system that BRF supports.
         `<r0>` - an 8-bit unsigned integer that specifies the exit code.
 
 2. `write` (index: 0x2):\
-    `write` system call writes data to a file descriptor.
+    `write` system call writes data to a file descriptor.\
     Arguments:\
         `<r0>` - file descriptor identifier, can be obtained using 
             `open` system call, or can be one a built-in `stdout` or `stderr`.
         `<r1>` - pointer to the data to be written to the file descriptor.
-        `<r2>` - amount of bytes to be copied from `<r1>` to the file descriptor.
+        `<r2>` - amount of bytes to be copied from `<r1>` to the file descriptor.\
     Result: `<r0>` - If the call succeded, the value is the amount of bytes actually written to the file descriptor.
                 Otherwise, the value will be set to -1.

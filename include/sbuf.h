@@ -246,17 +246,11 @@ sbuf sbufunesc(sbuf src, heapctx_t ctx)
 	sbuf res = sctxalloc_new(src.length, ctx);
 	res.length = 0;
 
-	for (int i = 0; src.length > 0; i++)
-	{
-		if (*src.data == '\\')
-		{
+	for (int i = 0; src.length > 0; i++) {
+		if (*src.data == '\\') {
 			sbufshift(src, 1);
-			if (i == src.length)
-			{
-				break;
-			}
-			switch (*src.data)
-			{
+			if (i == src.length) { break; }
+			switch (*src.data) {
 				case 'n':  res.data[i] = '\n'; sbufshift(src, 1); break;
 				case 'r':  res.data[i] = '\r'; sbufshift(src, 1); break;
 				case 't':  res.data[i] = '\t'; sbufshift(src, 1); break;
@@ -264,11 +258,13 @@ sbuf sbufunesc(sbuf src, heapctx_t ctx)
 				case 'x':
 					sbufshift(src, 1);
 					if (*src.data == '\0') { res.data[i] = 'x'; break; }
-					res.data[i] = (lowerchar(*src.data) >= 97 ? *src.data - 97 : *src.data - 48) * 16;
+					res.data[i] = (*src.data >= 65 ? lowerchar(*src.data) - 87 : *src.data - 48) << 4;
 
 					sbufshift(src, 1);
-					if (*src.data == '\0') { res.data[i] /= 16; break; }
-					res.data[i] /= lowerchar(*src.data) >= 97 ? *src.data - 97 : *src.data - 48;
+					if (*src.data == '\0') { res.data[i] = (unsigned char)res.data[i] >> 4; break; }
+					res.data[i] |= *src.data >= 65 ? lowerchar(*src.data) - 87 : *src.data - 48;
+
+					sbufshift(src, 1);
 					break;
 				default: res.data[i] = *src.data; break;
 			}
