@@ -70,6 +70,10 @@ typedef enum {
 	OP_STR16, // uses Op::dst_reg and Op::src_reg
 	OP_LD8, // uses Op::dst_reg and Op::src_reg
 	OP_STR8, // uses Op::dst_reg and Op::src_reg
+	OP_SETS, // uses Op::dst_reg and Op::value
+	OP_SETSR, // uses Op::dst_reg and Op::src_reg
+	OP_ALLOC, // uses Op::item_size and Op::value
+	OP_ALLOCR, // uses Op::item_size and Op::src_reg
 	N_OPS
 } OpType;
 
@@ -139,7 +143,11 @@ typedef enum {
 	fromcstr("ld16"), \
 	fromcstr("str16"), \
 	fromcstr("ld8"), \
-	fromcstr("str8") \
+	fromcstr("str8"), \
+	fromcstr("sets"), \
+	fromcstr("setsr"), \
+	fromcstr("alloc"), \
+	fromcstr("allocr") \
 
 sbuf opNames[] = { _opNames };
 
@@ -186,6 +194,7 @@ typedef struct op {
 	int8_t type;
 	int8_t dst_reg;
 	int8_t src_reg;
+	int8_t item_type;
 	union {
 		int64_t value;
 		int64_t symbol_id;

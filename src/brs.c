@@ -74,6 +74,10 @@ typedef enum {
 	KW_STR16,
 	KW_LD8,
 	KW_STR8,
+	KW_SETS,
+	KW_SETSR,
+	KW_ALLOC,
+	KW_ALLOCR,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -86,7 +90,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRF_KWS
 } VBRFKeyword;
-static_assert(N_OPS == 66, "Some BRF operations have unmatched keywords");
+static_assert(N_OPS == 70, "Some BRF operations have unmatched keywords");
 static_assert(N_SYS_OPS == 5, "there might be system ops with unmatched keywords");
 
 bool minimal = false;
@@ -163,7 +167,7 @@ void writeOpMark(FILE* fd, Op op)
 	}
 }
 
-void writeOpSet(FILE* fd, Op op)
+void writeRegImmOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
@@ -245,11 +249,25 @@ void writePopOp(FILE* fd, Op op)
 	fputc(op.dst_reg, fd);
 }
 
+void writeOpAlloc(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.item_type, fd);
+	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
+}
+
+void writeOpAllocr(FILE* fd, Op op)
+{
+	fputc(op.type, fd);
+	fputc(op.item_type, fd);
+	fputc(op.src_reg, fd);
+}
+
 OpWriter op_writers[] = {
 	&writeNoArgOp, // OP_NONE
 	&writeNoArgOp, // OP_END
 	&writeOpMark,
-	&writeOpSet,
+	&writeRegImmOp, // OP_SET
 	&write2RegOp, // OP_SETR
 	&writeOpSetd,
 	&writeOpSetb,
@@ -311,7 +329,11 @@ OpWriter op_writers[] = {
 	&write2RegOp, // OP_LD16
 	&write2RegOp, // OP_STR16
 	&write2RegOp, // OP_LD8
-	&write2RegOp // OP_STR8
+	&write2RegOp, // OP_STR8
+	&writeRegImmOp, // OP_SETS
+	&write2RegOp, // OP_SETSR
+	&writeOpAlloc,
+	&writeOpAllocr
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRF operations have unmatched writers");
 
@@ -347,6 +369,7 @@ typedef enum {
 	VBRF_ERR_DATA_BLOCK_NOT_FOUND,
 	VBRF_ERR_MEM_BLOCK_NOT_FOUND,
 	VBRF_ERR_INVALID_REG_ID,
+	VBRF_ERR_INVALID_ITEM_SIZE,
 	VBRF_ERR_UNKNOWN_CONST
 } VBRFErrorCode;
 
@@ -359,6 +382,7 @@ typedef struct {
 			uint8_t op_type;
 			uint8_t expected_token_type;
 		};
+		int64_t item_size;
 	};
 } VBRFError;
 
@@ -457,15 +481,14 @@ VBRFError compileOpMark(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRFError){0};
 }
 
-VBRFError compileOpSet(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRFError compileRegImmOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	op->type = OP_SET;
 
-	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, OP_SET, 0);
+	VBRFError err = getRegIdArg(fetchToken(obj), &op->dst_reg, op->type, 0);
 	if (err.code != VBRF_ERR_OK) return err;
 
-	err = getIntArg(fetchToken(obj), &op->value, OP_SET, 1);
+	err = getIntArg(fetchToken(obj), &op->value, op->type, 1);
 	if (err.code != VBRF_ERR_OK) return err;
 
 	return (VBRFError){0};
@@ -630,11 +653,63 @@ VBRFError compilePopOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRFError){0};
 }
 
+VBRFError compileOpAlloc(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	int64_t temp_int;
+	Token item_size_spec = fetchToken(obj);
+	VBRFError err = getIntArg(item_size_spec, &temp_int, op->type, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+	switch (temp_int) {
+		case 1: op->item_type = TRACER_INT8; break;
+		case 2: op->item_type = TRACER_INT16; break;
+		case 4: op->item_type = TRACER_INT32; break;
+		case 8: op->item_type = TRACER_INT64; break;
+		default: return (VBRFError){
+			.code = VBRF_ERR_INVALID_ITEM_SIZE,
+			.item_size = temp_int,
+			.loc = item_size_spec
+		};
+	}
+
+	err = getIntArg(fetchToken(obj), &op->value, op->type, 1);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
+VBRFError compileOpAllocr(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	int64_t temp_int;
+	Token item_size_spec = fetchToken(obj);
+	VBRFError err = getIntArg(item_size_spec, &temp_int, op->type, 0);
+	if (err.code != VBRF_ERR_OK) return err;
+	switch (temp_int) {
+		case 1: op->item_type = TRACER_INT8; break;
+		case 2: op->item_type = TRACER_INT16; break;
+		case 4: op->item_type = TRACER_INT32; break;
+		case 8: op->item_type = TRACER_INT64; break;
+		default: return (VBRFError){
+			.code = VBRF_ERR_INVALID_ITEM_SIZE,
+			.item_size = temp_int,
+			.loc = item_size_spec
+		};
+	}
+
+	err = getRegIdArg(fetchToken(obj), &op->src_reg, op->type, 1);
+	if (err.code != VBRF_ERR_OK) return err;
+
+	return (VBRFError){0};
+}
+
 OpCompiler op_compilers[] = {
 	&compileNoArgOp, // OP_NONE
 	&compileNoArgOp, // OP_END
 	&compileOpMark,
-	&compileOpSet,
+	&compileRegImmOp, // OP_SET
 	&compile2RegOp, // OP_SETR
 	&compileOpSetd,
 	&compileOpSetb,
@@ -697,6 +772,10 @@ OpCompiler op_compilers[] = {
 	&compile2RegOp, // OP_STR16
 	&compile2RegOp, // OP_LD8
 	&compile2RegOp, // OP_STR8
+	&compileRegImmOp, // OP_SETS
+	&compile2RegOp, // OP_SETSR
+	&compileOpAlloc,
+	&compileOpAllocr
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRF operations have unmatched compilers");
 
@@ -1076,7 +1155,7 @@ int main(int argc, char* argv[])
 				eprintf("expected integer as the stack size specifier, instead got ");
 				fprintTokenStr(stderr, err.loc, &prep);
 				fputc('\n', stderr);
-				break;
+				return 1;
 			case VBRF_ERR_NO_MEMORY:
 				eprintf("memory allocation failure\n");
 				return 1;
@@ -1152,6 +1231,9 @@ int main(int argc, char* argv[])
 				return 1;
 			case VBRF_ERR_UNKNOWN_CONST:
 				eprintf("unknown constant `%s`\n", getTokenWord(&prep, err.loc));
+				return 1;
+			case VBRF_ERR_INVALID_ITEM_SIZE:
+				eprintf("item size can only be either 1, 2, 4 or 8, instead got %lld\n", err.item_size);
 				return 1;
 		}
 	}

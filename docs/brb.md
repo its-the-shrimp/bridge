@@ -172,31 +172,41 @@
 
 ### Operations on the stack
 
-1. `push64 <src: register>` (code: 0x23):\
+1. `alloc <size: integer> <n: integer>` (code: 0x44):\
+    `alloc` operation allocates on the stack `n` items of size defined by `size`.
+    The program cannot assume anything about the values the items are initialized with.
+    `size` can only be either 1, 2, 4 or 8.
+
+2. `allocr <size: register> <src: register>` (code: 0x45):\
+    `allocr` operation allocates items on the stack, their size is specified by `size`, and amount of them
+    is defined by the value of register `src`. The program cannot assume anything about the values the items are initialized with.
+    `size` can only be either 1, 2, 4 or 8.
+
+3. `push64 <src: register>` (code: 0x23):\
     `push64` operation pushes the value of register `src` to the stack.
 
-2. `pop64 <dst: register>` (code: 0x24):\
+4. `pop64 <dst: register>` (code: 0x24):\
     `pop64` operation pops 8 bytes from the stack and writes them to
     register `dst`.
 
-3. `push32 <src: register>` (code: 0x25):\
+5. `push32 <src: register>` (code: 0x25):\
     `push32` operation pushes the 32 lower bits of register `src` to the stack.
 
-4. `pop32 <dst: register>` (code: 0x26):\
+6. `pop32 <dst: register>` (code: 0x26):\
     `pop32` operation pops 4 bytes from the stack and writes them to
     register `dst`. The 32 higher bits of the register are zeroed out.
 
-5. `push16 <src: register>` (code: 0x27):\
+7. `push16 <src: register>` (code: 0x27):\
     `push16` operation pushes the 16 lower bits of register `src` to the stack.
 
-6. `pop16 <dst: register>` (code: 0x28):\
+8. `pop16 <dst: register>` (code: 0x28):\
     `pop16` operation pops 2 bytes from the stack and writes them to
     register `dst`. The 48 higher bits of the register are zeroed out.
 
-5. `push8 <src: register>` (code: 0x29):\
+9. `push8 <src: register>` (code: 0x29):\
     `push8` operation pushes the 8 lower bits of register `src` to the stack.
 
-6. `pop8 <dst: register>` (code: 0x2A):\
+10. `pop8 <dst: register>` (code: 0x2A):\
     `pop8` operation pops 1 byte from the stack and writes it to
     register `dst`. The 56 higher bits of the register are zeroed out.
 
@@ -235,13 +245,21 @@
     `str16` operation stores 16 lower bits of register `src` at the address
     in register `dst`.
 
-7. `ld8 <dst: register> <src: register>` (code: 0x40):\
+9. `ld8 <dst: register> <src: register>` (code: 0x40):\
     `ld8` operation loads a 8-bit value from the address in register `src`
     to register `dst`. Higher 56 bits of register `dst` are zeroed out.
 
-8. `str8 <dst: register> <src: register>` (code: 0x41):\
+10. `str8 <dst: register> <src: register>` (code: 0x41):\
     `str8` operation stores 8 lower bits of register `src` at the address
     in register `dst`.
+
+11. `sets <dst: register> <value: integer>` (code: 0x42):\
+    `sets` operation writes to register `dst` the sum of an address of the head of the stack
+    and `value`.
+
+12. `setsr <dst: register> <src: register>` (code: 0x43):\
+    `setsr` operation writes to register `dst` the sum of an address of the head of the stack
+    and the value of register `src`.
     
 ### System interaction and platform-specific operations
 

@@ -81,7 +81,7 @@ BRFError loadOpMark(sbuf* input, Program* dst, heapctx_t ctx)
 	return (BRFError){0};
 }
 
-BRFError loadOpSet(sbuf* input, Program* dst, heapctx_t ctx)
+BRFError loadRegImmOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	if (input->length < 10) return (BRFError){
@@ -221,11 +221,37 @@ BRFError loadPopOp(sbuf* input, Program* dst, heapctx_t ctx)
 	return (BRFError){0};
 }
 
+BRFError loadOpAlloc(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 10) return (BRFError){
+		.code = BRF_ERR_NO_OP_ARG,
+		.opcode = op->type
+	};
+
+	op->item_type = loadInt8(input);
+	op->value = loadInt64(input);
+	return (BRFError){0};
+}
+
+BRFError loadOpAllocr(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+	if (input->length < 2) return (BRFError){
+		.code = BRF_ERR_NO_OP_ARG,
+		.opcode = op->type
+	};
+
+	op->item_type = loadInt8(input);
+	op->src_reg = loadInt8(input);
+	return (BRFError){0};
+}
+
 OpLoader op_loaders[] = {
 	&loadNoArgOp, // OP_NONE
 	&loadNoArgOp, // OP_END
 	&loadOpMark,
-	&loadOpSet,
+	&loadRegImmOp, // OP_SET
 	&load2RegOp, // OP_SETR
 	&loadOpSetd,
 	&loadOpSetb,
@@ -287,7 +313,11 @@ OpLoader op_loaders[] = {
 	&load2RegOp, // OP_LD16
 	&load2RegOp, // OP_STR16
 	&load2RegOp, // OP_LD8
-	&load2RegOp // OP_STR8
+	&load2RegOp, // OP_STR8
+	&loadRegImmOp, // OP_SETS
+	&load2RegOp,  // OP_SETSR
+	&loadOpAlloc,
+	&loadOpAllocr
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRF operations have unmatched loaders");
 
@@ -499,7 +529,7 @@ void printTracer(FILE* fd, Program* program, ExecEnv* env, Tracer tracer, int64_
 				if ((uint64_t)value < (uint64_t)buf.data) {
 					fprintf(fd, "- %llu ", (uint64_t)buf.data - (uint64_t)value);
 				} else if ((uint64_t)value > (uint64_t)buf.data) {
-					fprintf(fd, "+ %llu", (uint64_t)value - (uint64_t)buf.data);
+					fprintf(fd, "+ %llu ", (uint64_t)value - (uint64_t)buf.data);
 				}
 				fprintf(fd, "// %p", (void*)value);
 				break;
@@ -519,7 +549,7 @@ void printExecState(FILE* fd, ExecEnv* env, Program* program)
 		static_assert(N_TRACER_TYPES == 8, "not all tracer types are handled");
 
 		array_foreach(Tracer, tracer, env->stack_trace,
-			fprintf(fd, "\t[%d]\t", _tracer);
+			fprintf(fd, "\t[%d]\t", env->stack_trace.length - _tracer - 1);
 			int64_t input = 0;
 			switch (tracer.type) {
 				case TRACER_INT64:
@@ -540,6 +570,7 @@ void printExecState(FILE* fd, ExecEnv* env, Program* program)
 			}
 			printTracer(fd, program, env, tracer, input);
 		);
+		printf("\t[end]\n");
 		fprintf(fd, "total stack usage: %.3f Kb\n", (float)(env->stack_brk + program->stack_size - env->stack_head) / 1024.0f);
 	}
 
@@ -1706,13 +1737,13 @@ bool handleOpRet(ExecEnv* env, Program* program)
 
 		Tracer stackframe = {0};
 		int prev_stack_trace_head = -1;
-		array_rev_foreach(Tracer, tracer, env->stack_trace, 
-			if (tracer.ref.type == BUF_STACK && tracer.is_stackframe) { 
-				stackframe = tracer;
-				prev_stack_trace_head = _tracer;
+		for (int i = env->stack_trace.length - 1; i >= 0; i--) {
+			if (env->stack_trace.data[i].ref.type == BUF_STACK && env->stack_trace.data[i].is_stackframe) {
+				stackframe = env->stack_trace.data[i];
+				prev_stack_trace_head = i;
 				break;
 			}
-		);
+		}
 		if (!stackframe.is_stackframe) {
 			env->exitcode = EC_NO_STACKFRAME;
 			return true;
@@ -1723,7 +1754,6 @@ bool handleOpRet(ExecEnv* env, Program* program)
 			return true;
 		}
 		env->stack_trace.length--;
-
 	}
 
 	env->stack_head = env->prev_stack_head;
@@ -1844,6 +1874,80 @@ bool handleOpStr8(ExecEnv* env, Program* program)
 	return false;
 }
 
+bool handleOpSets(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		env->regs_trace[op.dst_reg] = (Tracer){ 
+			.type = TRACER_PTR, 
+			.ref = (BufferRef){ .type = BUF_STACK } 
+		};
+	}
+
+	env->registers[op.dst_reg] = (uint64_t)env->stack_head + op.value;
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpSetsr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		env->regs_trace[op.dst_reg] = (Tracer){ 
+			.type = TRACER_PTR, 
+			.ref = (BufferRef){ .type = BUF_STACK } 
+		};
+	}
+
+	env->registers[op.dst_reg] = (uint64_t)env->stack_head + env->registers[op.src_reg];
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpAlloc(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	if (env->flags & (BREX_TRACE_STACK | BREX_TRACE_REGS)) {
+		if (env->stack_head - env->stack_brk < TracerTypeSizes[op.item_type] * op.value) {
+			env->exitcode = EC_STACK_OVERFLOW;
+			env->err_push_size = TracerTypeSizes[op.item_type] * op.value;
+			return true;
+		}
+		for (int i = 0; i < op.value; i++) {
+			TracerArray_append(&env->stack_trace, (Tracer){ .type = op.item_type });
+		}
+	}
+
+	env->stack_head -= TracerTypeSizes[op.item_type] * op.value;
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpAllocr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+	if (env->flags & (BREX_TRACE_STACK | BREX_TRACE_REGS)) {
+		if (env->stack_head - env->stack_brk < TracerTypeSizes[op.item_type] * env->registers[op.src_reg]) {
+			env->exitcode = EC_STACK_OVERFLOW;
+			env->err_push_size = TracerTypeSizes[op.item_type] * env->registers[op.src_reg];
+			return true;
+		}
+		for (int i = 0; i < env->registers[op.src_reg]; i++) {
+			TracerArray_append(&env->stack_trace, (Tracer){ .type = op.item_type });
+		}
+	}
+
+	env->stack_head -= TracerTypeSizes[op.item_type] * env->registers[op.src_reg];
+
+	env->op_id++;
+	return false;
+}
+
 BRFFunc op_handlers[] = {
 	&handleNop,
 	&handleOpEnd,
@@ -1910,7 +2014,11 @@ BRFFunc op_handlers[] = {
 	&handleOpLd16,
 	&handleOpStr16,
 	&handleOpLd8,
-	&handleOpStr8
+	&handleOpStr8,
+	&handleOpSets,
+	&handleOpSetsr,
+	&handleOpAlloc,
+	&handleOpAllocr
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRF operations have unmatched execution handlers");
 
