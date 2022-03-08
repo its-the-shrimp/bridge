@@ -275,16 +275,6 @@ executions, but they are bound to a name that is constant and universal.
     write-only file, that represents error output of the program, e.g. to
     the terminal.
 
-4. `argc` (index: 0x3):\
-    `argc` is a runtime-specific constant, which specifies how many
-    command-line arguments were provided to the program.
-
-5. `argv` (index: 0x4):\
-    `argv` is a runtime-specific constant, providing a pointer to the start
-    of array of command-line arguments.\
-    Command-line arguments are provided in the form of array of pointers to
-    null-terminated strings, the C type for it is `char**`.
-
 ## System Calls
 
 **System Calls** are a crossplatform way to interact with the current system,
