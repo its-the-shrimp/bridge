@@ -251,6 +251,7 @@ sbuf sbufunesc(sbuf src, heapctx_t ctx)
 			sbufshift(src, 1);
 			if (i == src.length) { break; }
 			switch (*src.data) {
+				case '0':  res.data[i] = '\0'; sbufshift(src, 1); break;
 				case 'n':  res.data[i] = '\n'; sbufshift(src, 1); break;
 				case 'r':  res.data[i] = '\r'; sbufshift(src, 1); break;
 				case 't':  res.data[i] = '\t'; sbufshift(src, 1); break;
@@ -423,14 +424,9 @@ char fputcesc(FILE* fd, unsigned char obj, unsigned char format)
 		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);
 	}
 	else if (obj == '\0')				    { n += fwrite("\\0",  1, 2, fd); }
-	else if (obj == '\a')				    { n += fwrite("\\a",  1, 2, fd); }
-	else if (obj == '\b')				    { n += fwrite("\\b",  1, 2, fd); }
 	else if (obj == '\t')				    { n += fwrite("\\t",  1, 2, fd); }
 	else if (obj == '\n')				    { n += fwrite("\\n",  1, 2, fd); }
-	else if (obj == '\v')				    { n += fwrite("\\v",  1, 2, fd); }
-	else if (obj == '\f')				    { n += fwrite("\\f",  1, 2, fd); }
 	else if (obj == '\r')				    { n += fwrite("\\r",  1, 2, fd); }
-	else if (obj == '\e')				    { n += fwrite("\\e",  1, 2, fd); }
 	else if (obj == '\\')				    { n += fwrite("\\\\", 1, 2, fd); }
 	else if (obj == '\'' && format & BYTEFMT_ESC_QUOTE) { n += fwrite("\\'",  1, 2, fd); }
 	else if (obj == '"' && format & BYTEFMT_ESC_DQUOTE) { n += fwrite("\\\"", 1, 2, fd); }

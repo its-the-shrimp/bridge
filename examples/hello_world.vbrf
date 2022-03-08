@@ -1,3 +1,4 @@
+entry main
 data {
     helloworld "Hello, World\n"
 }

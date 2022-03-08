@@ -307,3 +307,15 @@ but a BRF system call is used the same way on any system that BRF supports.
         `<r2>` - amount of bytes to be copied from `<r1>` to the file descriptor.\
     Result: `<r0>` - If the call succeded, the value is the amount of bytes actually written to the file descriptor.
                 Otherwise, the value will be set to -1.
+
+3. `argc` (index: 0x3):\
+    `argc` system call provides the amount of arguments passed to the program, e.g. from a command line.\
+    Arguments: none.\
+    Result: `<r0>` - a 32-bit integer specifying the amount of provided arguments.
+
+4. `argv` (index: 0x4):\
+    `argv` system call provides a pointer to n-th argument, passed to the program.
+    Note: the first argument is always the name of the program.\
+    Arguments:\
+        `<r0>` - index of the requested argument.\
+    Result: `<r0>` - pointer to the argument, or NULL pointer if the index provided in `<r0>` is out of range.

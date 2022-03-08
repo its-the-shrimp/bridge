@@ -146,7 +146,9 @@ sbuf opNames[] = { _opNames };
 #define _syscallNames \
 	fromcstr("\x01"), \
 	fromcstr("exit"), \
-	fromcstr("write") \
+	fromcstr("write"), \
+	fromcstr("argc"), \
+	fromcstr("argv") \
 
 sbuf syscallNames[] = { _syscallNames };
 
@@ -154,11 +156,14 @@ typedef enum {
 	SYS_OP_INVALID,
 	SYS_OP_EXIT,
 	SYS_OP_WRITE,
+	SYS_OP_ARGC,
+	SYS_OP_ARGV,
 	N_SYS_OPS
 } SysOpCode;
 
 typedef enum {
-	EC_STACK_OVERFLOW = -8,
+	EC_STACK_OVERFLOW = -9,
+	EC_INVALID_ARG_ID,
 	EC_NO_STACKFRAME,
 	EC_NEGATIVE_SIZE_ACCESS,
 	EC_ACCESS_FAILURE,
@@ -209,9 +214,7 @@ BRBuiltin consts[] = {
 	(BRBuiltin){
 		.name = "stderr",
 		.value = 2
-	},
-	(BRBuiltin){ .name = "argc" },
-	(BRBuiltin){ .name = "argv" }
+	}
 };
 
 typedef struct {
@@ -237,8 +240,9 @@ typedef struct program {
 #define N_REGISTERS 8
 #define DEFAULT_STACK_SIZE 512 * 1024 // 512 Kb, just like in JVM
 
-#define BREX_TRACE_REGS  0x00000001
-#define BREX_TRACE_STACK 0x00000010
+#define BREX_TRACE_REGS     0b00000001
+#define BREX_TRACE_STACK    0b00000010
+#define BREX_CHECK_SYSCALLS 0b00000100
 
 typedef enum {
 	TRACER_VOID,
@@ -247,35 +251,48 @@ typedef enum {
 	TRACER_INT16,
 	TRACER_INT32,
 	TRACER_INT64,
-	TRACER_DATAPTR,
-	TRACER_MEMPTR,
-	TRACER_STACKPTR,
+	TRACER_PTR,
 	TRACER_CONST,
 	N_TRACER_TYPES
 } TracerType;
 
-char TracerTypeSizes[N_TRACER_TYPES] = { 
+char TracerTypeSizes[] = { 
 	0, // TRACER_VOID
 	1, // TRACER_BOOL
 	1, // TRACER_INT8
 	2, // TRACER_INT16
 	4, // TRACER_INT32
 	8, // TRACER_INT64
-	8, // TRACER_DATAPTR
-	8, // TRACER_MEMPTR
-	8, // TRACER_STACKPTR
+	8, // TRACER_PTR
 	8, // TRACER_CONST
 };
-#define isIntTracer(tracer) \
-	( (tracer).type == TRACER_INT8 || (tracer).type == TRACER_INT16 || (tracer).type == TRACER_INT32 || (tracer).type == TRACER_INT64 )
-#define isPtrTracer(tracer) \
-	( (tracer).type == TRACER_STACKPTR || (tracer).type == TRACER_DATAPTR || (tracer).type == TRACER_MEMPTR )
+static_assert(N_TRACER_TYPES == sizeof(TracerTypeSizes), "not all tracers have their sizes set");
+
+#define isIntTracer(tracer) inRange((tracer).type, TRACER_BOOL, TRACER_PTR)
+
+
+typedef enum {
+	BUF_UNKNOWN,
+	BUF_DATA,
+	BUF_MEMORY,
+	BUF_STACK,
+	BUF_ARGV,
+	N_BUF_TYPES
+} BufferRefType;
+
+typedef struct {
+	BufferRefType type;
+	int id;
+} BufferRef;
 
 typedef struct {
 	int8_t type;
-	int64_t symbol_id; // for TRACER_CONST, TRACER_MEMPTR, TRACER_DATAPTR
+	union {
+		BufferRef ref;
+		int64_t symbol_id;
+	};
+	bool is_stackframe;
 } Tracer;
-#define is_stackframe symbol_id
 defArray(Tracer);
 
 typedef struct {
@@ -292,13 +309,15 @@ typedef struct {
 		int8_t err_push_size; // for OP_PUSH*
 		struct {
 			int64_t err_access_length;
-			DataBlock err_buf;
+			BufferRef err_buf_ref;
 			void* err_ptr;
 		};
 	};
 	int8_t flags;
 	Tracer* regs_trace; // initialized only if BREX_TRACE_REGS flag is set
 	TracerArray stack_trace; // initialized only if BREX_TRACE_STACK flag is set
+	int exec_argc;
+	sbuf* exec_argv;
 } ExecEnv;
 
 typedef bool (*BRFFunc) (ExecEnv*, Program*);

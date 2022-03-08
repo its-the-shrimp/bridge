@@ -77,6 +77,8 @@ typedef enum {
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
+	KW_SYS_ARGC,
+	KW_SYS_ARGV,
 	KW_ENTRY,
 	KW_STACKSIZE,
 	KW_EXEC,
@@ -85,7 +87,7 @@ typedef enum {
 	N_VBRF_KWS
 } VBRFKeyword;
 static_assert(N_OPS == 66, "Some BRF operations have unmatched keywords");
-static_assert(N_SYS_OPS == 3, "there might be system ops with unmatched keywords");
+static_assert(N_SYS_OPS == 5, "there might be system ops with unmatched keywords");
 
 // special value for error reporting
 #define TOKEN_REG_ID 125
@@ -100,9 +102,10 @@ bool writeDataBlock(FILE* fd, char* name, sbuf obj)
 	sbuf input_name = fromstr(name);
 	fputsbuf(fd, input_name);
 	fputsbuf(fd, SEP);
-	int32_t data_length = obj.length;
+	int32_t data_length = obj.length + 1;
 	fwrite(BRByteOrder(&data_length, sizeof(data_length)), 1, sizeof(data_length), fd);
 	fputsbuf(fd, obj);
+	fputc('\0', fd);
 	return true;
 }
 
@@ -1171,5 +1174,5 @@ int main(int argc, char* argv[])
 	endExecSegment(output_fd);	
 	fclose(output_fd);
 
-	printf("%s -> %s in %f ms\n", input_path, output_path, endTimer());
+	printf("%s -> %s in %.3f ms\n", input_path, output_path, endTimer());
 }

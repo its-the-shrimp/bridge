@@ -369,7 +369,7 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 	return (BRFError){.code = BRF_ERR_OK};
 }
 
-ExecEnv initExecEnv(Program* program, int8_t flags)
+ExecEnv initExecEnv(Program* program, int8_t flags, char** args)
 {
 	heapctx_t memctx = ctxalloc_newctx(0);
 	ExecEnv res = {
@@ -397,58 +397,118 @@ ExecEnv initExecEnv(Program* program, int8_t flags)
 		res.stack_trace = TracerArray_new(memctx, 0);
 	}
 
+	res.exec_argc = 0;
+	while (args[++res.exec_argc]) {}
+	res.exec_argv = ctxalloc_new(res.exec_argc * sizeof(sbuf), memctx);
+	for (int i = 0; i < res.exec_argc; i++) {
+		res.exec_argv[i] = fromstr(args[i]);
+		res.exec_argv[i].length++;
+	}
+
 	return res;
+}
+
+BufferRef classifyPtr(ExecEnv* env, Program* program, void* ptr)
+{
+	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
+
+	if (inRange(ptr, env->stack_head, env->stack_brk + program->stack_size - env->stack_head)) {
+		return ((BufferRef){ .type = BUF_STACK });
+	}
+
+	array_foreach(DataBlock, block, program->datablocks,
+		if (inRange(ptr, block.spec.data, block.spec.data + block.spec.length)) {
+			return ((BufferRef){ .type = BUF_DATA, .id = _block });
+		}
+	);
+
+	array_foreach(sbuf, block, env->memblocks, 
+		if (inRange(ptr, block.data, block.data + block.length)) {
+			return ((BufferRef){ .type = BUF_MEMORY, .id = _block });
+		}
+	);
+
+	for (int i = 0; i < env->exec_argc; i++) {
+		if (inRange(ptr, env->exec_argv[i].data, env->exec_argv[i].data + env->exec_argv[i].length)) {
+			return (BufferRef){ .type = BUF_ARGV, .id = i };
+		}
+	}
+	return (BufferRef){0};
+}
+
+sbuf getBufferByRef(ExecEnv* env, Program* program, BufferRef ref)
+{
+	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
+	switch (ref.type) {
+		case BUF_DATA: return program->datablocks.data[ref.id].spec;
+		case BUF_MEMORY: return env->memblocks.data[ref.id];
+		case BUF_STACK: return (sbuf){ .data = env->stack_head, .length = env->stack_brk + program->stack_size - env->stack_head };
+		case BUF_ARGV: return env->exec_argv[ref.id];
+		default: return (sbuf){0};
+	}
 }
 
 void printTracer(FILE* fd, Program* program, ExecEnv* env, Tracer tracer, int64_t value)
 {
-	static_assert(N_TRACER_TYPES == 10, "not all tracer types are handled");
+	static_assert(N_TRACER_TYPES == 8, "not all tracer types are handled");
+	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
 	switch (tracer.type) {
-			case TRACER_VOID:
-				fprintf(fd, "(void)\n");
-				return;
-			case TRACER_BOOL:
-				fprintf(fd, "(bool)%s\n", value ? "true" : "false");
+			case TRACER_VOID: {
+				fprintf(fd, "(void)");
 				break;
-			case TRACER_INT64:
-				fprintf(fd, "(int64_t)%lld\n", value);
+			} case TRACER_BOOL: {
+				fprintf(fd, "(bool)%s", value ? "true" : "false");
 				break;
-			case TRACER_INT32:
-				fprintf(fd, "(int32_t)%lld\n", value);
+			} case TRACER_INT64: {
+				fprintf(fd, "(int64_t)%lld", value);
 				break;
-			case TRACER_INT16:
-				fprintf(fd, "(int16_t)%lld\n", value);
+			} case TRACER_INT32: {
+				fprintf(fd, "(int32_t)%lld", value);
 				break;
-			case TRACER_INT8:
+			} case TRACER_INT16: {
+				fprintf(fd, "(int16_t)%lld", value);
+				break;
+			} case TRACER_INT8: {
 				fprintf(fd, "(char)'");
 				fputcesc(fd, value, BYTEFMT_HEX);
-				fprintf(fd, "' // %lld\n", value);
+				fprintf(fd, "' // %lld", value);
 				break;
-			case TRACER_DATAPTR:
-				fprintf(fd, "(void*)%s ", program->datablocks.data[tracer.symbol_id].name);
-				if ((char*)value < program->datablocks.data[tracer.symbol_id].spec.data) {
-					fprintf(fd, "- %lld ", (int64_t)(program->datablocks.data[tracer.symbol_id].spec.data - value));
-				} else if ((char*)value > program->datablocks.data[tracer.symbol_id].spec.data) {
-					fprintf(fd, "+ %lld ", (int64_t)(value - (int64_t)program->datablocks.data[tracer.symbol_id].spec.data));
+			} case TRACER_PTR: {
+				if (!tracer.ref.type) {
+					tracer.ref = classifyPtr(env, program, (void*)value);
 				}
-				fprintf(fd, "// %p\n", (void*)value);
-				break;
-			case TRACER_MEMPTR:
-				fprintf(fd, "(void*)%s ", program->memblocks.data[tracer.symbol_id].name);
-				if ((char*)value < env->memblocks.data[tracer.symbol_id].data) {
-					fprintf(fd, "- %lld ", (int64_t)(env->memblocks.data[tracer.symbol_id].data - value));
-				} else if ((char*)value > env->memblocks.data[tracer.symbol_id].data) {
-					fprintf(fd, "+ %lld ", (int64_t)(value - (int64_t)env->memblocks.data[tracer.symbol_id].data));
+				sbuf buf = getBufferByRef(env, program, tracer.ref);
+				switch (tracer.ref.type) {
+					case BUF_DATA:
+						fprintf(fd, "(void*)%s ", program->datablocks.data[tracer.ref.id].name);
+						break;
+					case BUF_MEMORY:
+						fprintf(fd, "(void*)%s ", program->memblocks.data[tracer.ref.id].name);
+						break;
+					case BUF_STACK:
+						fprintf(fd, "(stackptr_t)sp ");
+						break;
+					case BUF_ARGV:
+						fprintf(fd, "(char*)argv[%d] ", tracer.ref.id);
+						break;
+					default:
+						fprintf(fd, "(void*)%p\n", (void*)value);
+						return;
 				}
-				fprintf(fd, "// %p\n", (void*)value);
+
+				if ((uint64_t)value < (uint64_t)buf.data) {
+					fprintf(fd, "- %llu ", (uint64_t)buf.data - (uint64_t)value);
+				} else if ((uint64_t)value > (uint64_t)buf.data) {
+					fprintf(fd, "+ %llu", (uint64_t)value - (uint64_t)buf.data);
+				}
+				fprintf(fd, "// %p", (void*)value);
 				break;
-			case TRACER_STACKPTR:
-				fprintf(fd, "(stackptr_t)sp + %lld // %p\n", value - (int64_t)env->stack_head, (void*)value);
+			} case TRACER_CONST: {
+				fprintf(fd, "(const int)%s // %lld", consts[tracer.symbol_id].name, value);
 				break;
-			case TRACER_CONST:
-				fprintf(fd, "(const int)%s // %lld\n", consts[tracer.symbol_id].name, value);
-				break;
+			}
 	}
+	fprintf(fd, tracer.is_stackframe ? " [stack frame]\n" : "\n");
 }
 
 void printExecState(FILE* fd, ExecEnv* env, Program* program)
@@ -456,16 +516,14 @@ void printExecState(FILE* fd, ExecEnv* env, Program* program)
 	if (env->flags & BREX_TRACE_STACK) {
 		fprintf(fd, "stack:\n");
 		void* cur_stack_pos = env->stack_brk + program->stack_size;
-		static_assert(N_TRACER_TYPES == 10, "not all tracer types are handled");
+		static_assert(N_TRACER_TYPES == 8, "not all tracer types are handled");
 
 		array_foreach(Tracer, tracer, env->stack_trace,
 			fprintf(fd, "\t[%d]\t", _tracer);
 			int64_t input = 0;
 			switch (tracer.type) {
 				case TRACER_INT64:
-				case TRACER_DATAPTR:
-				case TRACER_MEMPTR:
-				case TRACER_STACKPTR:
+				case TRACER_PTR:
 					input = *(int64_t*)(cur_stack_pos -= 8);
 					break;
 				case TRACER_INT32:
@@ -494,77 +552,38 @@ void printExecState(FILE* fd, ExecEnv* env, Program* program)
 	}
 }
 
-DataBlock getBufferByPtr(ExecEnv* env, Program* program, void* ptr)
-{
-	array_foreach(DataBlock, block, program->datablocks,
-		if (inRange(ptr, block.spec.data, block.spec.data + block.spec.length)) {
-			return block;
-		}
-	);
-
-	array_foreach(sbuf, block, env->memblocks, 
-		if (inRange(ptr, block.data, block.data + block.length)) {
-			return ((DataBlock){ .name = program->memblocks.data[_block].name, .spec = block });
-		}
-	);
-
-	return (DataBlock){0};
-}
-
 bool validateMemoryAccess(ExecEnv* env, Program* program, Tracer tracer, void* ptr, int64_t size)
 {
+	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
+
 	if (size < 0) {
 		env->exitcode = EC_NEGATIVE_SIZE_ACCESS;
 		env->err_ptr = ptr,
 		env->err_access_length = size;
 		return true;
 	}
-	if (tracer.type == TRACER_DATAPTR) {
-		DataBlock block = program->datablocks.data[tracer.symbol_id];
-		if (!isSlice(ptr, size, block.spec.data, block.spec.length)) {
-			env->exitcode = EC_ACCESS_MISALIGNMENT;
-			env->err_buf = block;
-			env->err_access_length = size;
-			env->err_ptr = ptr;
-			return true;
-		}
-	} else if (tracer.type == TRACER_MEMPTR) {
-		sbuf block = env->memblocks.data[tracer.symbol_id];
-		if (!isSlice(ptr, size, block.data, block.length)) {
-			env->exitcode = EC_ACCESS_MISALIGNMENT;
-			env->err_buf = (DataBlock){ 
-				.name = program->memblocks.data[tracer.symbol_id].name,
-				.spec = block
-			};
-			env->err_access_length = size;
-			env->err_ptr = ptr;
-			return true;
-		}
-	} else if (tracer.type == TRACER_STACKPTR) {
-		if (!isSlice(ptr, size, env->stack_head, env->stack_brk + program->stack_size - env->stack_head)) {
-			env->exitcode = EC_ACCESS_MISALIGNMENT;
-			env->err_buf = (DataBlock){
-				.spec = (sbuf){ .data = env->stack_head, .length = env->stack_brk + program->stack_size - env->stack_head }
-			};
-			env->err_access_length = size;
-			env->err_ptr = ptr;
-			return true;
-		}
+
+	BufferRef ref;
+	if (tracer.type == TRACER_PTR) {
+		ref = tracer.ref;
 	} else {
-		DataBlock block = getBufferByPtr(env, program, (char*)ptr);
-		if (!block.name) {
-			env->exitcode = EC_ACCESS_FAILURE;
-			env->err_ptr = ptr;
-			env->err_access_length = size;
-			return true;
-		}
-		if (!isSlice(ptr, size, block.spec.data, block.spec.length)) {
-			env->exitcode = EC_ACCESS_MISALIGNMENT;
-			env->err_buf = block;
-			env->err_access_length = size;
-			env->err_ptr = ptr;
-			return true;
-		}
+		ref = classifyPtr(env, program, ptr);
+	}
+
+	if (!ref.type) {
+		env->exitcode = EC_ACCESS_FAILURE;
+		env->err_access_length = size;
+		env->err_ptr = ptr;
+		return true;
+	}
+
+	sbuf buf = getBufferByRef(env, program, ref);
+	if (!isSlice(ptr, size, buf.data, buf.length)) {
+		env->exitcode = EC_ACCESS_MISALIGNMENT;
+		env->err_buf_ref = ref;
+		env->err_access_length = size;
+		env->err_ptr = ptr;
+		return true;
 	}
 
 	return false;
@@ -584,7 +603,7 @@ bool handleExitSyscall(ExecEnv* env, Program* program)
 
 bool handleWriteSyscall(ExecEnv* env, Program* program)
 {
-	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK) && env->flags & BREX_CHECK_SYSCALLS) {
 		if (validateMemoryAccess(env, program, env->regs_trace[1], (char*)env->registers[1], env->registers[2])) { return true; }
 	}
 
@@ -598,11 +617,46 @@ bool handleWriteSyscall(ExecEnv* env, Program* program)
 	return false;
 }
 
-BRFFunc syscall_handlers[N_SYS_OPS] = {
+bool handleArgcSyscall(ExecEnv* env, Program* program)
+{
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		env->regs_trace[0].type = TRACER_INT32;
+	}
+
+	env->registers[0] = env->exec_argc;
+	env->op_id++;
+	return false;
+}
+
+bool handleArgvSyscall(ExecEnv* env, Program* program)
+{
+	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
+		if (env->flags & BREX_CHECK_SYSCALLS ? !inRange(env->registers[0], 0, env->exec_argc) : false) {
+			env->exitcode = EC_INVALID_ARG_ID;
+			return true;
+		}
+		env->regs_trace[0] = (Tracer){ 
+			.type = TRACER_PTR, 
+			.ref = (BufferRef){ 
+				.type = BUF_ARGV, 
+				.id = env->registers[0] 
+			} 
+		};
+	}
+
+	env->registers[0] = inRange(env->registers[0], 0, env->exec_argc) ? (uint64_t)env->exec_argv[env->registers[0]].data : 0;
+	env->op_id++;
+	return false;
+}
+
+BRFFunc syscall_handlers[] = {
 	&handleInvalidSyscall,
 	&handleExitSyscall,
-	&handleWriteSyscall
+	&handleWriteSyscall,
+	&handleArgcSyscall,
+	&handleArgvSyscall
 };
+static_assert(N_SYS_OPS == sizeof(syscall_handlers) / sizeof(syscall_handlers[0]), "not all system calls have matching handlers");
 
 bool handleNop(ExecEnv* env, Program* program)
 {
@@ -654,7 +708,13 @@ bool handleOpSetd(ExecEnv* env, Program* program)
 	env->registers[op.dst_reg] = (int64_t)program->datablocks.data[op.symbol_id].spec.data;
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
-		env->regs_trace[op.dst_reg] = (Tracer){ .type = TRACER_DATAPTR, .symbol_id = op.symbol_id };
+		env->regs_trace[op.dst_reg] = (Tracer){ 
+			.type = TRACER_PTR,
+			.ref = (BufferRef){ 
+				.type = BUF_DATA,
+				.id = op.symbol_id
+			}
+		};
 	}
 
 	env->op_id++;
@@ -680,7 +740,13 @@ bool handleOpSetm(ExecEnv* env, Program* program)
 	env->registers[op.dst_reg] = (int64_t)env->memblocks.data[op.symbol_id].data;
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
-		env->regs_trace[op.dst_reg] = (Tracer){ .type = TRACER_MEMPTR, .symbol_id = op.symbol_id };
+		env->regs_trace[op.dst_reg] = (Tracer){ 
+			.type = TRACER_PTR,
+			.ref = (BufferRef){
+				.type = BUF_MEMORY,
+				.id = op.symbol_id
+			}
+		};
 	}
 
 	env->op_id++;
@@ -694,8 +760,7 @@ bool handleOpAdd(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 				break;
 			default:
@@ -723,8 +788,7 @@ bool handleOpAddr(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				if (isIntTracer(env->regs_trace[op.src2_reg])) {
 					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 					break;
@@ -754,8 +818,7 @@ bool handleOpSub(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 				break;
 			default:
@@ -783,8 +846,7 @@ bool handleOpSubr(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				if (isIntTracer(env->regs_trace[op.src2_reg])) {
 					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 					break;
@@ -1435,8 +1497,7 @@ bool handleOpShl(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 				break;
 			default:
@@ -1464,8 +1525,7 @@ bool handleOpShlr(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				if (isIntTracer(env->regs_trace[op.src2_reg])) {
 					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 					break;
@@ -1495,8 +1555,7 @@ bool handleOpShr(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 				break;
 			default:
@@ -1524,8 +1583,7 @@ bool handleOpShrr(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				if (isIntTracer(env->regs_trace[op.src2_reg])) {
 					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 					break;
@@ -1555,8 +1613,7 @@ bool handleOpShrs(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 				break;
 			default:
@@ -1584,8 +1641,7 @@ bool handleOpShrsr(ExecEnv* env, Program* program)
 
 	if (env->flags & (BREX_TRACE_REGS | BREX_TRACE_STACK)) {
 		switch (env->regs_trace[op.src_reg].type) {
-			case TRACER_DATAPTR:
-			case TRACER_MEMPTR:
+			case TRACER_PTR:
 				if (isIntTracer(env->regs_trace[op.src2_reg])) {
 					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 					break;
@@ -1617,8 +1673,15 @@ bool handleOpCall(ExecEnv* env, Program* program)
 			return true;
 		}
 
-		TracerArray_append(&env->stack_trace, (Tracer){ .type = TRACER_INT64 });
-		TracerArray_append(&env->stack_trace, (Tracer){ .type = TRACER_STACKPTR, .is_stackframe = true });
+		TracerArray_append(&env->stack_trace, (Tracer){ .type = TRACER_INT64, .is_stackframe = true });
+		TracerArray_append(
+			&env->stack_trace, 
+			(Tracer){ 
+				.type = TRACER_PTR, 
+				.ref = (BufferRef){ .type = BUF_STACK },
+				.is_stackframe = true
+			}
+		);
 	}
 
 	env->stack_head -= sizeof(env->op_id);
@@ -1644,17 +1707,22 @@ bool handleOpRet(ExecEnv* env, Program* program)
 		Tracer stackframe = {0};
 		int prev_stack_trace_head = -1;
 		array_rev_foreach(Tracer, tracer, env->stack_trace, 
-			if (tracer.type == TRACER_STACKPTR && tracer.is_stackframe) { 
+			if (tracer.ref.type == BUF_STACK && tracer.is_stackframe) { 
 				stackframe = tracer;
 				prev_stack_trace_head = _tracer;
 				break;
 			}
 		);
-		if (stackframe.type != TRACER_STACKPTR ? true : TracerArray_pop(&env->stack_trace, prev_stack_trace_head - 1).type != TRACER_INT64) {
+		if (!stackframe.is_stackframe) {
 			env->exitcode = EC_NO_STACKFRAME;
 			return true;
 		}
-		env->stack_trace.length = prev_stack_trace_head - 1;
+		env->stack_trace.length = prev_stack_trace_head;
+		if (!arrayhead(env->stack_trace)->is_stackframe) {
+			env->exitcode = EC_NO_STACKFRAME;
+			return true;
+		}
+		env->stack_trace.length--;
 
 	}
 
@@ -1846,10 +1914,10 @@ BRFFunc op_handlers[] = {
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRF operations have unmatched execution handlers");
 
-ExecEnv execProgram(Program* program, int8_t flags)
+ExecEnv execProgram(Program* program, int8_t flags, char** args)
 {
-	ExecEnv env = initExecEnv(program, flags);
-	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) { 
+	ExecEnv env = initExecEnv(program, flags, args);
+	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) {
 		if (interrupt) break; 
 	}
 	return env;
@@ -1859,18 +1927,19 @@ ExecEnv execProgram(Program* program, int8_t flags)
 void printUsageMsg(FILE* fd, char* exec_name)
 {
 	fprintf(fd, "brex - Execute and debug .brf (BRidge Executable) files\n");
-	fprintf(fd, "usage: %s [options] <file>\n", exec_name);
+	fprintf(fd, "usage: %s [-chmrs] <file> [program-args...]\n", exec_name);
 	fprintf(fd, "options:\n");
 	fprintf(fd, "\t-h     Output this message and exit\n");
 	fprintf(fd, "\t-r     Trace register values and output them after execution of the program\n");
 	fprintf(fd, "\t-s     Trace stack values and output them after execution of the program\n");
-	fprintf(fd, "\t-h     Output contents of memory blocks after execution of the program\n");
+	fprintf(fd, "\t-m     Output contents of memory blocks after execution of the program\n");
+	fprintf(fd, "\t-c     Stop execution upon any system call failure and report an error. Without `-r` or `-s` flags set, this flag does nothing\n");
 }
 
 int main(int argc, char* argv[]) {
 	initBREnv();
-	char* input_name = NULL;
-	int8_t exec_flags = 0;
+	char *input_name = NULL, **program_argv = NULL;
+	uint8_t exec_flags = 0;
 	bool dump_memblocks = false;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
@@ -1880,15 +1949,14 @@ int main(int argc, char* argv[]) {
 					case 'r': exec_flags |= BREX_TRACE_REGS; break;
 					case 's': exec_flags |= BREX_TRACE_STACK; break;
 					case 'm': dump_memblocks = true; break;
+					case 'c': exec_flags |= BREX_CHECK_SYSCALLS; break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
 			}
 		} else {
-			if (input_name) {
-				eprintf("error: more than 1 input path provided\n");
-				return 1;
-			}
 			input_name = argv[i];
+			program_argv = argv + i;
+			break;
 		}
 	}
 	if (!input_name) {
@@ -1953,8 +2021,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	signal(SIGINT, &handleExecInt);
-	startTimer();
-	ExecEnv res = execProgram(&program, exec_flags);
+	ExecEnv res = execProgram(&program, exec_flags, program_argv);
 	signal(SIGINT, SIG_DFL);
 
 	printExecState(stdout, &res, &program);
@@ -1975,6 +2042,11 @@ int main(int argc, char* argv[]) {
 			break;
 		case EC_NO_STACKFRAME:
 			eprintf("%llx:\n\truntime error: attempted to return from a global stack frame\n", res.op_id);
+			break;
+		case EC_INVALID_ARG_ID:
+			eprintf("%llx:\n\truntime error: attempted to fetch program argument of invalid ID\n", res.op_id);
+			eprintf("\tamount of arguments provided: %d\n", res.exec_argc);
+			eprintf("\tattempted to get address of argument #%lld, which is out of bounds for the array of arguments\n", res.registers[0]);
 			break;
 		case EC_ACCESS_FAILURE:
 			eprintf("%llx:\n\truntime error: memory access failure\n", res.op_id);
@@ -1998,27 +2070,47 @@ int main(int argc, char* argv[]) {
 			break;
 		case EC_STACK_UNDERFLOW:
 			eprintf("%llx:\n\truntime error: stack underflow\n", res.op_id);
-			eprintf("\tattempted to &#%% the stack by %hhd bytes, underflowing the stack\n", res.err_pop_size);
+			eprintf("\tattempted to decrease the stack by %hhd bytes, underflowing the stack\n", res.err_pop_size);
 			break;
 		case EC_UNKNOWN_SYSCALL:
 			eprintf("%llx:\n\truntime error: invalid system call\n", res.op_id - 1);
 			break;
 		case EC_ACCESS_MISALIGNMENT:
 			eprintf("%llx:\n\truntime error: misaligned memory access\n", res.op_id);
-			if (res.err_buf.spec.data == res.stack_head) {
-				eprintf("\tthe stack is at %p\n", res.err_buf.spec.data);
-				eprintf("\tstack size: %ld\n", res.err_buf.spec.length);
-			} else {
-				eprintf("\tbuffer `%s` is at %p\n", res.err_buf.name, res.err_buf.spec.data);
-				eprintf("\tbuffer size: %ld\n", res.err_buf.spec.length);
-			}
+			sbuf err_buf = getBufferByRef(&res, &program, res.err_buf_ref);
+			static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
+			switch (res.err_buf_ref.type) {
+				case BUF_DATA:
+					eprintf(
+						"\tdata block `%s` is at %p\n\tblock size: %ld bytes\n",
+						program.datablocks.data[res.err_buf_ref.id].name,
+						(void*)err_buf.data,
+						err_buf.length
+					);
+					break;
+				case BUF_MEMORY:
+					eprintf(
+						"\tmemory block `%s` is at %p\n\tblock size: %ld bytes\n",
+						program.memblocks.data[res.err_buf_ref.id].name,
+						(void*)err_buf.data,
+						err_buf.length
+					);
+					break;
+				case BUF_STACK:
+					eprintf("\tstack head is at %p\n\tstack size: %ld bytes\n", err_buf.data, err_buf.length);
+					break;
+				case BUF_ARGV:
+					eprintf("\targument #%d is at %p\n\targument length: %ld bytes\n", res.err_buf_ref.id, err_buf.data, err_buf.length);
+					break;
+				default: break;
+			} 
 			eprintf("\tattempted to access %lld bytes from %p\n", res.err_access_length, res.err_ptr);
-			if ((void*)res.err_ptr < (void*)res.err_buf.spec.data) {
-				eprintf("\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(res.err_buf.spec.data - (int64_t)res.err_ptr));
-			} else if ((void*)(res.err_ptr + res.err_access_length) > (void*)(res.err_buf.spec.data + res.err_buf.spec.length)) {
+			if (res.err_ptr < (void*)err_buf.data) {
+				eprintf("\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(err_buf.data - (int64_t)res.err_ptr));
+			} else if ((void*)(res.err_ptr + res.err_access_length) > (void*)(err_buf.data + err_buf.length)) {
 				eprintf(
 					"\tthe accessed field exceeds the buffer by %lld bytes\n", 
-					(int64_t)(res.err_ptr + res.err_access_length - ((int64_t)res.err_buf.spec.data + res.err_buf.spec.length))
+					(int64_t)(res.err_ptr + res.err_access_length - ((int64_t)err_buf.data + err_buf.length))
 				);
 			}
 			break;
