@@ -1,4 +1,4 @@
-#include "brf.h"
+#include "brb.h"
 #include "errno.h"
 
 typedef enum {
@@ -89,6 +89,8 @@ typedef enum {
 static_assert(N_OPS == 66, "Some BRF operations have unmatched keywords");
 static_assert(N_SYS_OPS == 5, "there might be system ops with unmatched keywords");
 
+bool minimal = false;
+
 // special value for error reporting
 #define TOKEN_REG_ID 125
 
@@ -100,7 +102,7 @@ bool startDataSegment(FILE* fd)
 bool writeDataBlock(FILE* fd, char* name, sbuf obj)
 {
 	sbuf input_name = fromstr(name);
-	fputsbuf(fd, input_name);
+	fputsbuf(fd, minimal ? CSTRTERM : input_name);
 	fputsbuf(fd, SEP);
 	int32_t data_length = obj.length + 1;
 	fwrite(BRByteOrder(&data_length, sizeof(data_length)), 1, sizeof(data_length), fd);
@@ -132,7 +134,7 @@ bool startMemorySegment(FILE* fd)
 bool writeMemoryBlock(FILE* fd, char* name, int32_t size)
 {
 	sbuf input_name = fromstr(name);
-	fputsbuf(fd, input_name);
+	fputsbuf(fd, minimal ? CSTRTERM : input_name);
 	fputsbuf(fd, SEP);
 	fwrite(BRByteOrder(&size, sizeof(size)), 1, sizeof(size), fd);
 	return true;
@@ -152,9 +154,13 @@ void writeNoArgOp(FILE* fd, Op op)
 
 void writeOpMark(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
-	fputsbuf(fd, fromstr(op.mark_name));
-	fputsbuf(fd, SEP);
+	if (minimal) {
+		fputc(OP_NONE, fd);
+	} else {
+		fputc(op.type, fd);
+		fputsbuf(fd, fromstr(op.mark_name));
+		fputsbuf(fd, SEP);
+	}
 }
 
 void writeOpSet(FILE* fd, Op op)
@@ -972,32 +978,42 @@ char* getTokenTypeName(char token_type)
 
 void printUsageMsg(FILE* fd, char* execname)
 {
-	fprintf(fd, "brf - Compiles `.vbrf` (BRidge Assembler) to interpetable `.brf` files (BRidge Executable)");
+	fprintf(fd, "brs - Compiles `.vbrb` (Visual BRidge Bytecode) to interpetable `.brb` files (BRidge Bytecode)");
 	fprintf(fd, "usage: %s [options] <file>\n", execname);
 	fprintf(fd, "options:\n");
 	fprintf(fd, "\t-h           Output this message and exit\n");
 	fprintf(fd, "\t-o <file>    The output will be saved to <file>\n");
+	fprintf(fd, "\t-m           Minimize the size of compiled program by removing all names from it. Not recommended when debugging\n");
 }
 
 int main(int argc, char* argv[])
 {
 	initBREnv();
+	bool go_on = false;
 	char *input_path = NULL, *output_path = NULL;
 	for (int i = 1; i < argc; i++) {
-		if (streq(argv[i], "-h")) {
-			printUsageMsg(stdout, argv[0]);
-			return 0;
-		} else if (streq(argv[i], "-o")) {
-			if (!argv[++i]) {
-				fprintf(stderr, "error: `-o` flag specified but no output path provided\n");
-				return 1;
+		if (argv[i][0] == '-') {
+			for (argv[i]++; *argv[i]; argv[i]++) {
+				if (go_on) { break; }
+				switch (*argv[i]) {
+					case 'h': printUsageMsg(stdout, argv[0]); return 0;
+					case 'o':
+						if (!argv[++i]) {
+							eprintf("error: `-o` option specified but no output file path provided\n");
+							return 1;
+						}
+						output_path = argv[i];
+						go_on = true;
+						break;
+					case 'm': minimal = true; break;
+					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
+				}
 			}
-			output_path = argv[i];
-		} else if (argv[i][0] != '-') {
-			input_path = argv[i];
 		} else {
-			fprintf(stderr, "error: unknown option `%s`\n", argv[i]);
-			return 1;
+			if (input_path) {
+				eprintf("error: got more than one input paths\n");
+			}
+			input_path = argv[i];
 		}
 	}
 
@@ -1009,7 +1025,7 @@ int main(int argc, char* argv[])
 	if (!output_path) {
 		sbuf ext = fromstr(input_path), noext = {0};
 		sbufsplit(&ext, &noext, fromcstr("."));
-		output_path = tostr(GLOBAL_CTX, noext, fromcstr(".brf"));
+		output_path = tostr(GLOBAL_CTX, noext, fromcstr(".brb"));
 	}
 	
 	sbuf delims[] = {

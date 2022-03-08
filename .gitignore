@@ -1,9 +1,9 @@
-*.brf
+*.brb
 nobuild
 nobuild.old
 build
 .vscode
 .DS_Store
 a.out
-test.vbrf
+test.vbrb
 *.S

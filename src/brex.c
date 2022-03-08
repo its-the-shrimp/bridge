@@ -1,4 +1,4 @@
-#include "brf.h"
+#include "brb.h"
 #include "stdio.h"
 #include "errno.h"
 #include "unistd.h"
@@ -1926,14 +1926,14 @@ ExecEnv execProgram(Program* program, int8_t flags, char** args)
 
 void printUsageMsg(FILE* fd, char* exec_name)
 {
-	fprintf(fd, "brex - Execute and debug .brf (BRidge Executable) files\n");
+	fprintf(fd, "brex - Execute and debug .brb (BRidge Executable) files\n");
 	fprintf(fd, "usage: %s [-chmrs] <file> [program-args...]\n", exec_name);
 	fprintf(fd, "options:\n");
 	fprintf(fd, "\t-h     Output this message and exit\n");
 	fprintf(fd, "\t-r     Trace register values and output them after execution of the program\n");
 	fprintf(fd, "\t-s     Trace stack values and output them after execution of the program\n");
 	fprintf(fd, "\t-m     Output contents of memory blocks after execution of the program\n");
-	fprintf(fd, "\t-c     Stop execution upon any system call failure and report an error. Without `-r` or `-s` flags set, this flag does nothing\n");
+	fprintf(fd, "\t-c     Stop execution if any system call fails and report an error. Without `-r` or `-s` flags, this flag does nothing\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -1943,7 +1943,7 @@ int main(int argc, char* argv[]) {
 	bool dump_memblocks = false;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
-			for (argv[i]++; *argv[i] != '\0'; argv[i]++) {
+			for (argv[i]++; *argv[i]; argv[i]++) {
 				switch (*argv[i]) {
 					case 'h': printUsageMsg(stdout, argv[0]); return 0;
 					case 'r': exec_flags |= BREX_TRACE_REGS; break;

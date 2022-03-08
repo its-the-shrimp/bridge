@@ -1,4 +1,4 @@
-# BRF Specification
+# BRB Specification
 
 ## Operations
 
