@@ -1,5 +1,5 @@
-#ifndef _BRF_
-#define _BRF_
+#ifndef _BRB_
+#define _BRB_
 
 #include "br.h"
 
@@ -160,6 +160,30 @@ sbuf opNames[] = { _opNames };
 
 sbuf syscallNames[] = { _syscallNames };
 
+
+typedef enum {
+	BRB_ERR_OK,
+	BRB_ERR_NO_MEMORY,
+	BRB_ERR_NO_ENTRY_SPEC,
+	BRB_ERR_NO_BLOCK_NAME,
+	BRB_ERR_NO_BLOCK_SIZE,
+	BRB_ERR_NO_BLOCK_SPEC,
+	BRB_ERR_NO_OPCODE,
+	BRB_ERR_NO_MARK_NAME,
+	BRB_ERR_NO_OP_ARG,
+	BRB_ERR_INVALID_OPCODE,
+	BRB_ERR_UNKNOWN_SEGMENT_SPEC,
+	BRB_ERR_NO_STACK_SIZE
+} BRBLoadErrorCode;
+
+typedef struct {
+	BRBLoadErrorCode code;
+	union {
+		sbuf segment_spec; // for BRB_ERR_UNKNOWN_SEGMENT_SPEC
+		int32_t opcode; // for BRB_ERR_INVALID_OPCODE and BRB_ERR_NO_OP_ARG
+	};
+} BRBLoadError;
+
 typedef enum {
 	SYS_OP_INVALID,
 	SYS_OP_EXIT,
@@ -203,7 +227,7 @@ typedef struct op {
 		int8_t src2_reg;
 	};
 } Op;
-defArray(Op);
+declArray(Op);
 static_assert(sizeof(Op) == 16, "checking compactness of operations' storage");
 
 typedef struct {
@@ -230,13 +254,13 @@ typedef struct {
 	char* name;
 	int64_t size;
 } MemBlock;
-defArray(MemBlock);
+declArray(MemBlock);
 
 typedef struct {
 	char* name;
 	sbuf spec;
 } DataBlock;
-defArray(DataBlock);
+declArray(DataBlock);
 
 typedef struct program {
 	OpArray execblock;
@@ -249,9 +273,10 @@ typedef struct program {
 #define N_REGISTERS 8
 #define DEFAULT_STACK_SIZE 512 * 1024 // 512 Kb, just like in JVM
 
-#define BREX_TRACE_REGS     0b00000001
-#define BREX_TRACE_STACK    0b00000010
-#define BREX_CHECK_SYSCALLS 0b00000100
+#define BREX_TRACE_REGS      0b00000001
+#define BREX_TRACE_STACK     0b00000010
+#define BREX_CHECK_SYSCALLS  0b00000100
+#define BREX_PRINT_MEMBLOCKS 0b00001000
 
 typedef enum {
 	TRACER_VOID,
@@ -302,7 +327,7 @@ typedef struct {
 	};
 	bool is_stackframe;
 } Tracer;
-defArray(Tracer);
+declArray(Tracer);
 
 typedef struct {
 	sbuf heap;
@@ -329,6 +354,10 @@ typedef struct {
 	sbuf* exec_argv;
 } ExecEnv;
 
-typedef bool (*BRFFunc) (ExecEnv*, Program*);
+BRBLoadError loadProgram(sbuf input, Program* dst, heapctx_t ctx);
+void printLoadError(BRBLoadError err);
+ExecEnv execProgram(Program* program, int8_t flags, char** args, volatile bool* interruptor);
+void printExecState(FILE* fd, ExecEnv* env, Program* program);
+void printRuntimeError(FILE* fd, ExecEnv* env, Program* program);
 
-#endif
+#endif // _BRB_

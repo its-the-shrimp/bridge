@@ -6,8 +6,9 @@ int main(int argc, char* argv[])
 	GO_REBUILD_URSELF(argc, argv);
 	MKDIRS("build", "lib");
 	MKDIRS("build", "bin");
+// compiling libbr
 	CMD(
-		"clang", 
+		"cc", 
 		"-Wno-deprecated-declarations", 
 		"-Wno-tautological-constant-out-of-range-compare",
 		"-c",
@@ -16,23 +17,44 @@ int main(int argc, char* argv[])
 		PATH("src", "core.c")
 	); 
 	CMD(
-		"clang", 
+		"cc", 
 		"-shared", 
 		"-o", PATH("build", "lib", "libbr.dylib"), 
 		PATH("build", "lib", "core.o")
 	);
+// compiling libbrb
+	CMD(
+		"cc", 
+		"-c",
+		"-o", PATH("build", "lib", "brb.o"), 
+		"-I", "include",
+		"-DLIBBRB=1",
+		PATH("src", "brex.c")
+	); 
+	CMD(
+		"cc", 
+		"-shared", 
+		"-o", PATH("build", "lib", "libbrb.dylib"), 
+		PATH("build", "lib", "core.o"),
+		PATH("build", "lib", "brb.o")
+	);
+	CMD("rm", PATH("build", "lib", "brb.o"));
 	CMD("rm", PATH("build", "lib", "core.o"));
 
-	FOREACH_FILE_IN_DIR(filename, "src", 
-		if (ENDS_WITH(filename, ".c") && strcmp(filename, "core.c")) {
-			CMD(
-				"clang", 
-				"-L", PATH("build", "lib"), 
-				"-lbr", 
-				"-I", "include", 
-				"-o", PATH("build", "bin", NOEXT(filename)), 
-				PATH("src", filename)
-			);
-		}
+	CMD(
+		"cc",
+		"-I", "include",
+		"-L", PATH("build", "lib"),
+		"-lbr",
+		"-o", PATH("build", "bin", "brs"),
+		PATH("src", "brs.c")
+	);
+	CMD(
+		"cc",
+		"-I", "include",
+		"-L", PATH("build", "lib"),
+		"-lbrb",
+		"-o", PATH("build", "bin", "brex"),
+		PATH("src", "brex.c")
 	);
 }

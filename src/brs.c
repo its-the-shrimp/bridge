@@ -1,6 +1,11 @@
 #include "brb.h"
 #include "errno.h"
 
+defArray(Op);
+defArray(DataBlock);
+defArray(MemBlock);
+defArray(Tracer)
+
 typedef enum {
 	SYMBOL_SEGMENT_START,
 	SYMBOL_SEGMENT_END,
@@ -413,6 +418,7 @@ typedef struct {
 	Token name;
 	int32_t id;
 } ExecMark;
+declArray(ExecMark);
 defArray(ExecMark);
 
 int64_t getBRBuiltinValue(char* name)
@@ -1072,10 +1078,10 @@ VBRFError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 	return (VBRFError){ .code = VBRF_ERR_OK };
 }
 
-char* getTokenTypeName(char token_type)
+char* getTokenTypeName(TokenType token_type)
 {
 	if (token_type == TOKEN_REG_ID) return "register";
-	return TokenTypeNames[token_type];
+	return getTokenTypeName(token_type);
 }
 
 void printUsageMsg(FILE* fd, char* execname)

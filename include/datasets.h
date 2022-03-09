@@ -44,8 +44,21 @@
 
 #define arrayhead(array) ((array).data + (array).length - 1)
 #define arrayctx(array) chunkctx((array).data)
-#define defArray(t) \
+#define declArray(t) \
 	typedef struct { int length; t* data; } t##Array; \
+	t##Array t##Array_new(heapctx_t ctx, int n, ...); \
+	t* t##Array_append(t##Array* array, t object); \
+	t t##Array_get(t##Array array, int index); \
+	void t##Array_set(t##Array* array, int index, t object); \
+	bool t##Array_move(t##Array* array, int index, size_t n, t dst[]); \
+	t##Array t##Array_slice(t##Array array, int index, size_t n); \
+	bool t##Array_del(t##Array* array, int index, size_t n); \
+	t t##Array_pop(t##Array* array, int index); \
+	long t##Array_index(t##Array array, t obj); \
+	bool t##Array_insert(t##Array* array, t##Array sub, int index); \
+	bool t##Array_delete(t##Array* array); \
+
+#define defArray(t) \
 	t##Array t##Array_new(heapctx_t ctx, int n, ...) { \
 		va_list args; \
 		va_start(args, n); \

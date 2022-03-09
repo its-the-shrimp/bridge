@@ -5,12 +5,12 @@
 #include "signal.h"
 #include "stdlib.h"
 
-bool interrupt = false;
+#ifdef LIBBRB
 
-void handleExecInt(int sig)
-{
-	interrupt = true;
-}
+defArray(Op);
+defArray(DataBlock);
+defArray(MemBlock);
+defArray(Tracer)
 
 int8_t loadInt8(sbuf* input)
 {
@@ -45,7 +45,7 @@ int64_t loadInt(sbuf* input)
 	int8_t size = input->length ? input->data[0] : 0;
 	sbufpshift(input, 1);
 
-	int64_t res = -69;
+	int64_t res;
 	switch (size) {
 		case 0: res = 0; break;
 		case 1: res = loadInt8(input); break;
@@ -56,154 +56,176 @@ int64_t loadInt(sbuf* input)
 	return res;
 }
 
-typedef enum {
-	BRF_ERR_OK,
-	BRF_ERR_NO_MEMORY,
-	BRF_ERR_NO_ENTRY_SPEC,
-	BRF_ERR_NO_BLOCK_NAME,
-	BRF_ERR_NO_BLOCK_SIZE,
-	BRF_ERR_NO_BLOCK_SPEC,
-	BRF_ERR_NO_OPCODE,
-	BRF_ERR_NO_MARK_NAME,
-	BRF_ERR_NO_OP_ARG,
-	BRF_ERR_INVALID_OPCODE,
-	BRF_ERR_UNKNOWN_SEGMENT_SPEC,
-	BRF_ERR_NO_STACK_SIZE
-} BRFErrorCode;
-
-typedef struct {
-	BRFErrorCode code;
-	union {
-		sbuf segment_spec; // for BRF_ERR_UNKNOWN_SEGMENT_SPEC
-		int32_t opcode; // for BRF_ERR_INVALID_OPCODE and BRF_ERR_NO_OP_ARG
-	};
-} BRFError;
-
-typedef BRFError (*OpLoader) (sbuf*, Program*, heapctx_t);
-
-BRFError loadNoArgOp(sbuf* input, Program* dst, heapctx_t ctx)
+typedef BRBLoadError (*OpLoader) (sbuf*, Program*, heapctx_t);
+ 
+void printLoadError(BRBLoadError err)
 {
-	return (BRFError){0};
+	switch (err.code) {
+		case BRB_ERR_OK: break;
+		case BRB_ERR_NO_MEMORY:
+			eprintf("BRB loading error: memory allocation failure\n");
+			break;
+		case BRB_ERR_NO_ENTRY_SPEC:
+			eprintf("BRB loading error: no entry mark specifier found\n");
+			break;
+		case BRB_ERR_NO_BLOCK_NAME:
+			eprintf("BRB loading error: block name not found\n");
+			break;
+		case BRB_ERR_NO_BLOCK_SIZE:
+			eprintf("BRB loading error: block size not found\n");
+			break;
+		case BRB_ERR_NO_BLOCK_SPEC:
+			eprintf("BRB loading error: data block specifier not found\n");
+			break;
+		case BRB_ERR_NO_OPCODE:
+			eprintf("BRB loading error: operation code not found\n");
+			break;
+		case BRB_ERR_NO_MARK_NAME:
+			eprintf("BRB loading error: mark name not found\n");
+			break;
+		case BRB_ERR_NO_OP_ARG:
+			eprintf(
+				"BRB loading error: argument for operation `"sbuf_format"` not found\n", 
+				unpack(opNames[err.opcode])
+			);
+			break;
+		case BRB_ERR_INVALID_OPCODE:
+			eprintf("BRB loading error: invalid operation code %d found\n", err.opcode);
+			break;
+		case BRB_ERR_UNKNOWN_SEGMENT_SPEC:
+			eprintf("BRB loading error: unknown segment specifier \"");
+			fputsbufesc(stderr, err.segment_spec, BYTEFMT_HEX);
+			eprintf("\"\n");
+			break;
+		case BRB_ERR_NO_STACK_SIZE:
+			eprintf("BRB loading error: found stack size segment identifier, but no stack size was provided\n");
+			break;
+	}
 }
 
-BRFError loadOpMark(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadNoArgOp(sbuf* input, Program* dst, heapctx_t ctx)
+{
+	return (BRBLoadError){0};
+}
+
+BRBLoadError loadOpMark(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	sbuf new;
 	putsbuflnesc(*input, BYTEFMT_HEX);
 	if (!sbufsplit(input, &new, SEP).data) {
-		return (BRFError){.code = BRF_ERR_NO_MARK_NAME};
+		return (BRBLoadError){.code = BRB_ERR_NO_MARK_NAME};
 	}
 	op->mark_name = tostr(ctx, new);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadRegImmOp(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadRegImmOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->dst_reg = loadInt8(input);
 	op->value = loadInt(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError load2RegOp(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError load2RegOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->dst_reg = loadInt8(input);
 	op->src_reg = loadInt8(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadOpSetd(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpSetd(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->dst_reg = loadInt8(input);
 	op->symbol_id = loadInt(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadOpSetm(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpSetm(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->dst_reg = loadInt8(input);
 	op->symbol_id = loadInt(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadOpSetb(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpSetb(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->dst_reg = loadInt8(input);
 	op->symbol_id = loadInt(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadOpSyscall(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpSyscall(sbuf* input, Program* dst, heapctx_t ctx)
 {	
 	Op* op = arrayhead(dst->execblock);
 	op->syscall_id = loadInt8(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadJumpOp(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadJumpOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->symbol_id = loadInt(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadOpCgoto(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpCgoto(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->src_reg = loadInt8(input);
 	op->symbol_id = loadInt(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError load2RegImmOp(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError load2RegImmOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->dst_reg = loadInt8(input);
 	op->src_reg = loadInt8(input);
 	op->value = loadInt(input);	
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError load3RegOp(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError load3RegOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->dst_reg = loadInt8(input);
 	op->src_reg = loadInt8(input);
 	op->src2_reg = loadInt8(input);	
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadPushOp(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadPushOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	arrayhead(dst->execblock)->src_reg = loadInt8(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadPopOp(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadPopOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	arrayhead(dst->execblock)->dst_reg = loadInt8(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadOpAlloc(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpAlloc(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->item_type = loadInt8(input);
 	op->value = loadInt(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
-BRFError loadOpAllocr(sbuf* input, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpAllocr(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	op->item_type = loadInt8(input);
 	op->src_reg = loadInt8(input);
-	return (BRFError){0};
+	return (BRBLoadError){0};
 }
 
 OpLoader op_loaders[] = {
@@ -278,9 +300,9 @@ OpLoader op_loaders[] = {
 	&loadOpAlloc,
 	&loadOpAllocr
 };
-static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRF operations have unmatched loaders");
+static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
-BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
+BRBLoadError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 {
 	dst->execblock = OpArray_new(ctx, -1),
 	dst->memblocks = MemBlockArray_new(ctx, 0),
@@ -295,67 +317,67 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 
 	while (input.length) {
 		if (sbufcut(&input, ENTRYSPEC_SEGMENT_START).data) {
-			if (input.length < 8) return (BRFError){.code = BRF_ERR_NO_ENTRY_SPEC};
+			if (input.length < 8) return (BRBLoadError){.code = BRB_ERR_NO_ENTRY_SPEC};
 			dst->entry_opid = loadInt(&input);
 		} else if (sbufcut(&input, STACKSIZE_SEGMENT_START).data) {
-			if (input.length < 8) return (BRFError){.code = BRF_ERR_NO_STACK_SIZE};
+			if (input.length < 8) return (BRBLoadError){.code = BRB_ERR_NO_STACK_SIZE};
 			dst->stack_size = loadInt(&input);
 		} else if (sbufcut(&input, DATA_SEGMENT_START).data) {
 			while (true) {
-				if (!sbufsplit(&input, &new, SEP).data) return (BRFError){.code = BRF_ERR_NO_BLOCK_NAME};
+				if (!sbufsplit(&input, &new, SEP).data) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_NAME};
 				if (!new.length) break;
 
 				if (!(datablock = DataBlockArray_append(&dst->datablocks, (DataBlock){0}))) {
-					return (BRFError){.code = BRF_ERR_NO_MEMORY};
+					return (BRBLoadError){.code = BRB_ERR_NO_MEMORY};
 				}
 				datablock->name = tostr(ctx, new);
 
-				if (input.length < 5) return (BRFError){.code = BRF_ERR_NO_BLOCK_SIZE};
+				if (input.length < 5) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SIZE};
 				datablock->spec.length = loadInt(&input);
 
 				if (input.length < datablock->spec.length + 1) {
-					return (BRFError){.code = BRF_ERR_NO_BLOCK_SPEC};
+					return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SPEC};
 				}
 				datablock->spec.data = input.data;
 				sbufshift(input, datablock->spec.length);
 			}
 		} else if (sbufcut(&input, MEMBLOCK_SEGMENT_START).data) {
 			while (true) {
-				if (!sbufsplit(&input, &new, SEP).data) return (BRFError){.code = BRF_ERR_NO_BLOCK_NAME};
+				if (!sbufsplit(&input, &new, SEP).data) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_NAME};
 				if (!new.length) break;
 
 				if (!(memblock = MemBlockArray_append(&dst->memblocks, (MemBlock){0}))) {
-					return (BRFError){.code = BRF_ERR_NO_MEMORY};
+					return (BRBLoadError){.code = BRB_ERR_NO_MEMORY};
 				}
 				memblock->name = tostr(ctx, new);
 
-				if (input.length < 5) return (BRFError){.code = BRF_ERR_NO_BLOCK_SIZE};
+				if (input.length < 5) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SIZE};
 				memblock->size = loadInt(&input);
 			}
 		} else if (sbufcut(&input, EXEC_SEGMENT_START).data) {
 			do {
 				if (!(op = OpArray_append(&dst->execblock, (Op){0}))) {
-					return (BRFError){.code = BRF_ERR_NO_MEMORY};
+					return (BRBLoadError){.code = BRB_ERR_NO_MEMORY};
 				}
-				if (!input.length) return (BRFError){.code = BRF_ERR_NO_OPCODE};
+				if (!input.length) return (BRBLoadError){.code = BRB_ERR_NO_OPCODE};
 
 				op->type = loadInt8(&input);
 				if (!inRange(op->type, 0, N_OPS)) {
-					return (BRFError){.code = BRF_ERR_INVALID_OPCODE, .opcode = op->type};
+					return (BRBLoadError){.code = BRB_ERR_INVALID_OPCODE, .opcode = op->type};
 				}
 
-				BRFError err = op_loaders[op->type](&input, dst, ctx);
-				if (err.code != BRF_ERR_OK) return err;
+				BRBLoadError err = op_loaders[op->type](&input, dst, ctx);
+				if (err.code != BRB_ERR_OK) return err;
 			} while (op->type != OP_END);
 		} else {
-			return (BRFError){
-				.code = BRF_ERR_UNKNOWN_SEGMENT_SPEC, 
+			return (BRBLoadError){
+				.code = BRB_ERR_UNKNOWN_SEGMENT_SPEC, 
 				.segment_spec = sbufslice(input, 0, input.length < 2 ? input.length : 2)
 			};
 		}
 	}
 
-	return (BRFError){.code = BRF_ERR_OK};
+	return (BRBLoadError){.code = BRB_ERR_OK};
 }
 
 ExecEnv initExecEnv(Program* program, int8_t flags, char** args)
@@ -540,6 +562,15 @@ void printExecState(FILE* fd, ExecEnv* env, Program* program)
 			printTracer(fd, program, env, env->regs_trace[i], env->registers[i]);
 		}
 	}
+
+	if (env->flags & BREX_PRINT_MEMBLOCKS) {
+		printf("memory blocks:\n");
+		array_foreach(sbuf, block, env->memblocks, 
+			printf("\t%s: \"", program->memblocks.data[_block].name);
+			putsbufesc(block, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
+			printf("\"\n");
+		);
+	}
 }
 
 bool validateMemoryAccess(ExecEnv* env, Program* program, Tracer tracer, void* ptr, int64_t size)
@@ -639,7 +670,9 @@ bool handleArgvSyscall(ExecEnv* env, Program* program)
 	return false;
 }
 
-BRFFunc syscall_handlers[] = {
+typedef bool (*ExecHandler) (ExecEnv*, Program*);
+
+ExecHandler syscall_handlers[] = {
 	&handleInvalidSyscall,
 	&handleExitSyscall,
 	&handleWriteSyscall,
@@ -1907,7 +1940,7 @@ bool handleOpAllocr(ExecEnv* env, Program* program)
 	return false;
 }
 
-BRFFunc op_handlers[] = {
+ExecHandler op_handlers[] = {
 	&handleNop,
 	&handleOpEnd,
 	&handleOpMark,
@@ -1979,17 +2012,114 @@ BRFFunc op_handlers[] = {
 	&handleOpAlloc,
 	&handleOpAllocr
 };
-static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRF operations have unmatched execution handlers");
+static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 
-ExecEnv execProgram(Program* program, int8_t flags, char** args)
+void printRuntimeError(FILE* fd, ExecEnv* env, Program* program)
+{
+	switch (env->exitcode) {
+		case EC_STACK_MISALIGNMENT:
+			fprintf(fd, "%llx:\n\truntime error: stack misalignment\n", env->op_id);
+			fprintf(fd, "\tstack head size: %hhd bytes\n", TracerTypeSizes[arrayhead(env->stack_trace)->type]);
+			fprintf(fd,"\tattempted to pop %hhd bytes\n", env->err_pop_size);
+			break;
+		case EC_NO_STACKFRAME:
+			fprintf(fd,"%llx:\n\truntime error: attempted to return from a global stack frame\n", env->op_id);
+			break;
+		case EC_INVALID_ARG_ID:
+			fprintf(fd,"%llx:\n\truntime error: attempted to fetch program argument of invalid ID\n", env->op_id);
+			fprintf(fd,"\tamount of arguments provided: %d\n", env->exec_argc);
+			fprintf(fd,"\tattempted to get address of argument #%lld, which is out of bounds for the array of arguments\n", env->registers[0]);
+			break;
+		case EC_ACCESS_FAILURE:
+			fprintf(fd,"%llx:\n\truntime error: memory access failure\n", env->op_id);
+			fprintf(fd,
+				"\tattempted to access %lld bytes from %p, which is not in bounds of the stack, the heap or any of the buffers\n",
+				env->err_access_length,
+				env->err_ptr
+			);
+			break;
+		case EC_NEGATIVE_SIZE_ACCESS:
+			fprintf(fd,"%llx:\n\truntime error: negative sized memory access\n", env->op_id);
+			fprintf(fd,
+				"\tattempted to access %lld bytes at %p; accessing memory by negative size is not allowed\n",
+				env->err_access_length, 
+				env->err_ptr
+			);
+			break;
+		case EC_STACK_OVERFLOW:
+			fprintf(fd,"%llx:\n\truntime error: stack overflow\n", env->op_id);
+			fprintf(fd,"\tattempted to expand the stack by %hhd bytes, overflowing the stack\n", env->err_push_size);
+			break;
+		case EC_STACK_UNDERFLOW:
+			fprintf(fd,"%llx:\n\truntime error: stack underflow\n", env->op_id);
+			fprintf(fd,"\tattempted to decrease the stack by %hhd bytes, underflowing the stack\n", env->err_pop_size);
+			break;
+		case EC_UNKNOWN_SYSCALL:
+			fprintf(fd,"%llx:\n\truntime error: invalid system call\n", env->op_id - 1);
+			break;
+		case EC_ACCESS_MISALIGNMENT:
+			fprintf(fd,"%llx:\n\truntime error: misaligned memory access\n", env->op_id);
+			sbuf err_buf = getBufferByRef(env, program, env->err_buf_ref);
+			static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
+			switch (env->err_buf_ref.type) {
+				case BUF_DATA:
+					fprintf(fd,
+						"\tdata block `%s` is at %p\n\tblock size: %ld bytes\n",
+						program->datablocks.data[env->err_buf_ref.id].name,
+						(void*)err_buf.data,
+						err_buf.length
+					);
+					break;
+				case BUF_MEMORY:
+					fprintf(fd,
+						"\tmemory block `%s` is at %p\n\tblock size: %ld bytes\n",
+						program->memblocks.data[env->err_buf_ref.id].name,
+						(void*)err_buf.data,
+						err_buf.length
+					);
+					break;
+				case BUF_STACK:
+					fprintf(fd,"\tstack head is at %p\n\tstack size: %ld bytes\n", err_buf.data, err_buf.length);
+					break;
+				case BUF_ARGV:
+					fprintf(fd,"\targument #%d is at %p\n\targument length: %ld bytes\n", env->err_buf_ref.id, err_buf.data, err_buf.length);
+					break;
+				default: break;
+			}
+			fprintf(fd,"\tattempted to access %lld bytes from %p\n", env->err_access_length, env->err_ptr);
+			if (env->err_ptr < (void*)err_buf.data) {
+				fprintf(fd,"\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(err_buf.data - (int64_t)env->err_ptr));
+			} else if ((void*)(env->err_ptr + env->err_access_length) > (void*)(err_buf.data + err_buf.length)) {
+				fprintf(fd,
+					"\tthe accessed field exceeds the buffer by %lld bytes\n", 
+					(int64_t)(env->err_ptr + env->err_access_length - ((int64_t)err_buf.data + err_buf.length))
+				);
+			}
+			break;
+	}
+}
+
+ExecEnv execProgram(Program* program, int8_t flags, char** args, volatile bool* interruptor)
 {
 	ExecEnv env = initExecEnv(program, flags, args);
-	while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) {
-		if (interrupt) break; 
+	if (interruptor) {
+		while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) {
+			if (*interruptor) break; 
+		}
+	} else {
+		while (!op_handlers[program->execblock.data[env.op_id].type](&env, program)) { }
 	}
 	return env;
 }
 
+#else // LIBBRB
+
+bool interrupt = false;
+
+void handleExecInt(int sig)
+{
+	interrupt = true;
+}
 
 void printUsageMsg(FILE* fd, char* exec_name)
 {
@@ -2007,7 +2137,6 @@ int main(int argc, char* argv[]) {
 	initBREnv();
 	char *input_name = NULL, **program_argv = NULL;
 	uint8_t exec_flags = 0;
-	bool dump_memblocks = false;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
 			for (argv[i]++; *argv[i]; argv[i]++) {
@@ -2015,7 +2144,7 @@ int main(int argc, char* argv[]) {
 					case 'h': printUsageMsg(stdout, argv[0]); return 0;
 					case 'r': exec_flags |= BREX_TRACE_REGS; break;
 					case 's': exec_flags |= BREX_TRACE_STACK; break;
-					case 'm': dump_memblocks = true; break;
+					case 'm': exec_flags |= BREX_PRINT_MEMBLOCKS; break;
 					case 'c': exec_flags |= BREX_CHECK_SYSCALLS; break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
@@ -2044,144 +2173,19 @@ int main(int argc, char* argv[]) {
 	fclose(input_fd);
 
 	Program program;
-	BRFError err = loadProgram(input, &program, GLOBAL_CTX);
-	switch (err.code) {
-		case BRF_ERR_OK: break;
-		case BRF_ERR_NO_MEMORY:
-			eprintf("BRF error: memory allocation failure\n");
-			return 1;
-		case BRF_ERR_NO_ENTRY_SPEC:
-			eprintf("BRF error: no entry mark specifier found\n");
-			return 1;
-		case BRF_ERR_NO_BLOCK_NAME:
-			eprintf("BRF error: block name not found\n");
-			return 1;
-		case BRF_ERR_NO_BLOCK_SIZE:
-			eprintf("BRF error: block size not found\n");
-			return 1;
-		case BRF_ERR_NO_BLOCK_SPEC:
-			eprintf("BRF error: data block specifier not found\n");
-			return 1;
-		case BRF_ERR_NO_OPCODE:
-			eprintf("BRF error: operation code not found\n");
-			return 1;
-		case BRF_ERR_NO_MARK_NAME:
-			eprintf("BRF error: mark name not found\n");
-			return 1;
-		case BRF_ERR_NO_OP_ARG:
-			eprintf(
-				"BRF error: argument for operation `"sbuf_format"` not found\n", 
-				unpack(opNames[err.opcode])
-			);
-			return 1;
-		case BRF_ERR_INVALID_OPCODE:
-			eprintf("BRF error: invalid operation code %d found\n", err.opcode);
-			return 1;
-		case BRF_ERR_UNKNOWN_SEGMENT_SPEC:
-			eprintf("BRF error: unknown segment specifier \"");
-			fputsbufesc(stderr, err.segment_spec, BYTEFMT_HEX);
-			eprintf("\"\n");
-			return 1;
-		case BRF_ERR_NO_STACK_SIZE:
-			eprintf("BRF error: found stack size segment identifier, but no stack size was provided\n");
-			return 1;
+	BRBLoadError err = loadProgram(input, &program, GLOBAL_CTX);
+	if (err.code) {
+		printLoadError(err);
+		return 1;
 	}
 
 	signal(SIGINT, &handleExecInt);
-	ExecEnv res = execProgram(&program, exec_flags, program_argv);
+	ExecEnv res = execProgram(&program, exec_flags, program_argv, &interrupt);
 	signal(SIGINT, SIG_DFL);
 
 	printExecState(stdout, &res, &program);
-	if (dump_memblocks) {
-		printf("memory blocks:\n");
-		array_foreach(sbuf, block, res.memblocks, 
-			printf("\t%s: \"", program.memblocks.data[_block].name);
-			putsbufesc(block, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
-			printf("\"\n");
-		);
-	}
-
-	switch (res.exitcode) {
-		case EC_STACK_MISALIGNMENT:
-			eprintf("%llx:\n\truntime error: stack misalignment\n", res.op_id);
-			eprintf("\tstack head size: %hhd bytes\n", TracerTypeSizes[arrayhead(res.stack_trace)->type]);
-			eprintf("\tattempted to pop %hhd bytes\n", res.err_pop_size);
-			break;
-		case EC_NO_STACKFRAME:
-			eprintf("%llx:\n\truntime error: attempted to return from a global stack frame\n", res.op_id);
-			break;
-		case EC_INVALID_ARG_ID:
-			eprintf("%llx:\n\truntime error: attempted to fetch program argument of invalid ID\n", res.op_id);
-			eprintf("\tamount of arguments provided: %d\n", res.exec_argc);
-			eprintf("\tattempted to get address of argument #%lld, which is out of bounds for the array of arguments\n", res.registers[0]);
-			break;
-		case EC_ACCESS_FAILURE:
-			eprintf("%llx:\n\truntime error: memory access failure\n", res.op_id);
-			eprintf(
-				"\tattempted to access %lld bytes from %p, which is not in bounds of the stack, the heap or any of the buffers\n",
-				res.err_access_length,
-				res.err_ptr
-			);
-			break;
-		case EC_NEGATIVE_SIZE_ACCESS:
-			eprintf("%llx:\n\truntime error: negative sized memory access\n", res.op_id);
-			eprintf(
-				"\tattempted to access %lld bytes at %p; accessing memory by negative size is not allowed\n",
-				res.err_access_length, 
-				res.err_ptr
-			);
-			break;
-		case EC_STACK_OVERFLOW:
-			eprintf("%llx:\n\truntime error: stack overflow\n", res.op_id);
-			eprintf("\tattempted to expand the stack by %hhd bytes, overflowing the stack\n", res.err_push_size);
-			break;
-		case EC_STACK_UNDERFLOW:
-			eprintf("%llx:\n\truntime error: stack underflow\n", res.op_id);
-			eprintf("\tattempted to decrease the stack by %hhd bytes, underflowing the stack\n", res.err_pop_size);
-			break;
-		case EC_UNKNOWN_SYSCALL:
-			eprintf("%llx:\n\truntime error: invalid system call\n", res.op_id - 1);
-			break;
-		case EC_ACCESS_MISALIGNMENT:
-			eprintf("%llx:\n\truntime error: misaligned memory access\n", res.op_id);
-			sbuf err_buf = getBufferByRef(&res, &program, res.err_buf_ref);
-			static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
-			switch (res.err_buf_ref.type) {
-				case BUF_DATA:
-					eprintf(
-						"\tdata block `%s` is at %p\n\tblock size: %ld bytes\n",
-						program.datablocks.data[res.err_buf_ref.id].name,
-						(void*)err_buf.data,
-						err_buf.length
-					);
-					break;
-				case BUF_MEMORY:
-					eprintf(
-						"\tmemory block `%s` is at %p\n\tblock size: %ld bytes\n",
-						program.memblocks.data[res.err_buf_ref.id].name,
-						(void*)err_buf.data,
-						err_buf.length
-					);
-					break;
-				case BUF_STACK:
-					eprintf("\tstack head is at %p\n\tstack size: %ld bytes\n", err_buf.data, err_buf.length);
-					break;
-				case BUF_ARGV:
-					eprintf("\targument #%d is at %p\n\targument length: %ld bytes\n", res.err_buf_ref.id, err_buf.data, err_buf.length);
-					break;
-				default: break;
-			} 
-			eprintf("\tattempted to access %lld bytes from %p\n", res.err_access_length, res.err_ptr);
-			if (res.err_ptr < (void*)err_buf.data) {
-				eprintf("\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(err_buf.data - (int64_t)res.err_ptr));
-			} else if ((void*)(res.err_ptr + res.err_access_length) > (void*)(err_buf.data + err_buf.length)) {
-				eprintf(
-					"\tthe accessed field exceeds the buffer by %lld bytes\n", 
-					(int64_t)(res.err_ptr + res.err_access_length - ((int64_t)err_buf.data + err_buf.length))
-				);
-			}
-			break;
-	}
+	printRuntimeError(stderr, &res, &program);
 
 	return res.exitcode;
 }
+#endif // LIBBRB

@@ -6,18 +6,14 @@
 #include "ctxalloc.h"
 #include "stdint.h"
 #include "stdio.h"
-#include "time.h"
+#include "stdbool.h"
 
 extern bool IS_BIG_ENDIAN;
 extern bool IS_LITTLE_ENDIAN;
 
 // declarations for the BRidge Parser
 
-const sbuf NT_PATHSEP = fromcstr("\\");
-const sbuf POSIX_PATHSEP = fromcstr("/");
-
-const sbuf NT_NEWLINE = fromcstr("\r\n");
-const sbuf POSIX_NEWLINE = fromcstr("\n");
+extern sbuf NT_PATHSEP, POSIX_PATHSEP, NT_NEWLINE, POSIX_NEWLINE, DQUOTE;
 
 #ifdef _WIN32_
 #define PATHSEP NT_PATHSEP
@@ -27,8 +23,8 @@ const sbuf POSIX_NEWLINE = fromcstr("\n");
 #define NEWLINE POSIX_NEWLINE
 #endif
 
-const sbuf SPACE = fromcstr(" ");
-const sbuf TAB = fromcstr("\t");
+#define SPACE fromcstr(" ")
+#define TAB fromcstr("\t")
 
 typedef enum {
 	TOKEN_NONE,
@@ -39,15 +35,6 @@ typedef enum {
 	TOKEN_STRING,
 	N_TOKEN_TYPES
 } TokenType;
-
-char* TokenTypeNames[N_TOKEN_TYPES] = {
-	"nothing",
-	"word",
-	"keyword",
-	"symbol",
-	"integer",
-	"string"
-};
 
 
 typedef struct {
@@ -66,7 +53,7 @@ typedef struct {
 		int64_t symbol_id; // for TOKEN_SYMBOL
 	};
 } Token;
-defArray(sbuf);
+declArray(sbuf);
 
 typedef enum {
 	PREP_ERR_OK,
@@ -82,7 +69,7 @@ typedef struct {
 	sbuf content;
 	TokenLoc cur_loc;
 } InputCtx;
-defArray(InputCtx);
+declArray(InputCtx);
 
 typedef struct {
 	sbuf* keywords;
@@ -105,6 +92,7 @@ Token fetchToken(Preprocessor* obj);
 int fprintTokenLoc(FILE* fd, TokenLoc loc, Preprocessor* obj);
 int fprintTokenStr(FILE* fd, Token token, Preprocessor* obj);
 int fprintToken(FILE* fd, Token token, Preprocessor* obj);
+char* getTokenTypeName(TokenType type);
 char* getTokenWord(Preprocessor* obj, Token token);
 char* getErrorStr(Preprocessor* obj);
 

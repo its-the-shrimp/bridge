@@ -38,7 +38,7 @@ typedef struct sbuf {
 	char* data;
 } sbuf;
 
-const sbuf CSTRTERM = { .data = "\0", .length = 1 };
+#define CSTRTERM ((sbuf){ .data = "\0", .length = 1 })
 
 sbuf _sbufconcat(heapctx_t ctx, ...);
 sbuf filecontent(FILE* fd, heapctx_t ctx);

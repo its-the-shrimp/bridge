@@ -27,8 +27,7 @@ struct ctxinfo {
 	long allocated;
 };
 
-extern heapctx_t GLOBAL_CTX;
-extern heapctx_t TEMP_CTX;
+extern heapctx_t GLOBAL_CTX, TEMP_CTX;
 static struct heapctx FREE_CHUNKS[1] = {0};
 static void* HEAP_START = NULL;
 

@@ -5,8 +5,16 @@
 #include "sys/param.h"
 #include "stdarg.h"
 #include "math.h"
+#include "time.h"
 
-const sbuf DQUOTE = fromcstr("\"");
+defArray(sbuf);
+defArray(InputCtx);
+
+sbuf DQUOTE = fromcstr("\"");
+sbuf NT_NEWLINE = fromcstr("\r\n");
+sbuf POSIX_NEWLINE = fromcstr("\n");
+sbuf NT_PATHSEP = fromcstr("\\");
+sbuf POSIX_PATHSEP = fromcstr("/");
 
 bool IS_BIG_ENDIAN, IS_LITTLE_ENDIAN;
 static struct timespec TIME;
@@ -180,6 +188,20 @@ int fprintToken(FILE* fd, Token token, Preprocessor* obj)
 	res += fprintTokenStr(fd, token, obj);
 	res += fputc('\n', fd);
 	return res;
+}
+
+char* TokenTypeNames[N_TOKEN_TYPES] = {
+	"nothing",
+	"word",
+	"keyword",
+	"symbol",
+	"integer",
+	"string"
+};
+
+char* getTokenTypeName(TokenType type)
+{
+	return TokenTypeNames[type];
 }
 
 char* getTokenWord(Preprocessor* obj, Token token)
