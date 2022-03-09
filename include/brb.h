@@ -228,7 +228,7 @@ BRBuiltin consts[] = {
 
 typedef struct {
 	char* name;
-	int32_t size;
+	int64_t size;
 } MemBlock;
 defArray(MemBlock);
 

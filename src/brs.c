@@ -98,6 +98,30 @@ bool minimal = false;
 // special value for error reporting
 #define TOKEN_REG_ID 125
 
+void writeInt(FILE* fd, int64_t x)
+{
+	if (x) {
+		if (inRange(x, INT8_MIN, INT8_MAX)) {
+			fputc(1, fd);
+			int8_t x8 = (int8_t)x;
+			fputc(x8, fd);
+		} else if (inRange(x, INT16_MIN, INT16_MAX)) {
+			fputc(2, fd);
+			int16_t x16 = (int16_t)x;
+			fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
+		} else if (inRange(x, INT32_MIN, INT32_MAX)) {
+			fputc(4, fd);
+			int32_t x32 = (int32_t)x;
+			fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
+		} else {
+			fputc(8, fd);
+			fwrite(BRByteOrder(&x, 8), 8, 1, fd);
+		}
+	} else {
+		fputc(0, fd);
+	}
+}
+
 bool startDataSegment(FILE* fd)
 {
 	return fputsbuf(fd, DATA_SEGMENT_START) > 0;
@@ -108,8 +132,7 @@ bool writeDataBlock(FILE* fd, char* name, sbuf obj)
 	sbuf input_name = fromstr(name);
 	fputsbuf(fd, minimal ? CSTRTERM : input_name);
 	fputsbuf(fd, SEP);
-	int32_t data_length = obj.length + 1;
-	fwrite(BRByteOrder(&data_length, sizeof(data_length)), 1, sizeof(data_length), fd);
+	writeInt(fd, obj.length + 1);
 	fputsbuf(fd, obj);
 	fputc('\0', fd);
 	return true;
@@ -140,7 +163,7 @@ bool writeMemoryBlock(FILE* fd, char* name, int32_t size)
 	sbuf input_name = fromstr(name);
 	fputsbuf(fd, minimal ? CSTRTERM : input_name);
 	fputsbuf(fd, SEP);
-	fwrite(BRByteOrder(&size, sizeof(size)), 1, sizeof(size), fd);
+	writeInt(fd, size);
 	return true;
 }
 
@@ -171,7 +194,7 @@ void writeRegImmOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
+	writeInt(fd, op.value);
 }
 
 void write2RegOp(FILE* fd, Op op)
@@ -185,40 +208,40 @@ void writeOpSetd(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
-	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
+	writeInt(fd, op.symbol_id);
 }
 
 void writeOpSetm(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
-	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
+	writeInt(fd, op.symbol_id);
 }
 
 void writeOpSetb(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
-	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
+	writeInt(fd, op.symbol_id);
 }
 
 void writeOpSyscall(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
-	fwrite(BRByteOrder(&op.syscall_id, sizeof(op.syscall_id)), sizeof(op.syscall_id), 1, fd);
+	fputc(op.syscall_id, fd);
 }
 
 void writeJumpOp(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
-	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
+	writeInt(fd, op.symbol_id);
 }
 
 void writeOpCgoto(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.symbol_id, sizeof(op.symbol_id)), sizeof(op.symbol_id), 1, fd);
+	writeInt(fd, op.symbol_id);
 }
 
 void write2RegImmOp(FILE* fd, Op op)
@@ -226,7 +249,7 @@ void write2RegImmOp(FILE* fd, Op op)
 	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
 	fputc(op.src_reg, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
+	writeInt(fd, op.value);
 }
 
 void write3RegOp(FILE* fd, Op op)
@@ -253,7 +276,7 @@ void writeOpAlloc(FILE* fd, Op op)
 {
 	fputc(op.type, fd);
 	fputc(op.item_type, fd);
-	fwrite(BRByteOrder(&op.value, sizeof(op.value)), sizeof(op.value), 1, fd);
+	writeInt(fd, op.value);
 }
 
 void writeOpAllocr(FILE* fd, Op op)
@@ -340,14 +363,14 @@ static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRF ope
 bool setEntryPoint(FILE* fd, int64_t mark_id)
 {
 	fputsbuf(fd, ENTRYSPEC_SEGMENT_START);
-	fwrite(BRByteOrder(&mark_id, sizeof(mark_id)), sizeof(mark_id), 1, fd);
+	writeInt(fd, mark_id);
 	return true;
 }
 
 bool setStackSize(FILE* fd, int64_t stack_size)
 {
 	fputsbuf(fd, STACKSIZE_SEGMENT_START);
-	fwrite(BRByteOrder(&stack_size, sizeof(stack_size)), sizeof(stack_size), 1, fd);
+    writeInt(fd, stack_size);
 	return true;
 }
 
@@ -1244,7 +1267,9 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	setEntryPoint(output_fd, res.entry_opid);
+	if (res.entry_opid) {
+		setEntryPoint(output_fd, res.entry_opid);
+	}
 	if (res.stack_size != DEFAULT_STACK_SIZE) {
 		setStackSize(output_fd, res.stack_size);
 	}

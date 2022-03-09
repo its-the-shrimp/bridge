@@ -137,5 +137,6 @@ float endTimer(void);
 // assumes that sub_size > 0 and size > 0
 #define maxInt(a, b) ( a > b ? a : b )
 #define minInt(a, b) ( a < b ? a : b )
+#define absInt(x) ( x < 0 ? x * -1 : x )
 
 #endif

@@ -40,6 +40,22 @@ int64_t loadInt64(sbuf* input)
 	return res;
 }
 
+int64_t loadInt(sbuf* input)
+{
+	int8_t size = input->length ? input->data[0] : 0;
+	sbufpshift(input, 1);
+
+	int64_t res = -69;
+	switch (size) {
+		case 0: res = 0; break;
+		case 1: res = loadInt8(input); break;
+		case 2: res = loadInt16(input); break;
+		case 4: res = loadInt32(input); break;
+		case 8: res = loadInt64(input); break;
+	}
+	return res;
+}
+
 typedef enum {
 	BRF_ERR_OK,
 	BRF_ERR_NO_MEMORY,
@@ -74,6 +90,7 @@ BRFError loadOpMark(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	sbuf new;
+	putsbuflnesc(*input, BYTEFMT_HEX);
 	if (!sbufsplit(input, &new, SEP).data) {
 		return (BRFError){.code = BRF_ERR_NO_MARK_NAME};
 	}
@@ -84,22 +101,14 @@ BRFError loadOpMark(sbuf* input, Program* dst, heapctx_t ctx)
 BRFError loadRegImmOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 10) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG,
-		.opcode = op->type
-	};
 	op->dst_reg = loadInt8(input);
-	op->value = loadInt64(input);	
+	op->value = loadInt(input);
 	return (BRFError){0};
 }
 
 BRFError load2RegOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 3) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG,
-		.opcode = op->type
-	};
 	op->dst_reg = loadInt8(input);
 	op->src_reg = loadInt8(input);
 	return (BRFError){0};
@@ -108,46 +117,30 @@ BRFError load2RegOp(sbuf* input, Program* dst, heapctx_t ctx)
 BRFError loadOpSetd(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 4) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG, 
-		.opcode = op->type
-	};
 	op->dst_reg = loadInt8(input);
-	op->symbol_id = loadInt64(input);
+	op->symbol_id = loadInt(input);
 	return (BRFError){0};
 }
 
 BRFError loadOpSetm(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 4) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG, 
-		.opcode = op->type
-	};
 	op->dst_reg = loadInt8(input);
-	op->symbol_id = loadInt64(input);
+	op->symbol_id = loadInt(input);
 	return (BRFError){0};
 }
 
 BRFError loadOpSetb(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 4) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG, 
-		.opcode = op->type
-	};
 	op->dst_reg = loadInt8(input);
-	op->symbol_id = loadInt64(input);
+	op->symbol_id = loadInt(input);
 	return (BRFError){0};
 }
 
 BRFError loadOpSyscall(sbuf* input, Program* dst, heapctx_t ctx)
 {	
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 2) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG, 
-		.opcode = op->type
-	};
 	op->syscall_id = loadInt8(input);
 	return (BRFError){0};
 }
@@ -155,46 +148,30 @@ BRFError loadOpSyscall(sbuf* input, Program* dst, heapctx_t ctx)
 BRFError loadJumpOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 5) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG, 
-		.opcode = op->type
-	};
-	op->symbol_id = loadInt64(input);
+	op->symbol_id = loadInt(input);
 	return (BRFError){0};
 }
 
 BRFError loadOpCgoto(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 6) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG, 
-		.opcode = op->type
-	};
 	op->src_reg = loadInt8(input);
-	op->symbol_id = loadInt64(input);
+	op->symbol_id = loadInt(input);
 	return (BRFError){0};
 }
 
 BRFError load2RegImmOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 11) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG,
-		.opcode = op->type
-	};
 	op->dst_reg = loadInt8(input);
 	op->src_reg = loadInt8(input);
-	op->value = loadInt64(input);	
+	op->value = loadInt(input);	
 	return (BRFError){0};
 }
 
 BRFError load3RegOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 4) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG,
-		.opcode = op->type
-	};
 	op->dst_reg = loadInt8(input);
 	op->src_reg = loadInt8(input);
 	op->src2_reg = loadInt8(input);	
@@ -203,20 +180,12 @@ BRFError load3RegOp(sbuf* input, Program* dst, heapctx_t ctx)
 
 BRFError loadPushOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
-	if (input->length < 2) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG,
-		.opcode = arrayhead(dst->execblock)->type
-	};
 	arrayhead(dst->execblock)->src_reg = loadInt8(input);
 	return (BRFError){0};
 }
 
 BRFError loadPopOp(sbuf* input, Program* dst, heapctx_t ctx)
 {
-	if (input->length < 2) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG,
-		.opcode = arrayhead(dst->execblock)->type
-	};
 	arrayhead(dst->execblock)->dst_reg = loadInt8(input);
 	return (BRFError){0};
 }
@@ -224,24 +193,14 @@ BRFError loadPopOp(sbuf* input, Program* dst, heapctx_t ctx)
 BRFError loadOpAlloc(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 10) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG,
-		.opcode = op->type
-	};
-
 	op->item_type = loadInt8(input);
-	op->value = loadInt64(input);
+	op->value = loadInt(input);
 	return (BRFError){0};
 }
 
 BRFError loadOpAllocr(sbuf* input, Program* dst, heapctx_t ctx)
 {
 	Op* op = arrayhead(dst->execblock);
-	if (input->length < 2) return (BRFError){
-		.code = BRF_ERR_NO_OP_ARG,
-		.opcode = op->type
-	};
-
 	op->item_type = loadInt8(input);
 	op->src_reg = loadInt8(input);
 	return (BRFError){0};
@@ -337,10 +296,10 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 	while (input.length) {
 		if (sbufcut(&input, ENTRYSPEC_SEGMENT_START).data) {
 			if (input.length < 8) return (BRFError){.code = BRF_ERR_NO_ENTRY_SPEC};
-			dst->entry_opid = loadInt64(&input);
+			dst->entry_opid = loadInt(&input);
 		} else if (sbufcut(&input, STACKSIZE_SEGMENT_START).data) {
 			if (input.length < 8) return (BRFError){.code = BRF_ERR_NO_STACK_SIZE};
-			dst->stack_size = loadInt64(&input);
+			dst->stack_size = loadInt(&input);
 		} else if (sbufcut(&input, DATA_SEGMENT_START).data) {
 			while (true) {
 				if (!sbufsplit(&input, &new, SEP).data) return (BRFError){.code = BRF_ERR_NO_BLOCK_NAME};
@@ -352,7 +311,7 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 				datablock->name = tostr(ctx, new);
 
 				if (input.length < 5) return (BRFError){.code = BRF_ERR_NO_BLOCK_SIZE};
-				datablock->spec.length = loadInt32(&input);
+				datablock->spec.length = loadInt(&input);
 
 				if (input.length < datablock->spec.length + 1) {
 					return (BRFError){.code = BRF_ERR_NO_BLOCK_SPEC};
@@ -371,7 +330,7 @@ BRFError loadProgram(sbuf input, Program* dst, heapctx_t ctx)
 				memblock->name = tostr(ctx, new);
 
 				if (input.length < 5) return (BRFError){.code = BRF_ERR_NO_BLOCK_SIZE};
-				memblock->size = loadInt32(&input);
+				memblock->size = loadInt(&input);
 			}
 		} else if (sbufcut(&input, EXEC_SEGMENT_START).data) {
 			do {
