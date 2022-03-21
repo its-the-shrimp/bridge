@@ -5,7 +5,6 @@
 #include "string.h"
 #include "stdbool.h"
 #include "stdarg.h"
-#include "stdio.h"
 
 #define array_foreach(t, item, array, body) \
 	do { \
@@ -56,7 +55,7 @@
 	t t##Array_pop(t##Array* array, int index); \
 	long t##Array_index(t##Array array, t obj); \
 	bool t##Array_insert(t##Array* array, t##Array sub, int index); \
-	bool t##Array_delete(t##Array* array); \
+	bool t##Array_clear(t##Array* array); \
 
 #define defArray(t) \
 	t##Array t##Array_new(heapctx_t ctx, int n, ...) { \
@@ -90,10 +89,7 @@
 	} \
 	bool t##Array_move(t##Array* array, int index, size_t n, t dst[]) { \
 		index = index >= 0 ? index : array->length + index; \
-		if (index + n > array->length) { \
-			printf("unavailable index\n"); \
-			return false; \
-		} \
+		if (index + n > array->length) return false; \
 		if (dst != NULL) for (int i = index; i < index + n; i++) dst[i - index] = array->data[i]; \
 		for (int i = index; i + n < array->length; i++) { \
 			array->data[i] = array->data[i + n]; \
@@ -153,10 +149,12 @@
 		} \
 		return true; \
 	} \
-	bool t##Array_delete(t##Array* array) { \
+	bool t##Array_clear(t##Array* array) { \
 		if (!array->length) return true; \
+		heapctx_t ctx = chunkctx(array->data); \
 		if (!ctxalloc_free(array->data)) return false; \
-		*array = (t##Array){0}; \
+		array->data = (t*)ctx; \
+		array->length = 0; \
 		return true; \
 	} \
 

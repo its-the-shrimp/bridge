@@ -6,6 +6,7 @@
 #include "stdarg.h"
 #include "math.h"
 #include "time.h"
+#include "errno.h"
 
 defArray(sbuf);
 defArray(InputCtx);
@@ -26,7 +27,7 @@ Preprocessor newPreprocessor(sbuf delims[], sbuf keywords[], heapctx_t ctx)
 		.keywords = keywords,
 		.sources = InputCtxArray_new(ctx, -1),
 		.error_code = PREP_ERR_OK,
-		.error_loc = (TokenLoc){0},
+		.error_loc = (TokenLoc){ .src_id = 1 },
 		._nl_delim_id = 1
 	};
 
@@ -67,6 +68,7 @@ bool setInput(Preprocessor* obj, char* name)
 	FILE* fd = fopen(name, "r");
 	if (!fd) {
 		obj->error_code = PREP_ERR_FILE_NOT_FOUND;
+		obj->sys_errno = errno;
 		return false;
 	}
 	sbuf input = filecontent(fd, arrayctx(obj->sources));
@@ -166,7 +168,9 @@ Token fetchToken(Preprocessor* obj)
 
 int fprintTokenLoc(FILE* fd, TokenLoc loc, Preprocessor* obj)
 {
-	return fprintf(fd, "[ %s:%hd:%hd ] ", obj->sources.data[loc.src_id].name, loc.lineno, loc.colno);
+	if (loc.src_id != -1) {
+		return fprintf(fd, "[ %s:%hd:%hd ] ", obj->sources.data[loc.src_id].name, loc.lineno, loc.colno);
+	} else { return fprintf(fd, " "); }
 }
 
 int fprintTokenStr(FILE* fd, Token token, Preprocessor* obj)
@@ -230,13 +234,19 @@ char* getTokenWord(Preprocessor* obj, Token token)
 	}
 }
 
-char* getErrorStr(Preprocessor* obj) {
+int printPrepError(FILE* fd, Preprocessor* obj) {
 	switch (obj->error_code) {
-		case PREP_ERR_UNCLOSED_STR: return "unclosed string literal";
-		case PREP_ERR_NO_NEWLINE_DELIM: return "no newline delimiter provided";
-		case PREP_ERR_NO_MEMORY: return "memory allocation failure";
-		case PREP_ERR_FILE_NOT_FOUND: return "could not open provided file";
-		default: return "unreachable";
+		case PREP_ERR_OK: return 0;
+		fprintTokenLoc(fd, obj->error_loc, obj);
+		case PREP_ERR_UNCLOSED_STR: 
+			return fprintf(fd, "preprocessing error: unclosed string literal\n");
+		case PREP_ERR_NO_NEWLINE_DELIM: 
+			return fprintf(fd, "preprocessing error: no newline delimiter provided\n");
+		case PREP_ERR_NO_MEMORY: 
+			return fprintf(fd, "preprocessing error: memory allocation failure\n");
+		case PREP_ERR_FILE_NOT_FOUND: 
+			return fprintf(fd, "preprocessing error: could not open provided file (reason: %s)\n", strerror(obj->sys_errno));
+		default: return fprintf(fd, "unreachable\n");
 	}
 }
 

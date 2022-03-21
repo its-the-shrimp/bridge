@@ -39,14 +39,6 @@ typedef enum {
 	OP_LESR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_GES, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_GESR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_PUSH64, // uses Op::src_reg
-	OP_POP64, // uses Op::dst_reg
-	OP_PUSH32, // uses Op::src_reg
-	OP_POP32, // uses Op::dst_reg
-	OP_PUSH16, // uses Op::src_reg
-	OP_POP16, // uses Op::dst_reg
-	OP_PUSH8, // uses Op::src_reg
-	OP_POP8, // uses Op::dst_reg
 	OP_AND, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_ANDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_OR, // uses Op::dst_reg, Op::src_reg and Op::value
@@ -60,8 +52,10 @@ typedef enum {
 	OP_SHRR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_SHRS, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_SHRSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_CALL, // uses Op::symbol_id,
+	OP_PROC, // uses Op::mark_name
+	OP_CALL, // uses Op::symbol_id
 	OP_RET,
+	OP_ENDPROC,
 	OP_LD64, // uses Op::dst_reg and Op::src_reg
 	OP_STR64, // uses Op::dst_reg and Op::src_reg
 	OP_LD32, // uses Op::dst_reg and Op::src_reg
@@ -70,10 +64,8 @@ typedef enum {
 	OP_STR16, // uses Op::dst_reg and Op::src_reg
 	OP_LD8, // uses Op::dst_reg and Op::src_reg
 	OP_STR8, // uses Op::dst_reg and Op::src_reg
-	OP_SETS, // uses Op::dst_reg and Op::value
-	OP_SETSR, // uses Op::dst_reg and Op::src_reg
-	OP_ALLOC, // uses Op::item_size and Op::value
-	OP_ALLOCR, // uses Op::item_size and Op::src_reg
+	OP_VAR, // uses Op::var_size
+	OP_SETV, // uses Op::dst_reg and Op::symbol_id
 	N_OPS
 } OpType;
 
@@ -113,14 +105,6 @@ typedef enum {
 	fromcstr("lesr"), \
 	fromcstr("ges"), \
 	fromcstr("gesr"), \
-	fromcstr("push64"), \
-	fromcstr("pop64"), \
-	fromcstr("push32"), \
-	fromcstr("pop32"), \
-	fromcstr("push16"), \
-	fromcstr("pop16"), \
-	fromcstr("push8"), \
-	fromcstr("pop8"), \
 	fromcstr("and"), \
 	fromcstr("andr"), \
 	fromcstr("or"), \
@@ -134,8 +118,10 @@ typedef enum {
 	fromcstr("shrr"), \
 	fromcstr("shrs"), \
 	fromcstr("shrsr"), \
+	fromcstr("proc"), \
 	fromcstr("call"), \
 	fromcstr("ret"), \
+	fromcstr("endproc"), \
 	fromcstr("ld64"), \
 	fromcstr("str64"), \
 	fromcstr("ld32"), \
@@ -144,10 +130,8 @@ typedef enum {
 	fromcstr("str16"), \
 	fromcstr("ld8"), \
 	fromcstr("str8"), \
-	fromcstr("sets"), \
-	fromcstr("setsr"), \
-	fromcstr("alloc"), \
-	fromcstr("allocr") \
+	fromcstr("var"), \
+	fromcstr("setv") \
 
 sbuf opNames[] = { _opNames };
 
@@ -194,14 +178,15 @@ typedef enum {
 } SysOpCode;
 
 typedef enum {
-	EC_STACK_OVERFLOW = -9,
-	EC_INVALID_ARG_ID,
+	EC_STACK_OVERFLOW = -10,
+	EC_OUTDATED_LOCALPTR,
+	EC_UNDEFINED_STACK_LOAD,
+	EC_NON_PROC_CALL,
 	EC_NO_STACKFRAME,
 	EC_NEGATIVE_SIZE_ACCESS,
 	EC_ACCESS_FAILURE,
-	EC_STACK_UNDERFLOW, 
+	EC_STACK_UNDERFLOW,
 	EC_UNKNOWN_SYSCALL,
-	EC_STACK_MISALIGNMENT,
 	EC_ACCESS_MISALIGNMENT,
 	EC_OK
 } ExitCode;
@@ -218,7 +203,7 @@ typedef struct op {
 	int8_t type;
 	int8_t dst_reg;
 	int8_t src_reg;
-	int8_t item_type;
+	int8_t var_size;
 	union {
 		int64_t value;
 		int64_t symbol_id;
@@ -270,64 +255,76 @@ typedef struct program {
 	int64_t stack_size;
 } Program;
 
-#define N_REGISTERS 8
-#define DEFAULT_STACK_SIZE 512 * 1024 // 512 Kb, just like in JVM
-
-#define BREX_TRACE_REGS      0b00000001
-#define BREX_TRACE_STACK     0b00000010
-#define BREX_CHECK_SYSCALLS  0b00000100
-#define BREX_PRINT_MEMBLOCKS 0b00001000
-
 typedef enum {
-	TRACER_VOID,
-	TRACER_BOOL,
-	TRACER_INT8,
-	TRACER_INT16,
-	TRACER_INT32,
-	TRACER_INT64,
-	TRACER_PTR,
-	TRACER_CONST,
-	N_TRACER_TYPES
-} TracerType;
+	DS_INT8,
+	DS_INT16,
+	DS_VOID,
+	DS_INT32,
+	DS_BOOL,
+	DS_CONST,
+	DS_PTR,
+	DS_INT64,
+	N_DS_TYPES
+} DataType;
 
-char TracerTypeSizes[] = { 
-	0, // TRACER_VOID
-	1, // TRACER_BOOL
-	1, // TRACER_INT8
-	2, // TRACER_INT16
-	4, // TRACER_INT32
-	8, // TRACER_INT64
-	8, // TRACER_PTR
-	8, // TRACER_CONST
+static const char DataTypeSizes[] = {
+	1, // DS_INT8
+	2, // DS_INT16
+	0, // DS_VOID
+	4, // DS_INT32
+	1, // DS_BOOL
+	8, // DS_CONST
+	8, // DS_PTR
+	8, // DS_INT64
 };
-static_assert(N_TRACER_TYPES == sizeof(TracerTypeSizes), "not all tracers have their sizes set");
-
-#define isIntTracer(tracer) inRange((tracer).type, TRACER_BOOL, TRACER_PTR)
-
+static_assert(N_DS_TYPES == sizeof(DataTypeSizes), "not all tracers have their sizes set");
+#define dataSpecSize(spec) ( (spec).type != DS_VOID ? DataTypeSizes[(spec).type] : (spec).size )
+#define intSpecFromSize(size) ((DataSpec){.type = (size) - 1})
+#define isIntSpec(spec) ( spec.type != DS_VOID && spec.type != DS_CONST && spec.type != DS_PTR )
 
 typedef enum {
 	BUF_UNKNOWN,
 	BUF_DATA,
 	BUF_MEMORY,
-	BUF_STACK,
+	BUF_VAR,
 	BUF_ARGV,
 	N_BUF_TYPES
 } BufferRefType;
 
 typedef struct {
-	BufferRefType type;
+	int8_t type;
 	int id;
 } BufferRef;
 
 typedef struct {
 	int8_t type;
-	union {
-		BufferRef ref;
-		int64_t symbol_id;
+	union { // type-specific parameters
+		BufferRef ref; // for DS_PTR
+		int64_t symbol_id; // for DS_CONST
+		int64_t size; // for DS_VOID
+		char* mark_name; // for DS_PROCFRAME of DS_FRAME
 	};
-	bool is_stackframe;
-} Tracer;
-declArray(Tracer);
+} DataSpec;
+declArray(DataSpec);
+
+typedef struct {
+	int8_t size;
+	int32_t n_elements;
+} Var;
+
+typedef struct {
+	DataSpecArray vars;
+	int64_t prev_opid;
+	int64_t call_id;
+} ProcFrame;
+declArray(ProcFrame);
+
+#define N_REGISTERS 8
+#define DEFAULT_STACK_SIZE (512 * 1024) // 512 Kb, just like in JVM
+
+#define BREX_TRACING         0b00000001
+#define BREX_CHECK_SYSCALLS  0b00000100
+#define BREX_PRINT_MEMBLOCKS 0b00001000
 
 typedef struct {
 	sbuf heap;
@@ -343,18 +340,24 @@ typedef struct {
 		int8_t err_push_size; // for OP_PUSH*
 		struct {
 			int64_t err_access_length;
-			BufferRef err_buf_ref;
+			union {
+				BufferRef err_buf_ref;
+				int err_spec_id;
+				int8_t err_var_size;
+			};
 			void* err_ptr;
 		};
 	};
 	int8_t flags;
-	Tracer* regs_trace; // initialized only if BREX_TRACE_REGS flag is set
-	TracerArray stack_trace; // initialized only if BREX_TRACE_STACK flag is set
+	DataSpec* regs_trace; // initialized only if BREX_TRACING flag is set
+	ProcFrameArray vars; // initialized only if BREX_TRACING flag is set
 	int exec_argc;
 	sbuf* exec_argv;
+	int64_t call_count;
 } ExecEnv;
+#define envctx(envp) chunkctx(envp->stack_brk)
 
-BRBLoadError loadProgram(sbuf input, Program* dst, heapctx_t ctx);
+BRBLoadError loadProgram(FILE* fd, Program* dst, heapctx_t ctx);
 void printLoadError(BRBLoadError err);
 ExecEnv execProgram(Program* program, int8_t flags, char** args, volatile bool* interruptor);
 void printExecState(FILE* fd, ExecEnv* env, Program* program);

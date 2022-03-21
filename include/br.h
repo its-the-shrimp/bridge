@@ -78,6 +78,7 @@ typedef struct {
 	union {
 		TokenLoc error_loc;
 		char* error_filename;
+		int32_t sys_errno;
 	};
 	InputCtxArray sources;
 	int _nl_delim_id;
@@ -94,7 +95,7 @@ int fprintTokenStr(FILE* fd, Token token, Preprocessor* obj);
 int fprintToken(FILE* fd, Token token, Preprocessor* obj);
 char* getTokenTypeName(TokenType type);
 char* getTokenWord(Preprocessor* obj, Token token);
-char* getErrorStr(Preprocessor* obj);
+int printPrepError(FILE* fd, Preprocessor* obj);
 
 
 #define setPrepError(prep, code, loc) \

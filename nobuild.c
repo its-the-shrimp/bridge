@@ -57,4 +57,12 @@ int main(int argc, char* argv[])
 		"-o", PATH("build", "bin", "brex"),
 		PATH("src", "brex.c")
 	);
+	/*CMD(
+		"cc",
+		"-I", "include",
+		"-L", PATH("build", "lib"),
+		"-lbrb",
+		"-o", PATH("build", "bin", "brn"),
+		PATH("src", "brn.c")
+	);*/
 }

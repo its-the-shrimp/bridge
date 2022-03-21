@@ -1,14 +1,9 @@
-entry main
 data {
     helloworld "Hello, World\n"
 }
 exec {
-    mark hello
-        setb r0 stdout
-        setd r1 helloworld
-        set r2 13
-        sys write
-        ret
-    mark main
-        call hello
+    setb r0 stdout
+    setd r1 helloworld
+    set r2 13
+    sys write
 }
