@@ -309,7 +309,9 @@ OpLoader op_loaders[] = {
 	&load2RegImmOp, // OP_MUL
 	&load3RegOp, // OP_MULR
 	&load2RegImmOp, // OP_DIV
-	&load3RegOp // OP_DIVR
+	&load3RegOp, // OP_DIVR
+	&load2RegImmOp, // OP_DIVS
+	&load3RegOp // OP_DIVSR
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
@@ -1964,6 +1966,60 @@ bool handleOpDivr(ExecEnv* env, Program* program)
 	return false;
 }
 
+bool handleOpDivs(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] / op.value;
+	
+	if (env->flags & BREX_TRACING) {
+		if (!op.value) {
+			env->exitcode = EC_ZERO_DIVISION;
+			return true;
+		}
+
+		if (env->registers[op.dst_reg] >= (1L << 32)) {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
+			env->regs_trace[op.dst_reg].type = DS_INT32;
+		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
+			env->regs_trace[op.dst_reg].type = DS_INT16;
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT8;
+		}
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpDivsr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] / (int64_t)env->registers[op.src2_reg];
+	
+	if (env->flags & BREX_TRACING) {
+		if (!env->registers[op.src2_reg]) {
+			env->exitcode = EC_ZERO_DIVISION;
+			return true;
+		}
+
+		if (env->registers[op.dst_reg] >= (1L << 32)) {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
+			env->regs_trace[op.dst_reg].type = DS_INT32;
+		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
+			env->regs_trace[op.dst_reg].type = DS_INT16;
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT8;
+		}
+	}
+
+	env->op_id++;
+	return false;
+}
+
 ExecHandler op_handlers[] = {
 	&handleNop,
 	&handleOpEnd,
@@ -2030,7 +2086,9 @@ ExecHandler op_handlers[] = {
 	&handleOpMul,
 	&handleOpMulr,
 	&handleOpDiv,
-	&handleOpDivr
+	&handleOpDivr,
+	&handleOpDivs,
+	&handleOpDivsr
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 

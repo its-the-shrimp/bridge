@@ -32,6 +32,20 @@
    `subr` operation writes the difference between the value of register `src`
     and the value of register `src2` to register `dst`.
 
+5. `mul <dst: register> <src: register> <value: integer>` (code: 0x3E):\
+    `mul` operation saves the product of the value of register `src` and `value` to register `dst`.
+
+6. `mulr <dst: register> <src: register> <src2: register>` (code: 0x3F):\
+    `mulr` operation saves the product of the values of registers `src` and `src2` to register `dst`.
+
+7. `div(s) <dst: register> <src: register> <value: integer>` (code: 0x40 (0x42) ):\
+    `div` operation saves the quotient of the value of register `src` and `value` to register `dst`.\
+    `divs` operation is the same but performs signed division.
+
+8. `div(s)r <dst: register> <src: register> <src2: register>` (code: 0x41 (0x43) ):\
+    `divr` operation saves the quotient of the values of registers `src` and `src2` to register `dst`.\
+    `divsr` operation is the same but performs signed division.
+
 ### Bitwise operations
 
 1. `and <dst: register> <src: register> <value: integer>` (code: 0x23):\

@@ -70,6 +70,8 @@ typedef enum {
 	OP_MULR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_DIV, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_DIVR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
+	OP_DIVS, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_DIVSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
 	N_OPS
 } OpType;
 
@@ -139,7 +141,10 @@ typedef enum {
 	fromcstr("mul"), \
 	fromcstr("mulr"), \
 	fromcstr("div"), \
-	fromcstr("divr") \
+	fromcstr("divr"), \
+	fromcstr("divs"), \
+	fromcstr("divsr") \
+
 
 sbuf opNames[] = { _opNames };
 
