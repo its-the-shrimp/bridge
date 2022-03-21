@@ -76,6 +76,10 @@ typedef enum {
 	KW_STR8,
 	KW_VAR,
 	KW_SETV,
+	KW_MUL,
+	KW_MULR,
+	KW_DIV,
+	KW_DIVR,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -88,7 +92,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 62, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 66, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 5, "there might be system ops with unmatched keywords");
 
 bool minimal = false;
@@ -308,7 +312,11 @@ OpWriter op_writers[] = {
 	&write2RegOp, // OP_LD8
 	&write2RegOp, // OP_STR8
 	&writeOpVar,
-	&writeRegSymbolIdOp // OP_SETV
+	&writeRegSymbolIdOp, // OP_SETV
+	&write2RegImmOp, // OP_MUL
+	&write3RegOp, // OP_MULR
+	&write2RegImmOp, // OP_DIV
+	&write3RegOp // OP_DIVR
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
 
@@ -755,7 +763,11 @@ OpCompiler op_compilers[] = {
 	&compile2RegOp, // OP_LD8
 	&compile2RegOp, // OP_STR8
 	&compileOpVar,
-	&compileOpSetv
+	&compileOpSetv,
+	&compile2RegImmOp, // OP_MUL
+	&compile3RegOp, // OP_MULR
+	&compile2RegImmOp, // OP_DIV
+	&compile3RegOp // OP_DIVR
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 

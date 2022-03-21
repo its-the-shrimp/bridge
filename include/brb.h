@@ -66,6 +66,10 @@ typedef enum {
 	OP_STR8, // uses Op::dst_reg and Op::src_reg
 	OP_VAR, // uses Op::var_size
 	OP_SETV, // uses Op::dst_reg and Op::symbol_id
+	OP_MUL, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_MULR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_DIV, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_DIVR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
 	N_OPS
 } OpType;
 
@@ -131,7 +135,11 @@ typedef enum {
 	fromcstr("ld8"), \
 	fromcstr("str8"), \
 	fromcstr("var"), \
-	fromcstr("setv") \
+	fromcstr("setv"), \
+	fromcstr("mul"), \
+	fromcstr("mulr"), \
+	fromcstr("div"), \
+	fromcstr("divr") \
 
 sbuf opNames[] = { _opNames };
 
@@ -178,7 +186,8 @@ typedef enum {
 } SysOpCode;
 
 typedef enum {
-	EC_STACK_OVERFLOW = -10,
+	EC_STACK_OVERFLOW = -11,
+	EC_ZERO_DIVISION,
 	EC_OUTDATED_LOCALPTR,
 	EC_UNDEFINED_STACK_LOAD,
 	EC_NON_PROC_CALL,

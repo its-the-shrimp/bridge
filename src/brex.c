@@ -305,7 +305,11 @@ OpLoader op_loaders[] = {
 	&load2RegOp, // OP_LD8
 	&load2RegOp, // OP_STR8
 	&loadOpVar,
-	&loadRegSymbolIdOp  // OP_SETV
+	&loadRegSymbolIdOp,  // OP_SETV
+	&load2RegImmOp, // OP_MUL
+	&load3RegOp, // OP_MULR
+	&load2RegImmOp, // OP_DIV
+	&load3RegOp // OP_DIVR
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
@@ -1862,6 +1866,104 @@ bool handleOpSetv(ExecEnv* env, Program* program)
 	return false;
 }
 
+bool handleOpMul(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	env->registers[op.dst_reg] = env->registers[op.src_reg] * (uint64_t)op.value;
+	
+	if (env->flags & BREX_TRACING) {
+		if (env->registers[op.dst_reg] >= (1L << 32)) {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
+			env->regs_trace[op.dst_reg].type = DS_INT32;
+		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
+			env->regs_trace[op.dst_reg].type = DS_INT16;
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT8;
+		}
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpMulr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	env->registers[op.dst_reg] = env->registers[op.src_reg] * env->registers[op.src2_reg];
+	
+	if (env->flags & BREX_TRACING) {
+		if (env->registers[op.dst_reg] >= (1L << 32)) {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
+			env->regs_trace[op.dst_reg].type = DS_INT32;
+		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
+			env->regs_trace[op.dst_reg].type = DS_INT16;
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT8;
+		}
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpDiv(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	env->registers[op.dst_reg] = env->registers[op.src_reg] / (uint64_t)op.value;
+	
+	if (env->flags & BREX_TRACING) {
+		if (!op.value) {
+			env->exitcode = EC_ZERO_DIVISION;
+			return true;
+		}
+
+		if (env->registers[op.dst_reg] >= (1L << 32)) {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
+			env->regs_trace[op.dst_reg].type = DS_INT32;
+		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
+			env->regs_trace[op.dst_reg].type = DS_INT16;
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT8;
+		}
+	}
+
+	env->op_id++;
+	return false;
+}
+
+bool handleOpDivr(ExecEnv* env, Program* program)
+{
+	Op op = program->execblock.data[env->op_id];
+
+	env->registers[op.dst_reg] = env->registers[op.src_reg] / env->registers[op.src2_reg];
+	
+	if (env->flags & BREX_TRACING) {
+		if (!env->registers[op.src2_reg]) {
+			env->exitcode = EC_ZERO_DIVISION;
+			return true;
+		}
+
+		if (env->registers[op.dst_reg] >= (1L << 32)) {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
+			env->regs_trace[op.dst_reg].type = DS_INT32;
+		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
+			env->regs_trace[op.dst_reg].type = DS_INT16;
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT8;
+		}
+	}
+
+	env->op_id++;
+	return false;
+}
+
 ExecHandler op_handlers[] = {
 	&handleNop,
 	&handleOpEnd,
@@ -1924,7 +2026,11 @@ ExecHandler op_handlers[] = {
 	&handleOpLd8,
 	&handleOpStr8,
 	&handleOpVar,
-	&handleOpSetv
+	&handleOpSetv,
+	&handleOpMul,
+	&handleOpMulr,
+	&handleOpDiv,
+	&handleOpDivr
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 
@@ -1933,6 +2039,9 @@ void printRuntimeError(FILE* fd, ExecEnv* env, Program* program)
 	switch (env->exitcode) {
 		case EC_NO_STACKFRAME:
 			fprintf(fd,"%llx:\n\truntime error: attempted to return from a global stack frame\n", env->op_id);
+			break;
+		case EC_ZERO_DIVISION:
+			fprintf(fd, "%llx:\n\truntime error: attempted to divide by zero\n", env->op_id);
 			break;
 		case EC_OUTDATED_LOCALPTR:
 			fprintf(fd, "%llx:\n\truntime error: attempted to use an outdated stack pointer\n", env->op_id);
