@@ -336,9 +336,9 @@ declArray(ProcFrame);
 #define N_REGISTERS 8
 #define DEFAULT_STACK_SIZE (512 * 1024) // 512 Kb, just like in JVM
 
-#define BREX_TRACING         0b00000001
-#define BREX_CHECK_SYSCALLS  0b00000100
-#define BREX_PRINT_MEMBLOCKS 0b00001000
+#define BRBX_TRACING         0b00000001
+#define BRBX_CHECK_SYSCALLS  0b00000100
+#define BRBX_PRINT_MEMBLOCKS 0b00001000
 
 typedef struct {
 	sbuf heap;
@@ -363,8 +363,8 @@ typedef struct {
 		};
 	};
 	int8_t flags;
-	DataSpec* regs_trace; // initialized only if BREX_TRACING flag is set
-	ProcFrameArray vars; // initialized only if BREX_TRACING flag is set
+	DataSpec* regs_trace; // initialized only if BRBX_TRACING flag is set
+	ProcFrameArray vars; // initialized only if BRBX_TRACING flag is set
 	int exec_argc;
 	sbuf* exec_argv;
 	int64_t call_count;

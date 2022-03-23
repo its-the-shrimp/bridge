@@ -12,7 +12,7 @@ $ ./nobuild
 ```
 
 ## Tools
-- [brex](src/brex.c) - Execution environment for BRidge bytecode.
+- [brbx](src/brbx.c) - Execution environment for BRidge bytecode.
 - [brs](src/brs.c) - BRidge assembler, translates BRidge assembly `.vbrb` files to executable bytecode `.brb` files.
 
 ## Documentation
@@ -23,5 +23,5 @@ $ ./nobuild
 'Hello World' in BRidge assembly is [there](examples/hello_world.vbrb) and can be compiled and executed with these commands:
 ```console
 $ brs examples/hello_world.vbrb
-$ brex examples/hello_world.brb
+$ brbx examples/hello_world.brb
 ```

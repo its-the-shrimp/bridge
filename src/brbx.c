@@ -418,7 +418,7 @@ ExecEnv initExecEnv(Program* program, int8_t flags, char** args)
 		memset(newblock->data, 0, newblock->length);
 	);
 
-	if (flags & BREX_TRACING) {
+	if (flags & BRBX_TRACING) {
 		res.regs_trace = ctxalloc_new(sizeof(DataSpec) * N_REGISTERS, memctx);
 		for (int i = 0; i < N_REGISTERS; i++) {
 			res.regs_trace[i].type = DS_VOID;
@@ -548,7 +548,7 @@ void printDataSpec(FILE* fd, Program* program, ExecEnv* env, DataSpec spec, int6
 
 void printExecState(FILE* fd, ExecEnv* env, Program* program)
 {
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		fprintf(fd, "local stack frame:\n");
 		void* cur_stack_pos = env->prev_stack_head;
 		static_assert(N_DS_TYPES == 8, "not all tracer types are handled");
@@ -593,7 +593,7 @@ void printExecState(FILE* fd, ExecEnv* env, Program* program)
 			printDataSpec(fd, program, env, env->regs_trace[i], env->registers[i]);
 		}
 
-		if (env->flags & BREX_PRINT_MEMBLOCKS) {
+		if (env->flags & BRBX_PRINT_MEMBLOCKS) {
 			printf("memory blocks:\n");
 			array_foreach(sbuf, block, env->memblocks, 
 				printf("\t%s: \"", program->memblocks.data[_block].name);
@@ -704,7 +704,7 @@ bool handleExitSyscall(ExecEnv* env, Program* program)
 
 bool handleWriteSyscall(ExecEnv* env, Program* program)
 {
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[0].type = DS_INT64;
 	}
 
@@ -716,7 +716,7 @@ bool handleWriteSyscall(ExecEnv* env, Program* program)
 
 bool handleArgcSyscall(ExecEnv* env, Program* program)
 {
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[0].type = DS_INT32;
 	}
 
@@ -727,7 +727,7 @@ bool handleArgcSyscall(ExecEnv* env, Program* program)
 
 bool handleArgvSyscall(ExecEnv* env, Program* program)
 {
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[0] = (DataSpec){ 
 			.type = DS_PTR,
 			.ref = (BufferRef){
@@ -770,7 +770,7 @@ bool handleOpSet(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_INT64;
 	}
 
@@ -783,7 +783,7 @@ bool handleOpSetr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 	}
 
@@ -796,7 +796,7 @@ bool handleOpSetd(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)program->datablocks.data[op.symbol_id].spec.data;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg] = (DataSpec){ 
 			.type = DS_PTR,
 			.ref = (BufferRef){ 
@@ -815,7 +815,7 @@ bool handleOpSetb(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = consts[op.symbol_id].value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg] = (DataSpec){ .type = DS_CONST, .symbol_id = op.symbol_id };
 	}
 
@@ -828,7 +828,7 @@ bool handleOpSetm(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->memblocks.data[op.symbol_id].data;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg] = (DataSpec){ 
 			.type = DS_PTR,
 			.ref = (BufferRef){
@@ -847,7 +847,7 @@ bool handleOpAdd(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] + op.value;
 
-	if (env->flags &  BREX_TRACING) {
+	if (env->flags &  BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
@@ -875,7 +875,7 @@ bool handleOpAddr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] + env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				if (isIntSpec(env->regs_trace[op.src2_reg])) {
@@ -905,7 +905,7 @@ bool handleOpSub(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] - op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
@@ -933,7 +933,7 @@ bool handleOpSubr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] - env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				if (isIntSpec(env->regs_trace[op.src2_reg])) {
@@ -986,7 +986,7 @@ bool handleOpEq(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] == op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -999,7 +999,7 @@ bool handleOpEqr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] == env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1012,7 +1012,7 @@ bool handleOpNeq(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] != op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1025,7 +1025,7 @@ bool handleOpNeqr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] != env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1038,7 +1038,7 @@ bool handleOpLt(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] < (uint64_t)op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1051,7 +1051,7 @@ bool handleOpLtr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] < env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1064,7 +1064,7 @@ bool handleOpGt(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] > (uint64_t)op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1077,7 +1077,7 @@ bool handleOpGtr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] > env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1090,7 +1090,7 @@ bool handleOpLe(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] <= (uint64_t)op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1103,7 +1103,7 @@ bool handleOpLer(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] <= env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1116,7 +1116,7 @@ bool handleOpGe(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >= (uint64_t)op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1129,7 +1129,7 @@ bool handleOpGer(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >= env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1142,7 +1142,7 @@ bool handleOpLts(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] < op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1155,7 +1155,7 @@ bool handleOpLtsr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] < (int64_t)env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1168,7 +1168,7 @@ bool handleOpGts(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] > op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1181,7 +1181,7 @@ bool handleOpGtsr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] > (int64_t)env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1194,7 +1194,7 @@ bool handleOpLes(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] <= op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1207,7 +1207,7 @@ bool handleOpLesr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] <= (int64_t)env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1220,7 +1220,7 @@ bool handleOpGes(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >= op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1233,7 +1233,7 @@ bool handleOpGesr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >= (int64_t)env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_BOOL;
 	}
 
@@ -1246,7 +1246,7 @@ bool handleOpAnd(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] & op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (isIntSpec(env->regs_trace[op.src_reg])) {
 			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 		} else {
@@ -1263,7 +1263,7 @@ bool handleOpAndr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] & env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		bool left_reg_int = isIntSpec(env->regs_trace[op.src_reg]), right_reg_int = isIntSpec(env->regs_trace[op.src2_reg]);
 		if (left_reg_int && right_reg_int) { // TODO: proper estimation of data size
 			if (env->regs_trace[op.src_reg].type > env->regs_trace[op.src2_reg].type) {
@@ -1289,7 +1289,7 @@ bool handleOpOr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] | op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (isIntSpec(env->regs_trace[op.src_reg])) {
 			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 		} else {
@@ -1306,7 +1306,7 @@ bool handleOpOrr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] | env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		bool left_reg_int = isIntSpec(env->regs_trace[op.src_reg]), right_reg_int = isIntSpec(env->regs_trace[op.src2_reg]);
 		if (left_reg_int && right_reg_int) {
 			if (env->regs_trace[op.src_reg].type < env->regs_trace[op.src2_reg].type) {
@@ -1332,7 +1332,7 @@ bool handleOpNot(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = ~env->registers[op.src_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg].type = DS_INT64;
 	}
 
@@ -1345,7 +1345,7 @@ bool handleOpXor(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] ^ op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (isIntSpec(env->regs_trace[op.src_reg])) {
 			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
 		} else {
@@ -1362,7 +1362,7 @@ bool handleOpXorr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] ^ env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		bool left_reg_int = isIntSpec(env->regs_trace[op.src_reg]), right_reg_int = isIntSpec(env->regs_trace[op.src2_reg]);
 		if (left_reg_int && right_reg_int) {
 			if (env->regs_trace[op.src_reg].type < env->regs_trace[op.src2_reg].type) {
@@ -1388,7 +1388,7 @@ bool handleOpShl(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] << op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
@@ -1416,7 +1416,7 @@ bool handleOpShlr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] << env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				if (isIntSpec(env->regs_trace[op.src2_reg])) {
@@ -1446,7 +1446,7 @@ bool handleOpShr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >> op.value;
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
@@ -1474,7 +1474,7 @@ bool handleOpShrr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >> env->registers[op.src2_reg];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				if (isIntSpec(env->regs_trace[op.src2_reg])) {
@@ -1504,7 +1504,7 @@ bool handleOpShrs(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >> op.value;
 
-	if (env->flags & (BREX_TRACING)) {
+	if (env->flags & BRBX_TRACING) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
@@ -1532,7 +1532,7 @@ bool handleOpShrsr(ExecEnv* env, Program* program)
 	Op op = program->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >> env->registers[op.src2_reg];
 
-	if (env->flags & (BREX_TRACING)) {
+	if (env->flags & (BRBX_TRACING)) {
 		switch (env->regs_trace[op.src_reg].type) {
 			case DS_PTR:
 				if (isIntSpec(env->regs_trace[op.src2_reg])) {
@@ -1560,7 +1560,7 @@ bool handleOpShrsr(ExecEnv* env, Program* program)
 bool handleOpCall(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
-	if (env->flags & (BREX_TRACING)) {
+	if (env->flags & (BRBX_TRACING)) {
 		if (env->stack_brk > env->stack_head - 16) {
 			env->exitcode = EC_STACK_OVERFLOW;
 			env->err_push_size = 16;
@@ -1590,7 +1590,7 @@ bool handleOpCall(ExecEnv* env, Program* program)
 
 bool handleOpRet(ExecEnv* env, Program* program)
 {
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (env->stack_head + 16 > env->stack_brk + program->stack_size) {
 			env->exitcode = EC_STACK_UNDERFLOW;
 			env->err_pop_size = 16;
@@ -1618,7 +1618,7 @@ bool handleOpLd64(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		BufferRef ref = validateMemoryAccess(env, program, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
 		if (!ref.type) {
 			return true;
@@ -1645,7 +1645,7 @@ bool handleOpStr64(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		BufferRef ref = validateMemoryAccess(env, program, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 8);
 		if (!ref.type) {
 			return true;
@@ -1672,7 +1672,7 @@ bool handleOpLd32(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		BufferRef ref = validateMemoryAccess(env, program, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 4);
 		if (!ref.type) {
 			return true;
@@ -1699,7 +1699,7 @@ bool handleOpStr32(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		BufferRef ref = validateMemoryAccess(env, program, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 4);
 		if (!ref.type) {
 			return true;
@@ -1726,7 +1726,7 @@ bool handleOpLd16(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		BufferRef ref = validateMemoryAccess(env, program, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 2);
 		if (!ref.type) {
 			return true;
@@ -1753,7 +1753,7 @@ bool handleOpStr16(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		BufferRef ref = validateMemoryAccess(env, program, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 2);
 		if (!ref.type) {
 			return true;
@@ -1780,7 +1780,7 @@ bool handleOpLd8(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		BufferRef ref = validateMemoryAccess(env, program, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 1);
 		if (!ref.type) {
 			return true;
@@ -1807,7 +1807,7 @@ bool handleOpStr8(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		BufferRef ref = validateMemoryAccess(env, program, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 1);
 		if (!ref.type) {
 			return true;
@@ -1834,7 +1834,7 @@ bool handleOpVar(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		DataSpecArray_append(
 			&arrayhead(env->vars)->vars, 
 			(DataSpec){
@@ -1853,7 +1853,7 @@ bool handleOpSetv(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
 	
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		env->regs_trace[op.dst_reg] = (DataSpec){
 			.type = DS_PTR,
 			.ref = (BufferRef){
@@ -1874,7 +1874,7 @@ bool handleOpMul(ExecEnv* env, Program* program)
 
 	env->registers[op.dst_reg] = env->registers[op.src_reg] * (uint64_t)op.value;
 	
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (env->registers[op.dst_reg] >= (1L << 32)) {
 			env->regs_trace[op.dst_reg].type = DS_INT64;
 		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
@@ -1896,7 +1896,7 @@ bool handleOpMulr(ExecEnv* env, Program* program)
 
 	env->registers[op.dst_reg] = env->registers[op.src_reg] * env->registers[op.src2_reg];
 	
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (env->registers[op.dst_reg] >= (1L << 32)) {
 			env->regs_trace[op.dst_reg].type = DS_INT64;
 		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
@@ -1918,7 +1918,7 @@ bool handleOpDiv(ExecEnv* env, Program* program)
 
 	env->registers[op.dst_reg] = env->registers[op.src_reg] / (uint64_t)op.value;
 	
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (!op.value) {
 			env->exitcode = EC_ZERO_DIVISION;
 			return true;
@@ -1945,7 +1945,7 @@ bool handleOpDivr(ExecEnv* env, Program* program)
 
 	env->registers[op.dst_reg] = env->registers[op.src_reg] / env->registers[op.src2_reg];
 	
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (!env->registers[op.src2_reg]) {
 			env->exitcode = EC_ZERO_DIVISION;
 			return true;
@@ -1972,7 +1972,7 @@ bool handleOpDivs(ExecEnv* env, Program* program)
 
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] / op.value;
 	
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (!op.value) {
 			env->exitcode = EC_ZERO_DIVISION;
 			return true;
@@ -1999,7 +1999,7 @@ bool handleOpDivsr(ExecEnv* env, Program* program)
 
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] / (int64_t)env->registers[op.src2_reg];
 	
-	if (env->flags & BREX_TRACING) {
+	if (env->flags & BRBX_TRACING) {
 		if (!env->registers[op.src2_reg]) {
 			env->exitcode = EC_ZERO_DIVISION;
 			return true;
@@ -2202,12 +2202,11 @@ void handleExecInt(int sig)
 
 void printUsageMsg(FILE* fd, char* exec_name)
 {
-	fprintf(fd, "brex - Execute and debug .brb (BRidge Executable) files\n");
+	fprintf(fd, "brbx - Execute and debug .brb (BRidge Executable) files\n");
 	fprintf(fd, "usage: %s [-chmrs] <file> [program-args...]\n", exec_name);
 	fprintf(fd, "options:\n");
 	fprintf(fd, "\t-h     Output this message and exit\n");
-	fprintf(fd, "\t-r     Trace register values and output them after execution of the program\n");
-	fprintf(fd, "\t-s     Trace stack values and output them after execution of the program\n");
+	fprintf(fd, "\t-t     Trace data alignment and validate arguments to the operations. Provides precise error tracking and verbose reporting\n");
 	fprintf(fd, "\t-m     Output contents of memory blocks after execution of the program\n");
 	fprintf(fd, "\t-c     Stop execution if any system call fails and report an error. Without `-r` or `-s` flags, this flag does nothing\n");
 }
@@ -2221,9 +2220,9 @@ int main(int argc, char* argv[]) {
 			for (argv[i]++; *argv[i]; argv[i]++) {
 				switch (*argv[i]) {
 					case 'h': printUsageMsg(stdout, argv[0]); return 0;
-					case 't': exec_flags |= BREX_TRACING; break;
-					case 'm': exec_flags |= BREX_PRINT_MEMBLOCKS; break;
-					case 'c': exec_flags |= BREX_CHECK_SYSCALLS; break;
+					case 't': exec_flags |= BRBX_TRACING; break;
+					case 'm': exec_flags |= BRBX_PRINT_MEMBLOCKS; break;
+					case 'c': exec_flags |= BRBX_CHECK_SYSCALLS; break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
 			}
