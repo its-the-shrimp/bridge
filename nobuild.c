@@ -5,16 +5,20 @@
 int main(int argc, char* argv[])
 {
 	GO_REBUILD_URSELF(argc, argv);
-	MKDIRS("build", "lib");
-	MKDIRS("build", "bin");
+	if (!PATH_EXISTS("build")) {
+		MKDIRS("build", "lib");
+		MKDIRS("build", "bin");
+	}
 
 #	define CORE_MODIFIED mod_flags[0]
 #	define BRS_MODIFIED  mod_flags[1]
 #	define BRBX_MODIFIED mod_flags[2]
+#	define BRBC_MODIFIED mod_flags[3]
 	bool mod_flags[] = {
 		is_path1_modified_after_path2(PATH("src", "core.c"), PATH("build", "lib", "libbr.dylib")),
 		is_path1_modified_after_path2(PATH("src", "brs.c"), PATH("build", "bin", "brs")),
-		is_path1_modified_after_path2(PATH("src", "brbx.c"), PATH("build", "bin", "brbx"))
+		is_path1_modified_after_path2(PATH("src", "brbx.c"), PATH("build", "bin", "brbx")),
+		is_path1_modified_after_path2(PATH("src", "brbc.c"), PATH("build", "bin", "brbc"))
 	};
 
 // compiling libbr
@@ -72,12 +76,15 @@ int main(int argc, char* argv[])
 			PATH("src", "brs.c")
 		);
 	}
-	/*CMD(
-		"cc",
-		"-I", "include",
-		"-L", PATH("build", "lib"),
-		"-lbrb",
-		"-o", PATH("build", "bin", "brn"),
-		PATH("src", "brn.c")
-	);*/
+	
+	if (BRBC_MODIFIED) {
+		CMD(
+			"cc",
+			"-I", "include",
+			"-L", PATH("build", "lib"),
+			"-lbrb",
+			"-o", PATH("build", "bin", "brbc"),
+			PATH("src", "brbc.c")
+		);
+	}
 }

@@ -7,6 +7,5 @@ build
 a.out
 test.vbrb
 *.S
-src/brbc.c
 *.o
 test

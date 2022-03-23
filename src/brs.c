@@ -1079,13 +1079,16 @@ void printUsageMsg(FILE* fd, char* execname)
 	fprintf(fd, "\t-h           Output this message and exit\n");
 	fprintf(fd, "\t-o <file>    The output will be saved to <file>\n");
 	fprintf(fd, "\t-m           Minimize the size of compiled program by removing all names from it. Not recommended when debugging\n");
+	fprintf(fd, "\t-n <file>    Compile source directly to a native executable\n");
 }
 
 int main(int argc, char* argv[])
 {
 	initBREnv();
+	startTimer();
+
 	bool go_on = false;
-	char *input_path = NULL, *output_path = NULL;
+	char *input_path = NULL, *output_path = NULL, *exec_output_path = NULL;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
 			for (argv[i]++; *argv[i]; argv[i]++) {
@@ -1101,6 +1104,14 @@ int main(int argc, char* argv[])
 						go_on = true;
 						break;
 					case 'm': minimal = true; break;
+					case 'n':
+						if (!argv[++i]) {
+							eprintf("error: `-n` option specified but no executable output file path provided\n");
+							return 1;
+						}
+						exec_output_path = argv[i];
+						go_on = true;
+						break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
 			}
@@ -1142,7 +1153,6 @@ int main(int argc, char* argv[])
 		(sbuf){0}
 	};
 
-	startTimer();
 	Preprocessor prep = newPreprocessor(delims, kws, GLOBAL_CTX);
 	if (!setInput(&prep, input_path)) {
 		printPrepError(stderr, &prep);

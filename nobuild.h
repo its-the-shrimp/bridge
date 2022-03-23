@@ -1091,6 +1091,9 @@ int is_path1_modified_after_path2(const char *path1, const char *path2)
     int path1_time = statbuf.st_mtime;
 
     if (stat(path2, &statbuf) < 0) {
+        if (errno == ENOENT) {
+            return 1;
+        }
         PANIC("could not stat %s: %s\n", path2, strerror(errno));
     }
     int path2_time = statbuf.st_mtime;

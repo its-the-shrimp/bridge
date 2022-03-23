@@ -7,6 +7,7 @@
 #include "math.h"
 #include "time.h"
 #include "errno.h"
+#include "sys/wait.h"
 
 defArray(sbuf);
 defArray(InputCtx);
@@ -315,4 +316,48 @@ float endTimer(void)
 	struct timespec newtime;
 	clock_gettime(CLOCK_MONOTONIC, &newtime);
 	return (newtime.tv_sec - TIME.tv_sec) * 1000 + (newtime.tv_nsec - TIME.tv_nsec) / (float)1e6;
+}
+
+int execProcess(char* command, FILE* input, FILE** output, FILE** error_output)
+{
+	int output_pipe[2] = {-1, -1}, error_pipe[2] = {-1, -1};
+	pipe(output_pipe);
+	pipe(error_pipe);
+	pid_t pid = vfork();
+
+	if (!pid) {
+		char* argv[] = {
+			"/bin/sh",
+			"-c",
+			command,
+			NULL
+		};
+
+		if (input) {
+			if (dup2(fileno(input), STDIN_FILENO) < 0) return -1;
+		}
+		if (dup2(output_pipe[1], STDOUT_FILENO) < 0) return -1;
+		if (dup2(error_pipe[1], STDERR_FILENO) < 0) return -1;
+		close(output_pipe[1]);
+		close(error_pipe[1]);
+
+		execvp("/bin/sh", argv);
+	}
+
+	int child_stats;
+	if (pid != waitpid(pid, &child_stats, 0)) return -1;
+	close(output_pipe[1]);
+	close(error_pipe[1]);
+
+	if (output) {
+		*output = fdopen(output_pipe[0], "r");
+	} else {
+		close(output_pipe[0]);
+	}
+	if (error_output) {
+		*error_output = fdopen(error_pipe[0], "r");
+	} else {
+		close(error_pipe[0]);
+	}
+	return WIFEXITED(child_stats) ? WEXITSTATUS(child_stats) : -1;
 }
