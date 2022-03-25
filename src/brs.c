@@ -1079,7 +1079,8 @@ void printUsageMsg(FILE* fd, char* execname)
 	fprintf(fd, "\t-h           Output this message and exit\n");
 	fprintf(fd, "\t-o <file>    The output will be saved to <file>\n");
 	fprintf(fd, "\t-m           Minimize the size of compiled program by removing all names from it. Not recommended when debugging\n");
-	fprintf(fd, "\t-n <file>    Compile source directly to a native executable\n");
+	fprintf(fd, "\t-n <file>    Compile source directly to a native executable, which will be saved to <file>\n");
+	fprintf(fd, "\t-N           The same as `-n` option, but the resulting executable will have the same name as the input file\n");
 }
 
 int main(int argc, char* argv[])
@@ -1112,6 +1113,7 @@ int main(int argc, char* argv[])
 						exec_output_path = argv[i];
 						go_on = true;
 						break;
+					case 'N': exec_output_path = (void*)1; break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
 			}
@@ -1128,10 +1130,13 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
+	sbuf input_path_sbuf = fromstr(input_path), basename = {0};
 	if (!output_path) {
-		sbuf ext = fromstr(input_path), noext = {0};
-		sbufsplit(&ext, &noext, fromcstr("."));
-		output_path = tostr(GLOBAL_CTX, noext, fromcstr(".brb"));
+		sbufsplit(&input_path_sbuf, &basename, fromcstr("."));
+		output_path = tostr(GLOBAL_CTX, basename, fromcstr(".brb"));
+	}
+	if (exec_output_path == (void*)1) {
+		exec_output_path = tostr(GLOBAL_CTX, basename);
 	}
 	
 	sbuf delims[] = {
@@ -1315,4 +1320,20 @@ int main(int argc, char* argv[])
 	fclose(output_fd);
 
 	printf("%s -> %s in %.3f ms\n", input_path, output_path, endTimer());
+	if (!exec_output_path) return 0;
+
+	char cmd[1024];
+	ProcessInfo proc_res = { .out = stdout };
+	snprintf(cmd, sizeof(cmd), "brbc -o %s %s", exec_output_path, output_path);
+
+	if (!execProcess(cmd, &proc_res)) {
+		eprintf("error: could start the bytecode compiler (reason: %s)\n", strerror(errno));
+		return 1;
+	} else if (proc_res.exitcode) {
+		eprintf("error: bytecode compiler exited with code %hhu\n", proc_res.exitcode);
+		sbuf err_output = filecontent(proc_res.err, GLOBAL_CTX);
+		err_output.length--; // removing the newline from the output
+		eprintf("bytecode compiler output:\n\t\""sbuf_format"\"\n", unpack(err_output));
+		return 1;
+	}
 }

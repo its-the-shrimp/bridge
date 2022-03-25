@@ -3,11 +3,12 @@
 #include "br.h"
 #include "unistd.h"
 #include "sys/param.h"
-#include "stdarg.h"
 #include "math.h"
 #include "time.h"
 #include "errno.h"
+#include "spawn.h"
 #include "sys/wait.h"
+extern char** environ;
 
 defArray(sbuf);
 defArray(InputCtx);
@@ -19,7 +20,6 @@ sbuf NT_PATHSEP = fromcstr("\\");
 sbuf POSIX_PATHSEP = fromcstr("/");
 
 bool IS_BIG_ENDIAN, IS_LITTLE_ENDIAN;
-static struct timespec TIME;
 
 Preprocessor newPreprocessor(sbuf delims[], sbuf keywords[], heapctx_t ctx)
 {
@@ -282,7 +282,10 @@ char* getAbsolutePath(char* src, heapctx_t ctx)
 	}
 	sbuf res = sctxalloc_new(input.length + 1, ctx);
 	memset(res.data, 0, res.length);
-	if (!res.data) return NULL;
+	if (!res.data) {
+		exit_tempctx(funcctx);
+		return NULL;
+	}
 	res.length = 0;
 	array_foreach(sbuf, component, components,
 		memcpy(res.data + res.length, PATHSEP.data, PATHSEP.length);
@@ -306,58 +309,73 @@ void* BRByteOrder(void* src, long length) {
 	return src;
 }
 
-bool startTimer(void)
+bool startTimerAt(struct timespec* dst)
 {
-	return !clock_gettime(CLOCK_MONOTONIC, &TIME);
+	return !clock_gettime(CLOCK_MONOTONIC, dst);
 }
 
-float endTimer(void)
+float endTimerAt(struct timespec* src)
 {
 	struct timespec newtime;
 	clock_gettime(CLOCK_MONOTONIC, &newtime);
-	return (newtime.tv_sec - TIME.tv_sec) * 1000 + (newtime.tv_nsec - TIME.tv_nsec) / (float)1e6;
+	return (newtime.tv_sec - src->tv_sec) * 1000 + (newtime.tv_nsec - src->tv_nsec) / (float)1e6;
 }
 
-int execProcess(char* command, FILE* input, FILE** output, FILE** error_output)
+bool execProcess(char* command, ProcessInfo* info)
 {
-	int output_pipe[2] = {-1, -1}, error_pipe[2] = {-1, -1};
-	pipe(output_pipe);
-	pipe(error_pipe);
-	pid_t pid = vfork();
+	pid_t pid;
+	int out_pipe[2], err_pipe[2], local_errno, exit_status;
+	posix_spawn_file_actions_t file_actions;
 
-	if (!pid) {
-		char* argv[] = {
-			"/bin/sh",
-			"-c",
-			command,
-			NULL
-		};
+	if ((local_errno = posix_spawn_file_actions_init(&file_actions))) {
+		errno = local_errno;
+		return false;
+	}
 
-		if (input) {
-			if (dup2(fileno(input), STDIN_FILENO) < 0) return -1;
+	if (info->in) {
+		if ((local_errno = posix_spawn_file_actions_adddup2(&file_actions, fileno(info->in), STDIN_FILENO))) {
+			errno = local_errno;
+			return false;
 		}
-		if (dup2(output_pipe[1], STDOUT_FILENO) < 0) return -1;
-		if (dup2(error_pipe[1], STDERR_FILENO) < 0) return -1;
-		close(output_pipe[1]);
-		close(error_pipe[1]);
-
-		execvp("/bin/sh", argv);
+	}
+	if (info->out != stdout) {
+		if (pipe(out_pipe) < 0) return false;
+		if ((local_errno = posix_spawn_file_actions_adddup2(&file_actions, out_pipe[1], STDOUT_FILENO))) {
+			errno = local_errno;
+			return false;
+		}
+	}
+	if (info->err != stderr) {
+		if (pipe(err_pipe) < 0) return false;
+		if ((local_errno = posix_spawn_file_actions_adddup2(&file_actions, err_pipe[1], STDERR_FILENO))) {
+			errno = local_errno;
+			return false;
+		}
 	}
 
-	int child_stats;
-	if (pid != waitpid(pid, &child_stats, 0)) return -1;
-	close(output_pipe[1]);
-	close(error_pipe[1]);
+	char* argv[] = { "sh", "-c", command, NULL };
 
-	if (output) {
-		*output = fdopen(output_pipe[0], "r");
+	if ((local_errno = posix_spawn(&pid, "/bin/sh", &file_actions, NULL, argv, environ))) {
+		errno = local_errno;
+		return false;
+	}
+	
+	if (waitpid(pid, &exit_status, 0) != pid) return false;
+
+	if (info->out != stdout) {
+		close(out_pipe[1]);
+		info->out = fdopen(out_pipe[0], "r");
+	} else { 
+		info->out = NULL; 
+	}
+	if (info->err != stderr) {
+		close(err_pipe[1]);
+		info->err = fdopen(err_pipe[0], "r");
 	} else {
-		close(output_pipe[0]);
+		info->err = NULL;
 	}
-	if (error_output) {
-		*error_output = fdopen(error_pipe[0], "r");
-	} else {
-		close(error_pipe[0]);
-	}
-	return WIFEXITED(child_stats) ? WEXITSTATUS(child_stats) : -1;
+	info->exited = WIFEXITED(exit_status);
+	info->exitcode = info->exited ? WEXITSTATUS(exit_status) : WTERMSIG(exit_status);
+
+	return true;
 }

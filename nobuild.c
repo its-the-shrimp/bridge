@@ -21,6 +21,19 @@ int main(int argc, char* argv[])
 		is_path1_modified_after_path2(PATH("src", "brbc.c"), PATH("build", "bin", "brbc"))
 	};
 
+	if (argc > 1 ? !strcmp("-f", argv[1]) : false) {
+		for (int i = sizeof(mod_flags); i >= 0; i--) { mod_flags[i] = 1; }
+	} else {
+		FOREACH_FILE_IN_DIR(header_name, "include",
+			if (header_name[0] != '.' ? is_path1_modified_after_path2(PATH("include", header_name), PATH("build", "lib", "libbr.dylib")) : 0) {
+				for (int i = sizeof(mod_flags); i >= 0; i--) { mod_flags[i] = 1; }
+				printf("true true %s\n", header_name);
+				goto compilation;
+			}
+		);
+	}
+compilation:
+
 // compiling libbr
 	if (CORE_MODIFIED || BRBX_MODIFIED) {
 		CMD(
@@ -64,6 +77,7 @@ int main(int argc, char* argv[])
 			"-o", PATH("build", "bin", "brbx"),
 			PATH("src", "brbx.c")
 		);
+	
 	}
 
 	if (BRS_MODIFIED) {
@@ -86,5 +100,15 @@ int main(int argc, char* argv[])
 			"-o", PATH("build", "bin", "brbc"),
 			PATH("src", "brbc.c")
 		);
+	}
+
+	if (!PATH_EXISTS("/usr/local/bin/brs")) {
+		CMD("sudo", "ln", "-sF", "$PWD/build/bin/brs", "/usr/local/bin/brs");
+	}
+	if (!PATH_EXISTS("/usr/local/bin/brbx")) {
+		CMD("sudo", "ln", "-sF", "$PWD/build/bin/brbx", "/usr/local/bin/brbx");
+	}
+	if (!PATH_EXISTS("/usr/local/bin/brbc")) {
+		CMD("sudo", "ln", "-sF", "$PWD/build/bin/brbc", "/usr/local/bin/brbc");
 	}
 }

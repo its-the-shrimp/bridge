@@ -899,13 +899,16 @@ int main(int argc, char* argv[])
 	);
 	startTimer();
 
-	char* cmd;
-	uint8_t exitcode;
-	FILE* err_output;
-	asprintf(&cmd, "as -arch arm64 -o %s %s", obj_output_path, asm_output_path);
-	if ((exitcode = execProcess(cmd, NULL, NULL, &err_output))) {
-		eprintf("error: native assembler exited with code %hhu\n", exitcode);
-		eprintf("assembler output: "sbuf_format"\n", unpack(filecontent(err_output, GLOBAL_CTX)));
+	char cmd[1024];
+	ProcessInfo proc_res;
+	snprintf(cmd, sizeof(cmd), "as -arch arm64 -o %s %s", obj_output_path, asm_output_path);
+	if (!execProcess(cmd, &proc_res)) {
+		eprintf("error: could not start the assembler (reason: %s)\n", strerror(errno));
+		return 1;
+	} else if (proc_res.exitcode) {
+		eprintf("error: native assembler exited with code %hhu\n", proc_res.exitcode);
+		sbuf err_output = filecontent(proc_res.err, GLOBAL_CTX);
+		eprintf("assembler output:\n"sbuf_format"\n", unpack(err_output));
 		unlink(asm_output_path);
 		return 1;
 	}
@@ -918,16 +921,20 @@ int main(int argc, char* argv[])
 	);
 	startTimer();
 
-	asprintf(
-		&cmd, 
+	snprintf(
+		cmd, sizeof(cmd),
 		"ld -arch arm64 -e %s -syslibroot `xcrun --show-sdk-path` -lSystem -o %s %s",
 		program.entry_opid ? program.execblock.data[program.entry_opid].mark_name : DEFAULT_ENTRY_NAME,
 		exec_output_path,
 		obj_output_path
 	);
-	if ((exitcode = execProcess(cmd, NULL, NULL, &err_output))) {
-		eprintf("error: linker exited with code %hhu\n", exitcode);
-		eprintf("linker output:\n"sbuf_format"\n", unpack(filecontent(err_output, GLOBAL_CTX)));
+	if (!execProcess(cmd, &proc_res)) {
+		eprintf("error: could not start the linker (reason: %s)\n", strerror(errno));
+		return 1;
+	} else if (proc_res.exitcode) {
+		eprintf("error: linker exited with code %hhu\n", proc_res.exitcode);
+		sbuf err_output = filecontent(proc_res.err, GLOBAL_CTX);
+		eprintf("linker output:\n"sbuf_format"\n", unpack(err_output));
 		unlink(asm_output_path);
 		unlink(obj_output_path);
 		return 1;

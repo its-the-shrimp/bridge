@@ -117,11 +117,12 @@ sbuf _sbufconcat(heapctx_t ctx, ...)
 // if an error occures, a zero-initialized sized string is returned.
 sbuf filecontent(FILE* fd, heapctx_t ctx)
 {
+	if (fd == NULL || ferror(fd) || feof(fd)) { 
+		return (sbuf){0}; 
+	}
 	char temp[1024];
 	sbuf res = sctxalloc_new(0, ctx);
 	int chunk_size;
-
-	if (fd == NULL || ferror(fd) != 0 || feof(fd)) { return (sbuf){0}; }
 
 	while (feof(fd) == 0 && ferror(fd) == 0)
 	{
@@ -133,7 +134,6 @@ sbuf filecontent(FILE* fd, heapctx_t ctx)
 		memcpy(res.data + res.length - chunk_size, temp, chunk_size);
 	}
 
-	fclose(fd);
 	return res;
 }
 

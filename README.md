@@ -29,7 +29,6 @@ $ brbx examples/hello_world.brb
 ```
 To execute native executable, run:
 ```console
-$ brs examples/hello_world.vbrb
-$ brbc examples/hello_world.brb
+$ brs -N examples/hello_world.vbrb
 $ examples/hello_world
 ```

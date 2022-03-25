@@ -7,6 +7,7 @@
 #include "stdint.h"
 #include "stdio.h"
 #include "stdbool.h"
+#include "time.h"
 
 extern bool IS_BIG_ENDIAN;
 extern bool IS_LITTLE_ENDIAN;
@@ -117,9 +118,22 @@ int printPrepError(FILE* fd, Preprocessor* obj);
 void initBREnv(void);
 char* getAbsolutePath(char* src, heapctx_t ctx);
 void* BRByteOrder(void* src, long length);
-bool startTimer(void);
-float endTimer(void);
-int execProcess(char* command, FILE* input, FILE** output, FILE** error_output);
+
+static struct timespec TIME;
+bool startTimerAt(struct timespec* dst);
+float endTimerAt(struct timespec* src);
+#define startTimer() startTimerAt(&TIME)
+#define endTimer() endTimerAt(&TIME)
+
+typedef struct process_info {
+	uint8_t exitcode;
+	bool exited;
+	FILE* in;
+	FILE* out;
+	FILE* err;
+} ProcessInfo;
+
+bool execProcess(char* command, ProcessInfo* info);
 
 #define isTempPath(path) sbufstartswith(fromstr(path), fromcstr("/tmp")) 
 #define inRange(x, start, end) ( (int64_t)(x) >= (int64_t)(start) && (int64_t)(x) < (int64_t)(end) )
