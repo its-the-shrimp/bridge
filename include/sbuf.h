@@ -20,7 +20,7 @@
 
 #define fromcstr(src) (sbuf){ .data = src, .length = sizeof(src) - 1 }
 #define fromstr(src) (sbuf){ .data = src, .length = strlen(src) }
-#define sbufslice(obj, start, end) (sbuf){ .data = obj.data + start, .length = (end < 0 ? obj.length : end) - start }
+#define sbufslice(obj, start, end) (sbuf){ .data = (obj).data + start, .length = (end < 0 ? (obj).length : end) - start }
 
 #define BYTEFMT_OCT         0b00000001
 #define BYTEFMT_HEX         0b00000010

@@ -145,15 +145,30 @@ typedef enum {
 	fromcstr("divs"), \
 	fromcstr("divsr") \
 
-
 sbuf opNames[] = { _opNames };
+
+
+typedef enum {
+	SYS_OP_INVALID,
+	SYS_OP_EXIT,
+	SYS_OP_WRITE,
+	SYS_OP_ARGC,
+	SYS_OP_ARGV,
+	SYS_OP_READ,
+	SYS_OP_GET_ERRNO, // TODO: replace this dinosaur with proper exceptions like in Python or Java
+	SYS_OP_SET_ERRNO,
+	N_SYS_OPS
+} SysOpCode;
 
 #define _syscallNames \
 	fromcstr("\x01"), \
 	fromcstr("exit"), \
 	fromcstr("write"), \
 	fromcstr("argc"), \
-	fromcstr("argv") \
+	fromcstr("argv"), \
+	fromcstr("read"), \
+	fromcstr("get_errno"), \
+	fromcstr("set_errno")
 
 sbuf syscallNames[] = { _syscallNames };
 
@@ -180,15 +195,6 @@ typedef struct {
 		int32_t opcode; // for BRB_ERR_INVALID_OPCODE and BRB_ERR_NO_OP_ARG
 	};
 } BRBLoadError;
-
-typedef enum {
-	SYS_OP_INVALID,
-	SYS_OP_EXIT,
-	SYS_OP_WRITE,
-	SYS_OP_ARGC,
-	SYS_OP_ARGV,
-	N_SYS_OPS
-} SysOpCode;
 
 typedef enum {
 	EC_STACK_OVERFLOW = -11,

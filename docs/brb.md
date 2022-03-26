@@ -294,9 +294,9 @@ but a BRF system call is used the same way on any system that BRF supports.
 2. `write` (index: 0x2):\
     `write` system call writes data to a file descriptor.\
     Arguments:\
-        `<r0>` - file descriptor identifier, can be obtained using 
-            `open` system call, or can be one a built-in `stdout` or `stderr`.
-        `<r1>` - pointer to the data to be written to the file descriptor.
+        `<r0>` - writable file descriptor, can be obtained using 
+            `open` system call, or can be one a built-in `stdout` or `stderr`.\
+        `<r1>` - pointer to the data to be written to the file descriptor.\
         `<r2>` - amount of bytes to be copied from `<r1>` to the file descriptor.\
     Result: `<r0>` - If the call succeded, the value is the amount of bytes actually written to the file descriptor.
                 Otherwise, the value will be set to -1.
@@ -312,3 +312,23 @@ but a BRF system call is used the same way on any system that BRF supports.
     Arguments:\
         `<r0>` - index of the requested argument.\
     Result: `<r0>` - pointer to the argument, or NULL pointer if the index provided in `<r0>` is out of range.
+
+5. `read` (index: 0x5):\
+    `read` system call reads data from a file descriptor.\
+    Arguments:\
+        `<r0>` - readable file descriptor, can be obtained using
+            `open` system call, or can be a built-in `stdin`.\
+        `<r1>` - address, to which data will be read.\
+        `<r2>` - amount of bytes to be read to `<r1>` from file descriptor.\
+    Result:  `<r0>` - If the call succeded, the value is the amount of bytes actually read from the file descriptor.
+        Otherwise, the value will be set to -1.
+
+6. `get_errno` (index: 0x6):\
+    `get_errno` system call gets the current error code. Error code is set by other system calls in case of failure, and the code itself describes the cause of failure. Alternatively, error code can be set by the application using `set_errno` system call.\
+    Arguments: none.\
+    Result: `<r0>` - a 32-bit integer specifying the error code.\
+
+7. `set_errno` (index: 0x7):\
+    `set_errno` system call sets the internal error code.\
+    Arguments: `<r0>` - new error code to be set.\
+    Result: none - the function is guaranteed to succeed.\

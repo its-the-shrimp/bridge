@@ -87,6 +87,9 @@ typedef enum {
 	KW_SYS_WRITE,
 	KW_SYS_ARGC,
 	KW_SYS_ARGV,
+	KW_SYS_READ,
+	KW_SYS_GET_ERRNO,
+	KW_SYS_SET_ERRNO,
 	KW_ENTRY,
 	KW_STACKSIZE,
 	KW_EXEC,
@@ -95,7 +98,7 @@ typedef enum {
 	N_VBRB_KWS
 } VBRBKeyword;
 static_assert(N_OPS == 68, "Some BRB operations have unmatched keywords");
-static_assert(N_SYS_OPS == 5, "there might be system ops with unmatched keywords");
+static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 bool minimal = false;
 
@@ -693,6 +696,12 @@ VBRBError compileOpSetv(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 			.loc = var_id_spec,
 			.op_type = op->type,
 			.arg_id = 0
+		};
+	}
+	if (var_id_spec.value >= ctx->vars.length) {
+		return (VBRBError){
+			.code = VBRB_ERR_UNKNOWN_VAR_ID,
+			.loc = var_id_spec
 		};
 	}
 

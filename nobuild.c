@@ -11,11 +11,13 @@ int main(int argc, char* argv[])
 	}
 
 #	define CORE_MODIFIED mod_flags[0]
-#	define BRS_MODIFIED  mod_flags[1]
-#	define BRBX_MODIFIED mod_flags[2]
-#	define BRBC_MODIFIED mod_flags[3]
+#	define BRB_MODIFIED  mod_flags[1]
+#	define BRS_MODIFIED  mod_flags[2]
+#	define BRBX_MODIFIED mod_flags[3]
+#	define BRBC_MODIFIED mod_flags[4]
 	bool mod_flags[] = {
 		is_path1_modified_after_path2(PATH("src", "core.c"), PATH("build", "lib", "libbr.dylib")),
+		is_path1_modified_after_path2(PATH("src", "brb.c"), PATH("build", "lib", "libbrb.dylib")),
 		is_path1_modified_after_path2(PATH("src", "brs.c"), PATH("build", "bin", "brs")),
 		is_path1_modified_after_path2(PATH("src", "brbx.c"), PATH("build", "bin", "brbx")),
 		is_path1_modified_after_path2(PATH("src", "brbc.c"), PATH("build", "bin", "brbc"))
@@ -35,7 +37,7 @@ int main(int argc, char* argv[])
 compilation:
 
 // compiling libbr
-	if (CORE_MODIFIED || BRBX_MODIFIED) {
+	if (CORE_MODIFIED || BRB_MODIFIED) {
 		CMD(
 			"cc", 
 			"-Wno-deprecated-declarations", 
@@ -57,8 +59,7 @@ compilation:
 			"-c",
 			"-o", PATH("build", "lib", "brb.o"), 
 			"-I", "include",
-			"-DLIBBRB=1",
-			PATH("src", "brbx.c")
+			PATH("src", "brb.c")
 		); 
 		CMD(
 			"cc", 
@@ -69,15 +70,6 @@ compilation:
 		);
 		CMD("rm", PATH("build", "lib", "brb.o"));
 		CMD("rm", PATH("build", "lib", "core.o"));
-		CMD(
-			"cc",
-			"-I", "include",
-			"-L", PATH("build", "lib"),
-			"-lbrb",
-			"-o", PATH("build", "bin", "brbx"),
-			PATH("src", "brbx.c")
-		);
-	
 	}
 
 	if (BRS_MODIFIED) {
@@ -88,6 +80,17 @@ compilation:
 			"-lbr",
 			"-o", PATH("build", "bin", "brs"),
 			PATH("src", "brs.c")
+		);
+	}
+
+	if (BRBX_MODIFIED) {
+		CMD(
+			"cc",
+			"-I", "include",
+			"-L", PATH("build", "lib"),
+			"-lbrb",
+			"-o", PATH("build", "bin", "brbx"),
+			PATH("src", "brbx.c")
 		);
 	}
 	

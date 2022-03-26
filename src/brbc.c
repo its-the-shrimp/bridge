@@ -1,7 +1,5 @@
 #include "brb.h"
-#include "unistd.h"
 #include "errno.h"
-#include "fcntl.h"
 
 #define ARM64_STACK_ALIGNMENT 16
 #define X86_64_STACK_ALIGNMENT 8
@@ -50,7 +48,7 @@ void compileSysNoneNative(Program* program, int index, CompCtx* ctx)
 
 void compileSysExitNative(Program* program, int index, CompCtx* ctx)
 {
-	fprintf(ctx->dst, "\tmov x16, 1\nsvc 0\n");
+	fprintf(ctx->dst, "\tmov x16, 1\n\tsvc 0\n");
 }
 
 void compileSysWriteNative(Program* program, int index, CompCtx* ctx)
@@ -58,10 +56,9 @@ void compileSysWriteNative(Program* program, int index, CompCtx* ctx)
 	fprintf(ctx->dst, 
 		"\tmov x16, 4\n"
 		"\tsvc 0\n"
-		"\tbcc . + 16\n"
-		"\tadrp x8, .errno@PAGE\n"
-		"\tadd x8, x8, .errno@PAGEOFF\n"
-		"\tldr x0, [x8]\n"	
+		"\tbcc . + 12\n"
+		"\tmov x26, x0\n"
+		"\tmvn x0, xzr\n"
 	);
 }
 
@@ -77,12 +74,36 @@ void compileSysArgvNative(Program* program, int index, CompCtx* ctx)
 	fprintf(ctx->dst, "\tldr x0, x0\n");
 }
 
+void compileSysReadNative(Program* program, int index, CompCtx* ctx)
+{
+	fprintf(ctx->dst, 
+		"\tmov x16, 3\n"
+		"\tsvc 0\n"
+		"\tbcc . + 12\n"
+		"\tmov x26, x0\n"
+		"\tmvn x0, xzr\n"
+	);
+}
+
+void compileSysGetErrnoNative(Program* program, int index, CompCtx* ctx)
+{
+	fprintf(ctx->dst, "\tmov x0, x26\n");
+}
+
+void compileSysSetErrnoNative(Program* program, int index, CompCtx* ctx)
+{
+	fprintf(ctx->dst, "\tmov x26, x0\n");
+}
+
 OpNativeCompiler native_syscall_compilers[] = {
 	&compileSysNoneNative,
 	&compileSysExitNative,
 	&compileSysWriteNative,
 	&compileSysArgcNative,
-	&compileSysArgvNative
+	&compileSysArgvNative,
+	&compileSysReadNative,
+	&compileSysGetErrnoNative,
+	&compileSysSetErrnoNative
 };
 static_assert(
 	N_SYS_OPS == sizeof(native_syscall_compilers) / sizeof(native_syscall_compilers[0]),
@@ -101,7 +122,7 @@ void compileOpEndNative(Program* program, int index, CompCtx* ctx)
 
 void compileOpMarkNative(Program* program, int index, CompCtx* ctx)
 {
-	fprintf(ctx->dst, "\t%s:\n", program->execblock.data[index].mark_name);
+	fprintf(ctx->dst, "%s:\n", program->execblock.data[index].mark_name);
 }
 
 void compileOpSetNative(Program* program, int index, CompCtx* ctx)
@@ -612,7 +633,7 @@ void compileOpVarNative(Program* program, int index, CompCtx* ctx)
 	Op op = program->execblock.data[index];
 	float frame_size = (float)frameSize(ctx->cur_frame);
 
-	if (floorf(frame_size / ARM64_STACK_ALIGNMENT) < floorf((frame_size + op.var_size) / ARM64_STACK_ALIGNMENT)) {
+	if (ceilf(frame_size / ARM64_STACK_ALIGNMENT) < ceilf((frame_size + op.var_size) / ARM64_STACK_ALIGNMENT)) {
 		fprintf(ctx->dst, "\tsub sp, sp, 16\n");
 	}
 	VarArray_append(&ctx->cur_frame, (Var){ .size = op.var_size, .n_elements = 1 });
@@ -755,6 +776,10 @@ static_assert(
 );
 
 void compileByteCode(Program* src, FILE* dst)
+// notes: 
+// 		x28 - argc
+// 		x27 - argv
+// 		x26 - errno
 {
 	enter_tempctx(funcctx, 0);
 	CompCtx ctx = { .dst = dst, .cur_frame = VarArray_new(TEMP_CTX, 0) };
