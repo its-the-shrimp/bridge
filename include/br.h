@@ -9,6 +9,7 @@
 #include "stdbool.h"
 #include "time.h"
 
+#define UINT48_MAX 281474976710655ULL
 extern bool IS_BIG_ENDIAN;
 extern bool IS_LITTLE_ENDIAN;
 
@@ -55,6 +56,7 @@ typedef struct {
 	};
 } Token;
 declArray(sbuf);
+declQueue(Token);
 
 typedef enum {
 	PREP_ERR_OK,
@@ -83,13 +85,14 @@ typedef struct {
 	};
 	InputCtxArray sources;
 	int _nl_delim_id;
-	Token pending;
+	TokenQueue pending;
 } Preprocessor;
 
 Preprocessor newPreprocessor(sbuf delims[], sbuf keywords[], heapctx_t ctx);
 bool setInputFrom(Preprocessor* obj, char* name, sbuf input);
 bool setInput(Preprocessor* obj, char* name);
 Token fetchToken(Preprocessor* obj);
+Token peekToken(Preprocessor* obj);
 
 int fprintTokenLoc(FILE* fd, TokenLoc loc, Preprocessor* obj);
 int fprintTokenStr(FILE* fd, Token token, Preprocessor* obj);

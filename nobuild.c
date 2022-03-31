@@ -2,8 +2,21 @@
 #include "nobuild.h"
 #include "stdbool.h"
 
+char* CWD(void) {
+#ifdef _WIN32_
+
+#else
+	return getcwd(NULL, 256);
+#endif
+}
+
 int main(int argc, char* argv[])
 {
+	Cstr cwd = CWD();
+	Cstr LIBPATH = PATH(cwd, "build", "lib");
+	Cstr BINPATH = PATH(cwd, "build", "bin");
+	Cstr INCLUDEPATH = PATH(cwd, "include");
+	Cstr SRCPATH = PATH(cwd, "src");
 	GO_REBUILD_URSELF(argc, argv);
 	if (!PATH_EXISTS("build")) {
 		MKDIRS("build", "lib");
@@ -16,11 +29,11 @@ int main(int argc, char* argv[])
 #	define BRBX_MODIFIED mod_flags[3]
 #	define BRBC_MODIFIED mod_flags[4]
 	bool mod_flags[] = {
-		is_path1_modified_after_path2(PATH("src", "core.c"), PATH("build", "lib", "libbr.dylib")),
-		is_path1_modified_after_path2(PATH("src", "brb.c"), PATH("build", "lib", "libbrb.dylib")),
-		is_path1_modified_after_path2(PATH("src", "brs.c"), PATH("build", "bin", "brs")),
-		is_path1_modified_after_path2(PATH("src", "brbx.c"), PATH("build", "bin", "brbx")),
-		is_path1_modified_after_path2(PATH("src", "brbc.c"), PATH("build", "bin", "brbc"))
+		is_path1_modified_after_path2(PATH("src", "core.c"), PATH(LIBPATH, "libbr.dylib")),
+		is_path1_modified_after_path2(PATH("src", "brb.c"), PATH(LIBPATH, "libbrb.dylib")),
+		is_path1_modified_after_path2(PATH("src", "brs.c"), PATH(BINPATH, "brs")),
+		is_path1_modified_after_path2(PATH("src", "brbx.c"), PATH(BINPATH, "brbx")),
+		is_path1_modified_after_path2(PATH("src", "brbc.c"), PATH(BINPATH, "brbc"))
 	};
 
 	if (argc > 1 ? !strcmp("-f", argv[1]) : false) {
@@ -43,54 +56,54 @@ compilation:
 			"-Wno-deprecated-declarations", 
 			"-Wno-tautological-constant-out-of-range-compare",
 			"-c",
-			"-o", PATH("build", "lib", "core.o"), 
-			"-I", "include", 
-			PATH("src", "core.c")
+			"-o", PATH(LIBPATH, "core.o"), 
+			"-I", INCLUDEPATH, 
+			PATH(SRCPATH, "core.c")
 		); 
 		CMD(
 			"cc", 
 			"-shared", 
-			"-o", PATH("build", "lib", "libbr.dylib"), 
-			PATH("build", "lib", "core.o")
+			"-o", PATH(LIBPATH, "libbr.dylib"), 
+			PATH(LIBPATH, "core.o")
 		);
 	// compiling libbrb
 		CMD(
 			"cc", 
 			"-c",
-			"-o", PATH("build", "lib", "brb.o"), 
-			"-I", "include",
-			PATH("src", "brb.c")
+			"-o", PATH(LIBPATH, "brb.o"), 
+			"-I", INCLUDEPATH,
+			PATH(SRCPATH, "brb.c")
 		); 
 		CMD(
 			"cc", 
 			"-shared", 
-			"-o", PATH("build", "lib", "libbrb.dylib"), 
-			PATH("build", "lib", "core.o"),
-			PATH("build", "lib", "brb.o")
+			"-o", PATH(LIBPATH, "libbrb.dylib"), 
+			PATH(LIBPATH, "core.o"),
+			PATH(LIBPATH, "brb.o")
 		);
-		CMD("rm", PATH("build", "lib", "brb.o"));
-		CMD("rm", PATH("build", "lib", "core.o"));
+		CMD("rm", PATH(LIBPATH, "brb.o"));
+		CMD("rm", PATH(LIBPATH, "core.o"));
 	}
 
 	if (BRS_MODIFIED) {
 		CMD(
 			"cc",
-			"-I", "include",
-			"-L", PATH("build", "lib"),
+			"-I", INCLUDEPATH,
+			"-L", LIBPATH,
 			"-lbr",
-			"-o", PATH("build", "bin", "brs"),
-			PATH("src", "brs.c")
+			"-o", PATH(BINPATH, "brs"),
+			PATH(SRCPATH, "brs.c")
 		);
 	}
 
 	if (BRBX_MODIFIED) {
 		CMD(
 			"cc",
-			"-I", "include",
-			"-L", PATH("build", "lib"),
+			"-I", INCLUDEPATH,
+			"-L", LIBPATH,
 			"-lbrb",
-			"-o", PATH("build", "bin", "brbx"),
-			PATH("src", "brbx.c")
+			"-o", PATH(BINPATH, "brbx"),
+			PATH(SRCPATH, "brbx.c")
 		);
 	}
 	

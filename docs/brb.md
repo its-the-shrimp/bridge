@@ -257,6 +257,33 @@
     `sys` operation performs a cross-platform system call bound to `sys_op_name`.
     See (System Calls)[#system-calls] for all defined system calls.
 
+## Conditions
+
+In BRidge Bytecode, all operations with a few exceptions can be executed conditionally. 
+Conditions are different comparisons on 2 arguments specified by `cmp` or `cmpr` operations.
+The syntax for a conditionally executed operation is the following:\
+`<op>:<condition> <args>`\
+
+### Condition codes
+1. `non` - always evaluates to true; the default condition code for all operations.\
+2. `equ` - evaluates to true if the arguments are equal.\
+3. `neq` - evaluates to true if the arguments are not equal.\
+4. `ltu` - evaluates to true if the first argument is less than the second one; the comparison is unsigned.\
+5. `gtu` - evaluates to true if the first argument is greater than the second one; the comparison is unsigned.\
+6. `leu` - evaluates to true if the first argument is less than or equal to the second one; the comparison is unsigned.\
+7. `geu` - evaluates to true if the first argument is greater than or equal to the second one; the comparison is unsigned.\
+4. `lts` - evaluates to true if the first argument is less than the second one; the comparison is signed.\
+5. `gts` - evaluates to true if the first argument is greater than the second one; the comparison is signed.\
+6. `les` - evaluates to true if the first argument is less than or equal to the second one; the comparison is signed.\
+7. `ges` - evaluates to true if the first argument is greater than or equal to the second one; the comparison is signed.\
+
+### Exceptions
+The following operations cannot have a condition specified:\
+- `mark`
+- `proc`
+- `endproc`
+- `var`
+
 ## Built-ins
 
 **Built-ins** are a crossplatform way to get platform- and execution-specific

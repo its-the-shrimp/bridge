@@ -10,6 +10,7 @@ defArray(Var);
 typedef enum {
 	SYMBOL_SEGMENT_START,
 	SYMBOL_SEGMENT_END,
+	SYMBOL_CONDITION_SPEC,
 	N_VBRB_SYMBOLS
 } VBRBSymbol;
 
@@ -28,27 +29,8 @@ typedef enum {
 	KW_SUBR,
 	KW_SYSCALL,
 	KW_GOTO,
-	KW_CGOTO,
-	KW_EQ,
-	KW_EQR,	
-	KW_NEQ,
-	KW_NEQR,
-	KW_LT,
-	KW_LTR,
-	KW_GT,
-	KW_GTR,
-	KW_LE,
-	KW_LER,
-	KW_GE,
-	KW_GER,
-	KW_LTS,
-	KW_LTSR,
-	KW_GTS,
-	KW_GTSR,
-	KW_LES,
-	KW_LESR,
-	KW_GES,
-	KW_GESR,
+	KW_CMP,
+	KW_CMPR,
 	KW_AND,
 	KW_ANDR,
 	KW_OR,
@@ -89,7 +71,18 @@ typedef enum {
 	KW_SYS_ARGV,
 	KW_SYS_READ,
 	KW_SYS_GET_ERRNO,
-	KW_SYS_SET_ERRNO,
+	KW_SYS_SET_ERRNO,	
+	KW_COND_NON,
+	KW_COND_EQU,
+	KW_COND_NEQ,
+	KW_COND_LTU,
+	KW_COND_GTU,
+	KW_COND_LEU,
+	KW_COND_GEU,
+	KW_COND_LTS,
+	KW_COND_GTS,
+	KW_COND_LES,
+	KW_COND_GES,
 	KW_ENTRY,
 	KW_STACKSIZE,
 	KW_EXEC,
@@ -97,7 +90,7 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 68, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 49, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 bool minimal = false;
@@ -181,61 +174,56 @@ bool startExecSegment(FILE* fd)
 
 typedef void (*OpWriter) (FILE*, Op);
 
-void writeNoArgOp(FILE* fd, Op op)
-{
-	fputc(op.type, fd);
-}
+void writeNoArgOp(FILE* fd, Op op) {}
 
 void writeMarkOp(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputsbuf(fd, fromstr(op.mark_name));
 	fputsbuf(fd, SEP);
 }
 
 void writeRegImmOp(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
 	writeInt(fd, op.value);
 }
 
 void write2RegOp(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
 	fputc(op.src_reg, fd);
 }
 
 void writeRegSymbolIdOp(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
 	writeInt(fd, op.symbol_id);
 }
 
 void writeOpSyscall(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputc(op.syscall_id, fd);
 }
 
 void writeJumpOp(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	writeInt(fd, op.symbol_id);
 }
 
-void writeOpCgoto(FILE* fd, Op op)
+void writeOpCmp(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputc(op.src_reg, fd);
-	writeInt(fd, op.symbol_id);
+	writeInt(fd, op.value);
+}
+
+void writeOpCmpr(FILE* fd, Op op)
+{
+	fputc(op.src_reg, fd);
+	fputc(op.src2_reg, fd);
 }
 
 void write2RegImmOp(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
 	fputc(op.src_reg, fd);
 	writeInt(fd, op.value);
@@ -243,7 +231,6 @@ void write2RegImmOp(FILE* fd, Op op)
 
 void write3RegOp(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputc(op.dst_reg, fd);
 	fputc(op.src_reg, fd);
 	fputc(op.src2_reg, fd);
@@ -251,7 +238,6 @@ void write3RegOp(FILE* fd, Op op)
 
 void writeOpVar(FILE* fd, Op op)
 {
-	fputc(op.type, fd);
 	fputc(op.var_size, fd);
 }
 
@@ -270,27 +256,8 @@ OpWriter op_writers[] = {
 	&write3RegOp, // OP_SUBR
 	&writeOpSyscall,
 	&writeJumpOp, // OP_GOTO
-	&writeOpCgoto,
-	&write2RegImmOp, // OP_EQ
-	&write3RegOp, // OP_EQR
-	&write2RegImmOp, // OP_NEQ
-	&write3RegOp, // OP_NEQR
-	&write2RegImmOp, // OP_LT
-	&write3RegOp, // OP_LTR
-	&write2RegImmOp, // OP_GT
-	&write3RegOp, // OP_GTR
-	&write2RegImmOp, // OP_LE
-	&write3RegOp, // OP_LER
-	&write2RegImmOp, // OP_GE
-	&write3RegOp, // OP_GER
-	&write2RegImmOp, // OP_LTS
-	&write3RegOp, // OP_LTSR
-	&write2RegImmOp, // OP_GTS
-	&write3RegOp, // OP_GTSR
-	&write2RegImmOp, // OP_LES
-	&write3RegOp, // OP_LESR
-	&write2RegImmOp, // OP_GES
-	&write3RegOp, // OP_GESR
+	&writeOpCmp, // OP_CMP
+	&writeOpCmpr, // OP_CMPR
 	&write2RegImmOp, // OP_AND
 	&write3RegOp, // OP_ANDR
 	&write2RegImmOp, // OP_OR
@@ -326,6 +293,17 @@ OpWriter op_writers[] = {
 	&write3RegOp // OP_DIVSR
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
+
+void writeOp(FILE* dst, Op op)
+{
+	if (op.cond_id) {
+		fputc(~op.type, dst);
+		fputc(op.cond_id, dst);
+	} else {
+		fputc(op.type, dst);
+	}
+	op_writers[op.type](dst, op);
+}
 
 bool setEntryPoint(FILE* fd, int64_t mark_id)
 {
@@ -365,6 +343,7 @@ typedef enum {
 	VBRB_ERR_NON_PROC_CALL,
 	VBRB_ERR_UNKNOWN_VAR_ID,
 	VBRB_ERR_UNCLOSED_PROC,
+	VBRB_ERR_UNKNOWN_CONDITION,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -391,8 +370,8 @@ defArray(ExecMark);
 
 int64_t getBRBuiltinValue(char* name)
 {
-	for (int64_t i = 0; i < sizeof(consts); i++) {
-		if (streq(consts[i].name, name)) return i;
+	for (int64_t i = 0; i < sizeof(builtins); i++) {
+		if (streq(builtins[i].name, name)) return i;
 	}
 	return -1;
 } 
@@ -414,7 +393,7 @@ VBRBError getRegIdArg(Token src, int8_t* dst, char op_type, char arg_id)
 		.expected_token_type = TOKEN_REG_ID
 	};
 	*dst = src.word[1] - '0';
-	if (!inRange(*dst, 0, N_REGISTERS)) return (VBRBError){
+	if (!inRange(*dst, 0, N_USER_REGS)) return (VBRBError){
 		.code = VBRB_ERR_INVALID_REG_ID,
 		.loc = src
 	};
@@ -620,14 +599,27 @@ VBRBError compileJumpOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpCgoto(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpCmp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
 	VBRBError err = getRegIdArg(fetchToken(obj), &op->src_reg, op->type, 0);
 	if (err.code != VBRB_ERR_OK) return err;
-	
-	err = getExecMarkArg(fetchToken(obj), dst->execblock.length - 1, &ctx->exec_unresolved, op->type, 1);
+
+	err = getIntArg(fetchToken(obj), &op->value, op->type, 1);
+	if (err.code != VBRB_ERR_OK) return err;
+
+	return (VBRBError){0};
+}
+
+VBRBError compileOpCmpr(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	VBRBError err = getRegIdArg(fetchToken(obj), &op->src_reg, op->type, 0);
+	if (err.code != VBRB_ERR_OK) return err;
+
+	err = getRegIdArg(fetchToken(obj), &op->src2_reg, op->type, 1);
 	if (err.code != VBRB_ERR_OK) return err;
 
 	return (VBRBError){0};
@@ -729,27 +721,8 @@ OpCompiler op_compilers[] = {
 	&compile3RegOp, // OP_SUBR
 	&compileOpSyscall, // OP_SYSCALL
 	&compileJumpOp, // OP_GOTO
-	&compileOpCgoto,
-	&compile2RegImmOp, // OP_EQ
-	&compile3RegOp, // OP_EQR
-	&compile2RegImmOp, // OP_NEQ
-	&compile3RegOp, // OP_NEQR
-	&compile2RegImmOp, // OP_LT
-	&compile3RegOp, // OP_LTR
-	&compile2RegImmOp, // OP_GT
-	&compile3RegOp, // OP_GTR
-	&compile2RegImmOp, // OP_LE
-	&compile3RegOp, // OP_LER
-	&compile2RegImmOp, // OP_GE
-	&compile3RegOp, // OP_GER
-	&compile2RegImmOp, // OP_LTS
-	&compile3RegOp, // OP_LTSR
-	&compile2RegImmOp, // OP_GTS
-	&compile3RegOp, // OP_GTSR
-	&compile2RegImmOp, // OP_LES
-	&compile3RegOp, // OP_LESR
-	&compile2RegImmOp, // OP_GES
-	&compile3RegOp, // OP_GESR
+	&compileOpCmp, // OP_CMP
+	&compileOpCmpr, // OP_CMPR
 	&compile2RegImmOp, // OP_AND
 	&compile3RegOp, // OP_ANDR
 	&compile2RegImmOp, // OP_OR
@@ -963,6 +936,20 @@ VBRBError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 
 					new_op->type = kw_id;
 					compctx.op_token = op_name;
+					Token cond_spec = peekToken(obj);
+					if (getTokenSymbolId(cond_spec) == SYMBOL_CONDITION_SPEC) {
+						fetchToken(obj); // to remove the peeked ':' symbol
+						cond_spec = fetchToken(obj);
+						if (!inRange(getTokenKeywordId(cond_spec), KW_COND_NON, KW_COND_NON + N_CONDS)) {
+							exit_tempctx(funcctx);
+							return (VBRBError){
+								.code = VBRB_ERR_UNKNOWN_CONDITION,
+								.loc = cond_spec
+							};
+						}
+						new_op->cond_id = cond_spec.keyword_id - KW_COND_NON;
+					}
+
 					VBRBError err = op_compilers[kw_id](obj, dst, &compctx);
 					if (err.code != VBRB_ERR_OK) {
 						exit_tempctx(funcctx);
@@ -1151,6 +1138,7 @@ int main(int argc, char* argv[])
 	sbuf delims[] = {
 		fromcstr("{"),
 		fromcstr("}"),
+		fromcstr(":"),
 		SPACE,
 		NEWLINE,
 		TAB,
@@ -1159,6 +1147,7 @@ int main(int argc, char* argv[])
 	sbuf kws[] = { 
 		_opNames,
 		_syscallNames,
+		_conditionNames,
 		fromcstr("entry"), 
 		fromcstr("stacksize"),
 		fromcstr("exec"),
@@ -1176,7 +1165,7 @@ int main(int argc, char* argv[])
 	Program res;
 	VBRBError err = compileSourceCode(&prep, &res, ctxalloc_newctx(0));
 
-	static_assert(N_VBRB_ERRORS == 23, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 24, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
 		fprintTokenLoc(stderr, err.loc.loc, &prep);
 		eprintf("error: ");
@@ -1215,10 +1204,12 @@ int main(int argc, char* argv[])
 			case VBRB_ERR_BLOCK_SPEC_EXPECTED:
 				eprintf("expected a string as the data block specifier, instead got ");
 				fprintTokenStr(stderr, err.loc, &prep);
+				fputc('\n', stderr);
 				return 1;
 			case VBRB_ERR_BLOCK_SIZE_EXPECTED:
 				eprintf("expected an integer as the memory block size, instead got ");
 				fprintTokenStr(stderr, err.loc, &prep);
+				fputc('\n', stderr);
 				return 1;
 			case VBRB_ERR_UNKNOWN_SEGMENT_SPEC:
 				eprintf("expected a segment specifier, instead got ");
@@ -1289,6 +1280,9 @@ int main(int argc, char* argv[])
 			case VBRB_ERR_UNCLOSED_PROC:
 				eprintf("procedure must start in the global scope, i.e. not inside another procedure\n");
 				return 1;
+			case VBRB_ERR_UNKNOWN_CONDITION:
+				eprintf("unknown condition specifier `%s`\n", getTokenWord(&prep, err.loc));
+				return 1;
 		}
 	}
 
@@ -1323,7 +1317,7 @@ int main(int argc, char* argv[])
 	
 	startExecSegment(output_fd);
 	array_foreach(Op, op, res.execblock,
-		op_writers[op.type](output_fd, op);
+		writeOp(output_fd, op);
 	);
 	endExecSegment(output_fd);	
 	fclose(output_fd);

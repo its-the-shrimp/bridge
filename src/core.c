@@ -12,6 +12,7 @@ extern char** environ;
 
 defArray(sbuf);
 defArray(InputCtx);
+defQueue(Token);
 
 sbuf DQUOTE = fromcstr("\"");
 sbuf NT_NEWLINE = fromcstr("\r\n");
@@ -29,7 +30,8 @@ Preprocessor newPreprocessor(sbuf delims[], sbuf keywords[], heapctx_t ctx)
 		.sources = InputCtxArray_new(ctx, -1),
 		.error_code = PREP_ERR_OK,
 		.error_loc = (TokenLoc){ .src_id = 1 },
-		._nl_delim_id = 1
+		._nl_delim_id = 1,
+		.pending = TokenQueue_new(ctx, 0)
 	};
 
 	for (int i = 0; delims[i].data; i++)
@@ -84,10 +86,9 @@ bool setInput(Preprocessor* obj, char* name)
 
 Token fetchToken(Preprocessor* obj)
 {
-	Token res;
-	if (obj->pending.type && !sbufspace(fromstr(getTokenWord(obj, obj->pending)))) {
-		res = obj->pending;
-		obj->pending.type = TOKEN_NONE;
+	Token res = {0};
+	TokenQueue_fetch(&obj->pending, &res);
+	if (res.type && !sbufspace(fromstr(getTokenWord(obj, res)))) {
 		return res;
 	}
 
@@ -147,9 +148,11 @@ Token fetchToken(Preprocessor* obj)
 			res.loc = input->cur_loc;
 			input->cur_loc.colno += new.length;
 
-			obj->pending.type = delim_id == -1 ? TOKEN_NONE : TOKEN_SYMBOL;
-			obj->pending.loc = input->cur_loc;
-			obj->pending.symbol_id = delim_id;
+			Token pending;
+			pending.type = delim_id == -1 ? TOKEN_NONE : TOKEN_SYMBOL;
+			pending.loc = input->cur_loc;
+			pending.symbol_id = delim_id;
+			TokenQueue_add(&obj->pending, pending);
 		} else {
 			res.type = delim_id == -1 ? TOKEN_NONE : TOKEN_SYMBOL;
 			res.loc = input->cur_loc;
@@ -165,6 +168,25 @@ Token fetchToken(Preprocessor* obj)
 
 		return res;
 	}
+}
+
+Token peekToken(Preprocessor* obj)
+{
+	Token res = {0};
+	if (obj->pending.length) {
+		TokenQueue_peek(&obj->pending, &res);
+	} else {
+		res = fetchToken(obj);
+		if (obj->pending.length) {
+			Token swapped;
+			TokenQueue_fetch(&obj->pending, &swapped);
+			TokenQueue_add(&obj->pending, res);
+			TokenQueue_add(&obj->pending, swapped);
+		} else {
+			TokenQueue_add(&obj->pending, res);
+		}
+	}
+	return res;
 }
 
 int fprintTokenLoc(FILE* fd, TokenLoc loc, Preprocessor* obj)

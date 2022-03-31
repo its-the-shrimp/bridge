@@ -18,27 +18,8 @@ typedef enum {
 	OP_SUBR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_SYSCALL, // uses Op::syscall_id
 	OP_GOTO, // uses Op::symbol_id
-	OP_CGOTO, // uses Op::src_reg and Op::symbol_id
-	OP_EQ, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_EQR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_NEQ, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_NEQR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_LT, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_LTR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_GT, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_GTR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_LE, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_LER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_GE, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_GER, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_LTS, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_LTSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_GTS, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_GTSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_LES, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_LESR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_GES, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_GESR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_CMP, // uses Op::src_reg and Op::value
+	OP_CMPR, // uses Op::src_reg and Op::src2_reg
 	OP_AND, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_ANDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_OR, // uses Op::dst_reg, Op::src_reg and Op::value
@@ -90,27 +71,8 @@ typedef enum {
 	fromcstr("subr"), \
 	fromcstr("sys"), \
 	fromcstr("goto"), \
-	fromcstr("cgoto"), \
-	fromcstr("eq"), \
-	fromcstr("eqr"), \
-	fromcstr("neq"), \
-	fromcstr("neqr"), \
-	fromcstr("lt"), \
-	fromcstr("ltr"), \
-	fromcstr("gt"), \
-	fromcstr("gtr"), \
-	fromcstr("le"), \
-	fromcstr("ler"), \
-	fromcstr("ge"), \
-	fromcstr("ger"), \
-	fromcstr("lts"), \
-	fromcstr("ltsr"), \
-	fromcstr("gts"), \
-	fromcstr("gtsr"), \
-	fromcstr("les"), \
-	fromcstr("lesr"), \
-	fromcstr("ges"), \
-	fromcstr("gesr"), \
+	fromcstr("cmp"), \
+	fromcstr("cmpr"), \
 	fromcstr("and"), \
 	fromcstr("andr"), \
 	fromcstr("or"), \
@@ -185,7 +147,9 @@ typedef enum {
 	BRB_ERR_NO_OP_ARG,
 	BRB_ERR_INVALID_OPCODE,
 	BRB_ERR_UNKNOWN_SEGMENT_SPEC,
-	BRB_ERR_NO_STACK_SIZE
+	BRB_ERR_INVALID_COND_ID,
+	BRB_ERR_NO_STACK_SIZE,
+	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
 typedef struct {
@@ -193,6 +157,7 @@ typedef struct {
 	union {
 		sbuf segment_spec; // for BRB_ERR_UNKNOWN_SEGMENT_SPEC
 		int32_t opcode; // for BRB_ERR_INVALID_OPCODE and BRB_ERR_NO_OP_ARG
+		uint8_t cond_id; // for BRB_ERR_INVALID_COND_ID
 	};
 } BRBLoadError;
 
@@ -219,11 +184,54 @@ const sbuf ENTRYSPEC_SEGMENT_START = fromcstr("e:");
 const sbuf STACKSIZE_SEGMENT_START = fromcstr("s:");
 const sbuf SEP = fromcstr(":");
 
+typedef enum {
+	COND_NON,
+	COND_EQU,
+	COND_NEQ,
+	COND_LTU,
+	COND_GTU,
+	COND_LEU,
+	COND_GEU,
+	COND_LTS,
+	COND_GTS,
+	COND_LES,
+	COND_GES,
+	N_CONDS
+} ConditionCode;
+
+ConditionCode opposite_conditions[N_CONDS] = {
+	[COND_NON] = COND_NON,
+	[COND_EQU] = COND_NEQ,
+	[COND_NEQ] = COND_EQU,
+	[COND_LTU] = COND_GEU,
+	[COND_GTU] = COND_LEU,
+	[COND_LEU] = COND_GTU,
+	[COND_GEU] = COND_LTU,
+	[COND_LTS] = COND_GES,
+	[COND_GTS] = COND_LES,
+	[COND_LES] = COND_GTS,
+	[COND_GES] = COND_LTS
+};
+
+#define _conditionNames \
+	fromcstr("non"), \
+	fromcstr("equ"), \
+	fromcstr("neq"), \
+	fromcstr("ltu"), \
+	fromcstr("gtu"), \
+	fromcstr("leu"), \
+	fromcstr("geu"), \
+	fromcstr("lts"), \
+	fromcstr("gts"), \
+	fromcstr("les"), \
+	fromcstr("ges") \
+
 typedef struct op {
 	int8_t type;
 	int8_t dst_reg;
 	int8_t src_reg;
 	int8_t var_size;
+	uint8_t cond_id;
 	union {
 		int64_t value;
 		int64_t symbol_id;
@@ -240,7 +248,7 @@ typedef struct {
 	int64_t value;
 } BRBuiltin;
 
-BRBuiltin consts[] = {
+const BRBuiltin builtins[] = {
 	(BRBuiltin){
 		.name = "stdin",
 		.value = 0
@@ -339,7 +347,10 @@ typedef struct {
 } ProcFrame;
 declArray(ProcFrame);
 
-#define N_REGISTERS 8
+#define N_REGS 10
+#define N_USER_REGS 8
+#define CONDREG1_ID 8
+#define CONDREG2_ID 9
 #define DEFAULT_STACK_SIZE (512 * 1024) // 512 Kb, just like in JVM
 
 #define BRBX_TRACING         0b00000001
