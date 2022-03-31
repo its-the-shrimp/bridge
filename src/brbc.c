@@ -749,9 +749,8 @@ void compileByteCode(Program* src, FILE* dst)
 		DEFAULT_ENTRY_NAME":\n"
 		"\tmov x28, x0\n"
 		"\tmov x27, x1\n"
-		"\tb %s\n",
-		src->execblock.data[src->entry_opid].mark_name
 	);
+	if (src->entry_opid) fprintf(dst, "\tb %s\n", src->execblock.data[src->entry_opid].mark_name);
 	for (int i = 0; i < src->execblock.length; i++) {
 		native_op_compilers[src->execblock.data[i].type](src, i, &ctx);
 	}
