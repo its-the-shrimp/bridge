@@ -16,7 +16,7 @@ typedef enum {
 	OP_ADDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_SUB, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_SUBR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_SYSCALL, // uses Op::syscall_id
+	OP_SYS, // uses Op::syscall_id
 	OP_GOTO, // uses Op::symbol_id
 	OP_CMP, // uses Op::src_reg and Op::value
 	OP_CMPR, // uses Op::src_reg and Op::src2_reg
