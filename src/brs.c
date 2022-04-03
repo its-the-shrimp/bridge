@@ -64,6 +64,7 @@ typedef enum {
 	KW_DIVR,
 	KW_DIVS,
 	KW_DIVSR,
+	KW_EXTPROC,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -90,239 +91,15 @@ typedef enum {
 	KW_MEMORY,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 49, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 50, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
-
-bool minimal = false;
 
 // special value for error reporting
 #define TOKEN_REG_ID 125
 
-void writeInt(FILE* fd, int64_t x)
-{
-	if (x) {
-		if (inRange(x, INT8_MIN, INT8_MAX)) {
-			fputc(1, fd);
-			int8_t x8 = (int8_t)x;
-			fputc(x8, fd);
-		} else if (inRange(x, INT16_MIN, INT16_MAX)) {
-			fputc(2, fd);
-			int16_t x16 = (int16_t)x;
-			fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
-		} else if (inRange(x, INT32_MIN, INT32_MAX)) {
-			fputc(4, fd);
-			int32_t x32 = (int32_t)x;
-			fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
-		} else {
-			fputc(8, fd);
-			fwrite(BRByteOrder(&x, 8), 8, 1, fd);
-		}
-	} else {
-		fputc(0, fd);
-	}
-}
-
-bool startDataSegment(FILE* fd)
-{
-	return fputsbuf(fd, DATA_SEGMENT_START) > 0;
-}
-
-bool writeDataBlock(FILE* fd, char* name, sbuf obj)
-{
-	sbuf input_name = fromstr(name);
-	fputsbuf(fd, minimal ? CSTRTERM : input_name);
-	fputsbuf(fd, SEP);
-	writeInt(fd, obj.length + 1);
-	fputsbuf(fd, obj);
-	fputc('\0', fd);
-	return true;
-}
-
-bool endMemorySegment(FILE* fd)
-{
-	return fputsbuf(fd, SEP) > 0;
-}
-
-bool endDataSegment(FILE* fd)
-{
-	return fputsbuf(fd, SEP) > 0;
-}
-
-bool endExecSegment(FILE* fd)
-{
-	return fputc(OP_END, fd) > 0;
-}
-
-bool startMemorySegment(FILE* fd)
-{
-	return fputsbuf(fd, MEMBLOCK_SEGMENT_START) > 0;
-}
-
-bool writeMemoryBlock(FILE* fd, char* name, int32_t size)
-{
-	sbuf input_name = fromstr(name);
-	fputsbuf(fd, minimal ? CSTRTERM : input_name);
-	fputsbuf(fd, SEP);
-	writeInt(fd, size);
-	return true;
-}
-
-bool startExecSegment(FILE* fd)
-{
-	return fputsbuf(fd, EXEC_SEGMENT_START) > 0;
-}
-
-typedef void (*OpWriter) (FILE*, Op);
-
-void writeNoArgOp(FILE* fd, Op op) {}
-
-void writeMarkOp(FILE* fd, Op op)
-{
-	fputsbuf(fd, fromstr(op.mark_name));
-	fputsbuf(fd, SEP);
-}
-
-void writeRegImmOp(FILE* fd, Op op)
-{
-	fputc(op.dst_reg, fd);
-	writeInt(fd, op.value);
-}
-
-void write2RegOp(FILE* fd, Op op)
-{
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-}
-
-void writeRegSymbolIdOp(FILE* fd, Op op)
-{
-	fputc(op.dst_reg, fd);
-	writeInt(fd, op.symbol_id);
-}
-
-void writeOpSyscall(FILE* fd, Op op)
-{
-	fputc(op.syscall_id, fd);
-}
-
-void writeJumpOp(FILE* fd, Op op)
-{
-	writeInt(fd, op.symbol_id);
-}
-
-void writeOpCmp(FILE* fd, Op op)
-{
-	fputc(op.src_reg, fd);
-	writeInt(fd, op.value);
-}
-
-void writeOpCmpr(FILE* fd, Op op)
-{
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
-void write2RegImmOp(FILE* fd, Op op)
-{
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	writeInt(fd, op.value);
-}
-
-void write3RegOp(FILE* fd, Op op)
-{
-	fputc(op.dst_reg, fd);
-	fputc(op.src_reg, fd);
-	fputc(op.src2_reg, fd);
-}
-
-void writeOpVar(FILE* fd, Op op)
-{
-	fputc(op.var_size, fd);
-}
-
-OpWriter op_writers[] = {
-	&writeNoArgOp, // OP_NONE
-	&writeNoArgOp, // OP_END
-	&writeMarkOp, // OP_MARK
-	&writeRegImmOp, // OP_SET
-	&write2RegOp, // OP_SETR
-	&writeRegSymbolIdOp, // OP_SETD
-	&writeRegSymbolIdOp, // OP_SETB
-	&writeRegSymbolIdOp, // OP_SETM
-	&write2RegImmOp, // OP_ADD
-	&write3RegOp, // OP_ADDR
-	&write2RegImmOp, // OP_SUB
-	&write3RegOp, // OP_SUBR
-	&writeOpSyscall,
-	&writeJumpOp, // OP_GOTO
-	&writeOpCmp, // OP_CMP
-	&writeOpCmpr, // OP_CMPR
-	&write2RegImmOp, // OP_AND
-	&write3RegOp, // OP_ANDR
-	&write2RegImmOp, // OP_OR
-	&write3RegOp, // OP_ORR
-	&write2RegOp, // OP_NOT
-	&write2RegImmOp, // OP_XOR
-	&write3RegOp, // OP_XORR
-	&write2RegImmOp, // OP_SHL
-	&write3RegOp, // OP_SHLR
-	&write2RegImmOp, // OP_SHR
-	&write3RegOp, // OP_SHRR
-	&write2RegImmOp, // OP_SHRS
-	&write3RegOp, // OP_SHRSR
-	&writeMarkOp, // OP_PROC
-	&writeJumpOp, // OP_CALL
-	&writeNoArgOp, // OP_RET
-	&writeNoArgOp, // OP_ENDPROC
-	&write2RegOp, // OP_LD64
-	&write2RegOp, // OP_STR64
-	&write2RegOp, // OP_LD32
-	&write2RegOp, // OP_STR32
-	&write2RegOp, // OP_LD16
-	&write2RegOp, // OP_STR16
-	&write2RegOp, // OP_LD8
-	&write2RegOp, // OP_STR8
-	&writeOpVar,
-	&writeRegSymbolIdOp, // OP_SETV
-	&write2RegImmOp, // OP_MUL
-	&write3RegOp, // OP_MULR
-	&write2RegImmOp, // OP_DIV
-	&write3RegOp, // OP_DIVR
-	&write2RegImmOp, // OP_DIVS
-	&write3RegOp // OP_DIVSR
-};
-static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
-
-void writeOp(FILE* dst, Op op)
-{
-	if (op.cond_id) {
-		fputc(~op.type, dst);
-		fputc(op.cond_id, dst);
-	} else {
-		fputc(op.type, dst);
-	}
-	op_writers[op.type](dst, op);
-}
-
-bool setEntryPoint(FILE* fd, int64_t mark_id)
-{
-	fputsbuf(fd, ENTRYSPEC_SEGMENT_START);
-	writeInt(fd, mark_id);
-	return true;
-}
-
-bool setStackSize(FILE* fd, int64_t stack_size)
-{
-	fputsbuf(fd, STACKSIZE_SEGMENT_START);
-    writeInt(fd, stack_size);
-	return true;
-}
-
 typedef enum {
 	VBRB_ERR_OK,
 	VBRB_ERR_BLOCK_NAME_EXPECTED,
-	VBRB_ERR_ENTRY_NAME_EXPECTED,
 	VBRB_ERR_STACK_SIZE_EXPECTED,
 	VBRB_ERR_NO_MEMORY,
 	VBRB_ERR_SEGMENT_START_EXPECTED,
@@ -442,14 +219,14 @@ typedef struct {
 	bool in_proc;
 	Token op_token;
 } CompilerCtx;
-typedef VBRBError (*OpCompiler) (Preprocessor*, Program*, CompilerCtx*);
+typedef VBRBError (*OpCompiler) (BRP*, Program*, CompilerCtx*);
 
-VBRBError compileNoArgOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileNoArgOp(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	return (VBRBError){0};
 }
 
-VBRBError compileMarkOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileMarkOp(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -460,7 +237,7 @@ VBRBError compileMarkOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileRegImmOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileRegImmOp(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -473,7 +250,7 @@ VBRBError compileRegImmOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compile2RegOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compile2RegOp(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	
@@ -486,7 +263,7 @@ VBRBError compile2RegOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpSetd(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpSetd(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -499,7 +276,7 @@ VBRBError compileOpSetd(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpSetm(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpSetm(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -512,7 +289,7 @@ VBRBError compileOpSetm(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpSetb(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpSetb(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -540,7 +317,7 @@ VBRBError compileOpSetb(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpSyscall(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpSyscall(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	Token arg = fetchToken(obj);
@@ -558,7 +335,7 @@ VBRBError compileOpSyscall(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compile2RegImmOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compile2RegImmOp(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -574,7 +351,7 @@ VBRBError compile2RegImmOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compile3RegOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compile3RegOp(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 	
@@ -590,7 +367,7 @@ VBRBError compile3RegOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileJumpOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileJumpOp(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -599,7 +376,7 @@ VBRBError compileJumpOp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpCmp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpCmp(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -612,7 +389,7 @@ VBRBError compileOpCmp(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpCmpr(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpCmpr(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -625,7 +402,7 @@ VBRBError compileOpCmpr(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpProc(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpProc(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	if (ctx->in_proc) {
 		return (VBRBError){
@@ -637,14 +414,14 @@ VBRBError compileOpProc(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return compileMarkOp(obj, dst, ctx);
 }
 
-VBRBError compileOpEndproc(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpEndproc(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	VarArray_clear(&ctx->vars);
 	ctx->in_proc = false;
 	return (VBRBError){0};
 }
 
-VBRBError compileOpVar(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpVar(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -674,7 +451,7 @@ VBRBError compileOpVar(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
 	return (VBRBError){0};
 }
 
-VBRBError compileOpSetv(Preprocessor* obj, Program* dst, CompilerCtx* ctx)
+VBRBError compileOpSetv(BRP* obj, Program* dst, CompilerCtx* ctx)
 {
 	Op* op = arrayhead(dst->execblock);
 
@@ -755,14 +532,15 @@ OpCompiler op_compilers[] = {
 	&compile2RegImmOp, // OP_DIV
 	&compile3RegOp, // OP_DIVR
 	&compile2RegImmOp, // OP_DIVS
-	&compile3RegOp // OP_DIVSR
+	&compile3RegOp, // OP_DIVSR
+	&compileOpProc // OP_EXTPROC
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 
-VBRBError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
+VBRBError compileSourceCode(BRP* obj, Program* dst, heapctx_t ctx)
 {
 	enter_tempctx(funcctx, 0);
-	dst->entry_opid = 0;
+	dst->entry_opid = -1;
 	dst->execblock = OpArray_new(ctx, -1);
 	dst->memblocks = MemBlockArray_new(ctx, 0);
 	dst->datablocks = DataBlockArray_new(ctx, 0);
@@ -777,25 +555,11 @@ VBRBError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 	};
 	Token entry_name = {0};
 
-	while (!isPrepEOF(obj)) {
+	while (!BRPempty(obj)) {
 		Token segment_spec = fetchToken(obj);
 		if (segment_spec.type == TOKEN_NONE) { break; }
 		switch (getTokenKeywordId(segment_spec)) {
-			case KW_ENTRY: {
-				Token entry_symbol = fetchToken(obj);
-				if (entry_symbol.type == TOKEN_INT) {
-					dst->entry_opid = entry_symbol.value;
-				} else if (isWordToken(entry_symbol)) {
-					entry_name = entry_symbol;
-				} else {
-					exit_tempctx(funcctx);
-					return (VBRBError){
-						.code = VBRB_ERR_ENTRY_NAME_EXPECTED,
-						.loc = entry_symbol
-					};
-				}
-				break;
-			} case KW_STACKSIZE: {
+			case KW_STACKSIZE: {
 				Token size_spec = fetchToken(obj);
 				if (size_spec.type != TOKEN_INT) {
 					exit_tempctx(funcctx);
@@ -818,7 +582,7 @@ VBRBError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 				}
 
 				Token block_name, block_spec;
-				while (!isPrepEOF(obj)) {
+				while (!BRPempty(obj)) {
 					block_name = fetchToken(obj);
 					if (getTokenSymbolId(block_name) == SYMBOL_SEGMENT_END) {
 						break;
@@ -866,7 +630,7 @@ VBRBError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 				}
 
 				Token block_name, block_spec;
-				while (!isPrepEOF(obj)) {
+				while (!BRPempty(obj)) {
 					block_name = fetchToken(obj);
 					if (getTokenSymbolId(block_name) == SYMBOL_SEGMENT_END) {
 						break;
@@ -913,7 +677,7 @@ VBRBError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 				}
 
 				Op* new_op;
-				while (!isPrepEOF(obj)) {
+				while (!BRPempty(obj)) {
 					Token op_name = fetchToken(obj);
 					if (getTokenSymbolId(op_name) == SYMBOL_SEGMENT_END) break; 
 
@@ -967,32 +731,6 @@ VBRBError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 		}
 	}
 	
-	// resolving entry mark
-	if (entry_name.type != TOKEN_NONE) {
-		bool resolved = false;
-		array_foreach(ExecMark, mark, compctx.marks,
-			if (streq(getTokenWord(obj, mark.name), entry_name.word)) {
-				dst->entry_opid = mark.id; 
-				if (dst->execblock.data[mark.id].type != OP_PROC) {
-					exit_tempctx(funcctx);
-					return ((VBRBError){
-						.code = VBRB_ERR_NON_PROC_ENTRY,
-						.loc = entry_name,
-						.mark_name = getTokenWord(obj, mark.name)
-					});
-				}
-				resolved = true;
-				break;
-			}
-		);
-		if (!resolved) {
-			exit_tempctx(funcctx);
-			return (VBRBError){
-				.code = VBRB_ERR_EXEC_MARK_NOT_FOUND,
-				.loc = entry_name
-			};
-		}
-	}
 	// resolving references to data blocks
 	bool resolved = false;
 	array_foreach(ExecMark, unresolved, compctx.data_unresolved, {
@@ -1034,7 +772,7 @@ VBRBError compileSourceCode(Preprocessor* obj, Program* dst, heapctx_t ctx)
 	array_foreach(ExecMark, unresolved, compctx.exec_unresolved, {
 		array_foreach(ExecMark, mark, compctx.marks,
 			if (streq(getTokenWord(obj, mark.name), getTokenWord(obj, unresolved.name))) {
-				dst->execblock.data[unresolved.id].symbol_id = mark.id;
+				dst->execblock.data[unresolved.id].op_offset = unresolved.id - mark.id;
 				if (dst->execblock.data[mark.id].type != OP_PROC && dst->execblock.data[unresolved.id].type == OP_CALL) {
 					exit_tempctx(funcctx);
 					return ((VBRBError){
@@ -1074,7 +812,6 @@ void printUsageMsg(FILE* fd, char* execname)
 	fprintf(fd, "options:\n");
 	fprintf(fd, "\t-h           Output this message and exit\n");
 	fprintf(fd, "\t-o <file>    The output will be saved to <file>\n");
-	fprintf(fd, "\t-m           Minimize the size of compiled program by removing all names from it. Not recommended when debugging\n");
 	fprintf(fd, "\t-n <file>    Compile source directly to a native executable, which will be saved to <file>\n");
 	fprintf(fd, "\t-N           The same as `-n` option, but the resulting executable will have the same name as the input file\n");
 }
@@ -1100,7 +837,6 @@ int main(int argc, char* argv[])
 						output_path = argv[i];
 						go_on = true;
 						break;
-					case 'm': minimal = true; break;
 					case 'n':
 						if (!argv[++i]) {
 							eprintf("error: `-n` option specified but no executable output file path provided\n");
@@ -1136,47 +872,42 @@ int main(int argc, char* argv[])
 	}
 	
 	sbuf delims[] = {
-		fromcstr("{"),
-		fromcstr("}"),
-		fromcstr(":"),
-		SPACE,
-		NEWLINE,
-		TAB,
+		BRP_SYMBOL("{"),
+		BRP_SYMBOL("}"),
+		BRP_SYMBOL(":"),
+		BRP_HIDDEN_SYMBOL(" "),
+		BRP_HIDDEN_SYMBOL("\n"),
+		BRP_HIDDEN_SYMBOL("\t"),
 		(sbuf){0}
 	};
 	sbuf kws[] = { 
 		_opNames,
 		_syscallNames,
 		_conditionNames,
-		fromcstr("entry"), 
-		fromcstr("stacksize"),
-		fromcstr("exec"),
-		fromcstr("data"),
-		fromcstr("memory"),
+		BRP_KEYWORD("entry"), 
+		BRP_KEYWORD("stacksize"),
+		BRP_KEYWORD("exec"),
+		BRP_KEYWORD("data"),
+		BRP_KEYWORD("memory"),
 		(sbuf){0}
 	};
 
-	Preprocessor prep = newPreprocessor(delims, kws, GLOBAL_CTX);
+	BRP prep = newBRP(delims, kws, GLOBAL_CTX);
 	if (!setInput(&prep, input_path)) {
-		printPrepError(stderr, &prep);
+		printBRPError(stderr, &prep);
 		return 1;
 	}
 
 	Program res;
 	VBRBError err = compileSourceCode(&prep, &res, ctxalloc_newctx(0));
 
-	static_assert(N_VBRB_ERRORS == 24, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 23, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
 		fprintTokenLoc(stderr, err.loc.loc, &prep);
 		eprintf("error: ");
 		switch (err.code) {
 			case N_VBRB_ERRORS: break;
 			case VBRB_ERR_OK: break;
-			case VBRB_ERR_ENTRY_NAME_EXPECTED:
-				eprintf("expected a word or integer as the entry mark, instead got ");
-				fprintTokenStr(stderr, err.loc, &prep);
-				fputc('\n', stderr);
-				return 1;
 			case VBRB_ERR_BLOCK_NAME_EXPECTED:
 				eprintf("expected a word as the block name, instead got ");
 				fprintTokenStr(stderr, err.loc, &prep);
@@ -1291,35 +1022,7 @@ int main(int argc, char* argv[])
 		eprintf("error: could not open/create file `%s` (reason: %s)\n", output_path, strerror(errno)); 
 		return 1;
 	}
-
-	if (res.entry_opid) {
-		setEntryPoint(output_fd, res.entry_opid);
-	}
-	if (res.stack_size != DEFAULT_STACK_SIZE) {
-		setStackSize(output_fd, res.stack_size);
-	}
-
-	if (res.datablocks.length) {
-		startDataSegment(output_fd);
-		array_foreach(DataBlock, block, res.datablocks,
-			writeDataBlock(output_fd, block.name, block.spec);
-		);
-		endDataSegment(output_fd);
-	}
-	
-	if (res.memblocks.length) {
-		startMemorySegment(output_fd);
-		array_foreach(MemBlock, block, res.memblocks,
-			writeMemoryBlock(output_fd, block.name, block.size);
-		);
-		endMemorySegment(output_fd);
-	}
-	
-	startExecSegment(output_fd);
-	array_foreach(Op, op, res.execblock,
-		writeOp(output_fd, op);
-	);
-	endExecSegment(output_fd);	
+	writeProgram(&res, output_fd);
 	fclose(output_fd);
 
 	printf("%s -> %s in %.3f ms\n", input_path, output_path, endTimer());

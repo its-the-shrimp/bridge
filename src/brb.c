@@ -11,6 +11,247 @@ defArray(MemBlock);
 defArray(DataSpec)
 defArray(ProcFrame);
 
+void writeInt(FILE* fd, int64_t x)
+{
+	if (x) {
+		if (inRange(x, INT8_MIN, INT8_MAX)) {
+			fputc(1, fd);
+			int8_t x8 = (int8_t)x;
+			fputc(x8, fd);
+		} else if (inRange(x, INT16_MIN, INT16_MAX)) {
+			fputc(2, fd);
+			int16_t x16 = (int16_t)x;
+			fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
+		} else if (inRange(x, INT32_MIN, INT32_MAX)) {
+			fputc(4, fd);
+			int32_t x32 = (int32_t)x;
+			fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
+		} else {
+			fputc(8, fd);
+			fwrite(BRByteOrder(&x, 8), 8, 1, fd);
+		}
+	} else {
+		fputc(0, fd);
+	}
+}
+
+void startDataSegment(FILE* fd)
+{
+	fputsbuf(fd, DATA_SEGMENT_START);
+}
+
+void writeDataBlock(FILE* fd, char* name, sbuf obj)
+{
+	sbuf input_name = fromstr(name);
+	fputsbuf(fd, input_name);
+	fputsbuf(fd, SEP);
+	writeInt(fd, obj.length + 1);
+	fputsbuf(fd, obj);
+	fputc('\0', fd);
+}
+
+void endMemorySegment(FILE* fd)
+{
+	fputsbuf(fd, SEP);
+}
+
+void endDataSegment(FILE* fd)
+{
+	fputsbuf(fd, SEP);
+}
+
+void endExecSegment(FILE* fd)
+{
+	fputc(OP_END, fd);
+}
+
+void startMemorySegment(FILE* fd)
+{
+	fputsbuf(fd, MEMBLOCK_SEGMENT_START);
+}
+
+void writeMemoryBlock(FILE* fd, char* name, int32_t size)
+{
+	sbuf input_name = fromstr(name);
+	fputsbuf(fd, input_name);
+	fputsbuf(fd, SEP);
+	writeInt(fd, size);
+}
+
+void startExecSegment(FILE* fd)
+{
+	fputsbuf(fd, EXEC_SEGMENT_START);
+}
+
+typedef void (*OpWriter) (FILE*, Op);
+
+void writeNoArgOp(FILE* fd, Op op) {}
+
+void writeMarkOp(FILE* fd, Op op)
+{
+	fputsbuf(fd, fromstr(op.mark_name));
+	fputsbuf(fd, SEP);
+}
+
+void writeRegImmOp(FILE* fd, Op op)
+{
+	fputc(op.dst_reg, fd);
+	writeInt(fd, op.value);
+}
+
+void write2RegOp(FILE* fd, Op op)
+{
+	fputc(op.dst_reg, fd);
+	fputc(op.src_reg, fd);
+}
+
+void writeRegSymbolIdOp(FILE* fd, Op op)
+{
+	fputc(op.dst_reg, fd);
+	writeInt(fd, op.symbol_id);
+}
+
+void writeOpSyscall(FILE* fd, Op op)
+{
+	fputc(op.syscall_id, fd);
+}
+
+void writeJumpOp(FILE* fd, Op op)
+{
+	writeInt(fd, op.symbol_id);
+}
+
+void writeOpCmp(FILE* fd, Op op)
+{
+	fputc(op.src_reg, fd);
+	writeInt(fd, op.value);
+}
+
+void writeOpCmpr(FILE* fd, Op op)
+{
+	fputc(op.src_reg, fd);
+	fputc(op.src2_reg, fd);
+}
+
+void write2RegImmOp(FILE* fd, Op op)
+{
+	fputc(op.dst_reg, fd);
+	fputc(op.src_reg, fd);
+	writeInt(fd, op.value);
+}
+
+void write3RegOp(FILE* fd, Op op)
+{
+	fputc(op.dst_reg, fd);
+	fputc(op.src_reg, fd);
+	fputc(op.src2_reg, fd);
+}
+
+void writeOpVar(FILE* fd, Op op)
+{
+	fputc(op.var_size, fd);
+}
+
+OpWriter op_writers[] = {
+	&writeNoArgOp, // OP_NONE
+	&writeNoArgOp, // OP_END
+	&writeMarkOp, // OP_MARK
+	&writeRegImmOp, // OP_SET
+	&write2RegOp, // OP_SETR
+	&writeRegSymbolIdOp, // OP_SETD
+	&writeRegSymbolIdOp, // OP_SETB
+	&writeRegSymbolIdOp, // OP_SETM
+	&write2RegImmOp, // OP_ADD
+	&write3RegOp, // OP_ADDR
+	&write2RegImmOp, // OP_SUB
+	&write3RegOp, // OP_SUBR
+	&writeOpSyscall,
+	&writeJumpOp, // OP_GOTO
+	&writeOpCmp, // OP_CMP
+	&writeOpCmpr, // OP_CMPR
+	&write2RegImmOp, // OP_AND
+	&write3RegOp, // OP_ANDR
+	&write2RegImmOp, // OP_OR
+	&write3RegOp, // OP_ORR
+	&write2RegOp, // OP_NOT
+	&write2RegImmOp, // OP_XOR
+	&write3RegOp, // OP_XORR
+	&write2RegImmOp, // OP_SHL
+	&write3RegOp, // OP_SHLR
+	&write2RegImmOp, // OP_SHR
+	&write3RegOp, // OP_SHRR
+	&write2RegImmOp, // OP_SHRS
+	&write3RegOp, // OP_SHRSR
+	&writeMarkOp, // OP_PROC
+	&writeJumpOp, // OP_CALL
+	&writeNoArgOp, // OP_RET
+	&writeNoArgOp, // OP_ENDPROC
+	&write2RegOp, // OP_LD64
+	&write2RegOp, // OP_STR64
+	&write2RegOp, // OP_LD32
+	&write2RegOp, // OP_STR32
+	&write2RegOp, // OP_LD16
+	&write2RegOp, // OP_STR16
+	&write2RegOp, // OP_LD8
+	&write2RegOp, // OP_STR8
+	&writeOpVar,
+	&writeRegSymbolIdOp, // OP_SETV
+	&write2RegImmOp, // OP_MUL
+	&write3RegOp, // OP_MULR
+	&write2RegImmOp, // OP_DIV
+	&write3RegOp, // OP_DIVR
+	&write2RegImmOp, // OP_DIVS
+	&write3RegOp, // OP_DIVSR
+	&writeMarkOp // OP_EXTPROC
+};
+static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
+
+void writeOp(FILE* dst, Op op)
+{
+	if (op.cond_id) {
+		fputc(~op.type, dst);
+		fputc(op.cond_id, dst);
+	} else {
+		fputc(op.type, dst);
+	}
+	op_writers[op.type](dst, op);
+}
+
+void setStackSize(FILE* fd, int64_t stack_size)
+{
+	fputsbuf(fd, STACKSIZE_SEGMENT_START);
+    writeInt(fd, stack_size);
+}
+
+void writeProgram(Program* src, FILE* dst)
+{
+	if (src->stack_size != DEFAULT_STACK_SIZE) {
+		setStackSize(dst, src->stack_size);
+	}
+
+	if (src->datablocks.length) {
+		startDataSegment(dst);
+		array_foreach(DataBlock, block, src->datablocks,
+			writeDataBlock(dst, block.name, block.spec);
+		);
+		endDataSegment(dst);
+	}
+	
+	if (src->memblocks.length) {
+		startMemorySegment(dst);
+		array_foreach(MemBlock, block, src->memblocks,
+			writeMemoryBlock(dst, block.name, block.size);
+		);
+		endMemorySegment(dst);
+	}
+	
+	startExecSegment(dst);
+	array_foreach(Op, op, src->execblock,
+		writeOp(dst, op);
+	);
+	endExecSegment(dst);	
+}
+
 int8_t loadInt8(FILE* fd, long* n_fetched)
 {
 	if (feof(fd) || ferror(fd)) { *n_fetched = 0; return 0; }
@@ -82,17 +323,15 @@ char* loadName(FILE* fd, heapctx_t ctx, long* n_fetched)
 	return res;
 }
 
-typedef BRBLoadError (*OpLoader) (FILE*, Program*, heapctx_t);
+typedef BRBLoadError (*OpLoader) (FILE*, Op*, heapctx_t);
  
 void printLoadError(BRBLoadError err)
 {
+	static_assert(N_BRB_ERRORS == 13, "not all BRB errors are handled\n");
 	switch (err.code) {
 		case BRB_ERR_OK: break;
 		case BRB_ERR_NO_MEMORY:
 			eprintf("BRB loading error: memory allocation failure\n");
-			break;
-		case BRB_ERR_NO_ENTRY_SPEC:
-			eprintf("BRB loading error: no entry mark specifier found\n");
 			break;
 		case BRB_ERR_NO_BLOCK_NAME:
 			eprintf("BRB loading error: block name not found\n");
@@ -129,141 +368,123 @@ void printLoadError(BRBLoadError err)
 		case BRB_ERR_NO_STACK_SIZE:
 			eprintf("BRB loading error: found stack size segment identifier, but no stack size was provided\n");
 			break;
+		case BRB_ERR_NO_ENTRY:
+			eprintf("BRB loading error: no `main` procedure found in the program\n");
+			break;
 		case N_BRB_ERRORS:
 			eprintf("unreachable\n");
 			break;
 	}
 }
 
-BRBLoadError loadNoArgOp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadNoArgOp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadMarkOp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadMarkOp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	if (!(arrayhead(dst->execblock)->mark_name = loadName(fd, ctx, &status))) {
+	if (!(dst->mark_name = loadName(fd, ctx, &status))) {
 		return (BRBLoadError){.code = BRB_ERR_NO_MARK_NAME};
 	}
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadRegImmOp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadRegImmOp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->dst_reg = loadInt8(fd, &status);
-	op->value = loadInt(fd, &status);
+	dst->dst_reg = loadInt8(fd, &status);
+	dst->value = loadInt(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError load2RegOp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError load2RegOp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->dst_reg = loadInt8(fd, &status);
-	op->src_reg = loadInt8(fd, &status);
+	dst->dst_reg = loadInt8(fd, &status);
+	dst->src_reg = loadInt8(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadRegSymbolIdOp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadRegSymbolIdOp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->dst_reg = loadInt8(fd, &status);
-	op->symbol_id = loadInt(fd, &status);
+	dst->dst_reg = loadInt8(fd, &status);
+	dst->symbol_id = loadInt(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadOpSyscall(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpSyscall(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->syscall_id = loadInt8(fd, &status);
+	dst->syscall_id = loadInt8(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadJumpOp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadJumpOp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->symbol_id = loadInt(fd, &status);
+	dst->op_offset = loadInt(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadOpCgoto(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpCmp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->src_reg = loadInt8(fd, &status);
-	op->symbol_id = loadInt(fd, &status);
+	dst->src_reg = loadInt8(fd, &status);
+	dst->value = loadInt(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadOpCmp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpCmpr(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->src_reg = loadInt8(fd, &status);
-	op->value = loadInt(fd, &status);
+	dst->src_reg = loadInt8(fd, &status);
+	dst->src2_reg = loadInt8(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadOpCmpr(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError load2RegImmOp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->src_reg = loadInt8(fd, &status);
-	op->src2_reg = loadInt8(fd, &status);
+	dst->dst_reg = loadInt8(fd, &status);
+	dst->src_reg = loadInt8(fd, &status);
+	dst->value = loadInt(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError load2RegImmOp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError load3RegOp(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->dst_reg = loadInt8(fd, &status);
-	op->src_reg = loadInt8(fd, &status);
-	op->value = loadInt(fd, &status);
+	dst->dst_reg = loadInt8(fd, &status);
+	dst->src_reg = loadInt8(fd, &status);
+	dst->src2_reg = loadInt8(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
 }
 
-BRBLoadError load3RegOp(FILE* fd, Program* dst, heapctx_t ctx)
+BRBLoadError loadOpVar(FILE* fd, Op* dst, heapctx_t ctx)
 {
 	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->dst_reg = loadInt8(fd, &status);
-	op->src_reg = loadInt8(fd, &status);
-	op->src2_reg = loadInt8(fd, &status);
-
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
-	return (BRBLoadError){0};
-}
-
-BRBLoadError loadOpVar(FILE* fd, Program* dst, heapctx_t ctx)
-{
-	long status = 0;
-	Op* op = arrayhead(dst->execblock);
-	op->var_size = loadInt8(fd, &status);
+	dst->var_size = loadInt8(fd, &status);
 
 	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
 	return (BRBLoadError){0};
@@ -318,7 +539,8 @@ OpLoader op_loaders[] = {
 	&load2RegImmOp, // OP_DIV
 	&load3RegOp, // OP_DIVR
 	&load2RegImmOp, // OP_DIVS
-	&load3RegOp // OP_DIVSR
+	&load3RegOp, // OP_DIVSR
+	&loadMarkOp // OP_EXTPROC
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
@@ -327,7 +549,7 @@ BRBLoadError loadProgram(FILE* fd, Program* dst, heapctx_t ctx)
 	dst->execblock = OpArray_new(ctx, -1),
 	dst->memblocks = MemBlockArray_new(ctx, 0),
 	dst->datablocks = DataBlockArray_new(ctx, 0),
-	dst->entry_opid = 0;
+	dst->entry_opid = -1;
 	dst->stack_size = DEFAULT_STACK_SIZE;
 
 	DataBlock* datablock;
@@ -341,10 +563,7 @@ BRBLoadError loadProgram(FILE* fd, Program* dst, heapctx_t ctx)
 		sbuf segment_spec = { .data = segment_spec_data, .length = 2 };
 		if (fread(segment_spec_data, 1, 2, fd) != 2) { break; }
 
-		if (sbufeq(segment_spec, ENTRYSPEC_SEGMENT_START)) {
-			dst->entry_opid = loadInt(fd, &n_fetched);
-			if (!n_fetched) { return (BRBLoadError){ .code = BRB_ERR_NO_ENTRY_SPEC }; }
-		} else if (sbufeq(segment_spec, STACKSIZE_SEGMENT_START)) {
+		if (sbufeq(segment_spec, STACKSIZE_SEGMENT_START)) {
 			dst->stack_size = loadInt(fd, &n_fetched);
 			if (!n_fetched) { return (BRBLoadError){ .code = BRB_ERR_NO_STACK_SIZE }; }
 		} else if (sbufeq(segment_spec, DATA_SEGMENT_START)) {
@@ -398,7 +617,10 @@ BRBLoadError loadProgram(FILE* fd, Program* dst, heapctx_t ctx)
 					return (BRBLoadError){.code = BRB_ERR_INVALID_OPCODE, .opcode = op->type};
 				}
 
-				BRBLoadError err = op_loaders[op->type](fd, dst, ctx);
+				BRBLoadError err = op_loaders[op->type](fd, arrayhead(dst->execblock), ctx);
+				if (arrayhead(dst->execblock)->type == OP_PROC && streq(arrayhead(dst->execblock)->mark_name, "main")) {
+					dst->entry_opid = dst->execblock.length - 1;
+				}
 				if (err.code != BRB_ERR_OK) return err;
 			} while (op->type != OP_END);
 		} else {
@@ -408,6 +630,8 @@ BRBLoadError loadProgram(FILE* fd, Program* dst, heapctx_t ctx)
 			};
 		}
 	}
+
+	if (dst->entry_opid == -1) return (BRBLoadError){.code = BRB_ERR_NO_ENTRY};
 
 	return (BRBLoadError){.code = BRB_ERR_OK};
 }
@@ -1034,7 +1258,7 @@ bool handleOpSyscall(ExecEnv* env, Program* program)
 
 bool handleOpGoto(ExecEnv* env, Program* program)
 {
-	env->op_id = program->execblock.data[env->op_id].symbol_id;
+	env->op_id += program->execblock.data[env->op_id].op_offset;
 	return false;
 }
 
@@ -1377,7 +1601,7 @@ bool handleOpShrsr(ExecEnv* env, Program* program)
 bool handleOpCall(ExecEnv* env, Program* program)
 {
 	Op op = program->execblock.data[env->op_id];
-	if (env->flags & (BRBX_TRACING)) {
+	if (env->flags & BRBX_TRACING) {
 		if (env->stack_brk > env->stack_head - 16) {
 			env->exitcode = EC_STACK_OVERFLOW;
 			env->err_push_size = 16;
@@ -1401,7 +1625,7 @@ bool handleOpCall(ExecEnv* env, Program* program)
 	*(void**)env->stack_head = env->prev_stack_head;
 	env->prev_stack_head = env->stack_head;
 
-	env->op_id = op.symbol_id; 
+	env->op_id += op.op_offset;
 	return false;
 }
 
@@ -1886,7 +2110,8 @@ ExecHandler op_handlers[] = {
 	&handleOpDiv,
 	&handleOpDivr,
 	&handleOpDivs,
-	&handleOpDivsr
+	&handleOpDivsr,
+	&handleNop // OP_EXTPROC
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 

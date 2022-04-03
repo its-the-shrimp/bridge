@@ -90,7 +90,7 @@ compilation:
 			"cc",
 			"-I", INCLUDEPATH,
 			"-L", LIBPATH,
-			"-lbr",
+			"-lbrb",
 			"-o", PATH(BINPATH, "brs"),
 			PATH(SRCPATH, "brs.c")
 		);

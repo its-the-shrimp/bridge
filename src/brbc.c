@@ -10,17 +10,17 @@ sbuf EXEC_EXT = fromcstr("");
 sbuf OBJ_EXT = fromcstr(".o");
 
 char* conditionNames_arm64[] = {
-	"",
-	"eq",
-	"ne",
-	"lo",
-	"hs",
-	"ls",
-	"hi",
-	"lt",
-	"gt",
-	"le",
-	"ge"
+	[COND_NON] = "",
+	[COND_EQU] = "eq",
+	[COND_NEQ] = "ne",
+	[COND_LTU] = "lo",
+	[COND_GTU] = "hs",
+	[COND_LEU] = "ls",
+	[COND_GEU] = "hi",
+	[COND_LTS] = "lt",
+	[COND_GTS] = "gt",
+	[COND_LES] = "le",
+	[COND_GES] = "ge"
 };
 #define oppositeConditionName(cond_id) conditionNames_arm64[opposite_conditions[cond_id]]
 
@@ -78,7 +78,7 @@ void compileSysExitNative(Program* program, int index, CompCtx* ctx)
 void compileSysWriteNative(Program* program, int index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, program->execblock.data[index].cond_id, 5);
-	fprintf(ctx->dst, 
+	fprintf(ctx->dst,
 		"\tmov x16, 4\n"
 		"\tsvc 0\n"
 		"\tbcc . + 12\n"
@@ -96,7 +96,7 @@ void compileSysArgcNative(Program* program, int index, CompCtx* ctx)
 void compileSysArgvNative(Program* program, int index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, program->execblock.data[index].cond_id, 3);
-	fprintf(ctx->dst, 
+	fprintf(ctx->dst,
 		"\tmul x8, x0, 8\n"
 		"\tadd x0, x8, x27\n"
 		"\tldr x0, x0\n"
@@ -106,7 +106,7 @@ void compileSysArgvNative(Program* program, int index, CompCtx* ctx)
 void compileSysReadNative(Program* program, int index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, program->execblock.data[index].cond_id, 5);
-	fprintf(ctx->dst, 
+	fprintf(ctx->dst,
 		"\tmov x16, 3\n"
 		"\tsvc 0\n"
 		"\tbcc . + 12\n"
@@ -151,7 +151,7 @@ void compileOpEndNative(Program* program, int index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, program->execblock.data[index].cond_id, 3);
 	fprintf(
-		ctx->dst, 
+		ctx->dst,
 		"\tmov x16, 1\n"
 		"\tmov x0, 0\n"
 		"\tsvc 0\n"
@@ -661,6 +661,18 @@ void compileOpDivsrNative(Program* program, int index, CompCtx* ctx)
 	fprintf(ctx->dst, "\tsdiv x%hhd, x%hhd, x%hhd\n", op.dst_reg, op.src_reg, op.src2_reg);
 }
 
+void compileOpExtprocNative(Program* program, int index, CompCtx* ctx)
+{
+	Op op = program->execblock.data[index];
+	fprintf(
+		ctx->dst, 
+		".global %s\n"
+		"%s:\n",
+		op.mark_name,
+		op.mark_name
+	);
+}
+
 
 OpNativeCompiler native_op_compilers[] = {
 	&compileNopNative,
@@ -711,7 +723,8 @@ OpNativeCompiler native_op_compilers[] = {
 	&compileOpDivNative,
 	&compileOpDivrNative,
 	&compileOpDivsNative,
-	&compileOpDivsrNative
+	&compileOpDivsrNative,
+	&compileOpExtprocNative
 };
 static_assert(
 	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),
@@ -730,7 +743,7 @@ void compileByteCode(Program* src, FILE* dst)
 	if (src->datablocks.length) {
 		fprintf(dst, ".data\n");
 		array_foreach(DataBlock, block, src->datablocks, 
-			fprintf(dst, "\t%s: .ascii \"", block.name);
+			fprintf(dst, "\t%s: .asciz \"", block.name);
 			fputsbufesc(dst, block.spec, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
 			fprintf(dst, "\"\n");
 		);
@@ -744,7 +757,7 @@ void compileByteCode(Program* src, FILE* dst)
 
 	fprintf(dst, ".text\n.align 4\n");
 	fprintf(
-		dst, 
+		dst,
 		".global "DEFAULT_ENTRY_NAME"\n"
 		DEFAULT_ENTRY_NAME":\n"
 		"\tmov x28, x0\n"

@@ -53,59 +53,61 @@ typedef enum {
 	OP_DIVR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
 	OP_DIVS, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_DIVSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
+	OP_EXTPROC,
 	N_OPS
 } OpType;
 
 #define _opNames \
-	fromcstr("nop"), \
-	fromcstr("end"), \
-	fromcstr("mark"), \
-	fromcstr("set"), \
-	fromcstr("setr"), \
-	fromcstr("setd"), \
-	fromcstr("setb"), \
-	fromcstr("setm"), \
-	fromcstr("add"), \
-	fromcstr("addr"), \
-	fromcstr("sub"), \
-	fromcstr("subr"), \
-	fromcstr("sys"), \
-	fromcstr("goto"), \
-	fromcstr("cmp"), \
-	fromcstr("cmpr"), \
-	fromcstr("and"), \
-	fromcstr("andr"), \
-	fromcstr("or"), \
-	fromcstr("orr"), \
-	fromcstr("not"), \
-	fromcstr("xor"), \
-	fromcstr("xorr"), \
-	fromcstr("shl"), \
-	fromcstr("shlr"), \
-	fromcstr("shr"), \
-	fromcstr("shrr"), \
-	fromcstr("shrs"), \
-	fromcstr("shrsr"), \
-	fromcstr("proc"), \
-	fromcstr("call"), \
-	fromcstr("ret"), \
-	fromcstr("endproc"), \
-	fromcstr("ld64"), \
-	fromcstr("str64"), \
-	fromcstr("ld32"), \
-	fromcstr("str32"), \
-	fromcstr("ld16"), \
-	fromcstr("str16"), \
-	fromcstr("ld8"), \
-	fromcstr("str8"), \
-	fromcstr("var"), \
-	fromcstr("setv"), \
-	fromcstr("mul"), \
-	fromcstr("mulr"), \
-	fromcstr("div"), \
-	fromcstr("divr"), \
-	fromcstr("divs"), \
-	fromcstr("divsr") \
+	BRP_KEYWORD("nop"), \
+	BRP_KEYWORD("end"), \
+	BRP_KEYWORD("mark"), \
+	BRP_KEYWORD("set"), \
+	BRP_KEYWORD("setr"), \
+	BRP_KEYWORD("setd"), \
+	BRP_KEYWORD("setb"), \
+	BRP_KEYWORD("setm"), \
+	BRP_KEYWORD("add"), \
+	BRP_KEYWORD("addr"), \
+	BRP_KEYWORD("sub"), \
+	BRP_KEYWORD("subr"), \
+	BRP_KEYWORD("sys"), \
+	BRP_KEYWORD("goto"), \
+	BRP_KEYWORD("cmp"), \
+	BRP_KEYWORD("cmpr"), \
+	BRP_KEYWORD("and"), \
+	BRP_KEYWORD("andr"), \
+	BRP_KEYWORD("or"), \
+	BRP_KEYWORD("orr"), \
+	BRP_KEYWORD("not"), \
+	BRP_KEYWORD("xor"), \
+	BRP_KEYWORD("xorr"), \
+	BRP_KEYWORD("shl"), \
+	BRP_KEYWORD("shlr"), \
+	BRP_KEYWORD("shr"), \
+	BRP_KEYWORD("shrr"), \
+	BRP_KEYWORD("shrs"), \
+	BRP_KEYWORD("shrsr"), \
+	BRP_KEYWORD("proc"), \
+	BRP_KEYWORD("call"), \
+	BRP_KEYWORD("ret"), \
+	BRP_KEYWORD("endproc"), \
+	BRP_KEYWORD("ld64"), \
+	BRP_KEYWORD("str64"), \
+	BRP_KEYWORD("ld32"), \
+	BRP_KEYWORD("str32"), \
+	BRP_KEYWORD("ld16"), \
+	BRP_KEYWORD("str16"), \
+	BRP_KEYWORD("ld8"), \
+	BRP_KEYWORD("str8"), \
+	BRP_KEYWORD("var"), \
+	BRP_KEYWORD("setv"), \
+	BRP_KEYWORD("mul"), \
+	BRP_KEYWORD("mulr"), \
+	BRP_KEYWORD("div"), \
+	BRP_KEYWORD("divr"), \
+	BRP_KEYWORD("divs"), \
+	BRP_KEYWORD("divsr"), \
+	BRP_KEYWORD("extproc")
 
 sbuf opNames[] = { _opNames };
 
@@ -123,14 +125,14 @@ typedef enum {
 } SysOpCode;
 
 #define _syscallNames \
-	fromcstr("\x01"), \
-	fromcstr("exit"), \
-	fromcstr("write"), \
-	fromcstr("argc"), \
-	fromcstr("argv"), \
-	fromcstr("read"), \
-	fromcstr("get_errno"), \
-	fromcstr("set_errno")
+	BRP_KEYWORD("\x01"), \
+	BRP_KEYWORD("exit"), \
+	BRP_KEYWORD("write"), \
+	BRP_KEYWORD("argc"), \
+	BRP_KEYWORD("argv"), \
+	BRP_KEYWORD("read"), \
+	BRP_KEYWORD("get_errno"), \
+	BRP_KEYWORD("set_errno")
 
 sbuf syscallNames[] = { _syscallNames };
 
@@ -138,7 +140,6 @@ sbuf syscallNames[] = { _syscallNames };
 typedef enum {
 	BRB_ERR_OK,
 	BRB_ERR_NO_MEMORY,
-	BRB_ERR_NO_ENTRY_SPEC,
 	BRB_ERR_NO_BLOCK_NAME,
 	BRB_ERR_NO_BLOCK_SIZE,
 	BRB_ERR_NO_BLOCK_SPEC,
@@ -149,6 +150,7 @@ typedef enum {
 	BRB_ERR_UNKNOWN_SEGMENT_SPEC,
 	BRB_ERR_INVALID_COND_ID,
 	BRB_ERR_NO_STACK_SIZE,
+	BRB_ERR_NO_ENTRY,
 	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
@@ -180,7 +182,6 @@ static_assert(EC_OK == 0, "all special exit codes must have a value below 0");
 const sbuf DATA_SEGMENT_START = fromcstr("D\n");
 const sbuf MEMBLOCK_SEGMENT_START = fromcstr("M\n");
 const sbuf EXEC_SEGMENT_START = fromcstr("X\n");
-const sbuf ENTRYSPEC_SEGMENT_START = fromcstr("e:");
 const sbuf STACKSIZE_SEGMENT_START = fromcstr("s:");
 const sbuf SEP = fromcstr(":");
 
@@ -214,17 +215,17 @@ ConditionCode opposite_conditions[N_CONDS] = {
 };
 
 #define _conditionNames \
-	fromcstr("non"), \
-	fromcstr("equ"), \
-	fromcstr("neq"), \
-	fromcstr("ltu"), \
-	fromcstr("gtu"), \
-	fromcstr("leu"), \
-	fromcstr("geu"), \
-	fromcstr("lts"), \
-	fromcstr("gts"), \
-	fromcstr("les"), \
-	fromcstr("ges") \
+	BRP_KEYWORD("non"), \
+	BRP_KEYWORD("equ"), \
+	BRP_KEYWORD("neq"), \
+	BRP_KEYWORD("ltu"), \
+	BRP_KEYWORD("gtu"), \
+	BRP_KEYWORD("leu"), \
+	BRP_KEYWORD("geu"), \
+	BRP_KEYWORD("lts"), \
+	BRP_KEYWORD("gts"), \
+	BRP_KEYWORD("les"), \
+	BRP_KEYWORD("ges") \
 
 typedef struct op {
 	int8_t type;
@@ -235,6 +236,7 @@ typedef struct op {
 	union {
 		int64_t value;
 		int64_t symbol_id;
+		uint64_t op_offset;
 		char* mark_name;
 		uint8_t syscall_id; 
 		int8_t src2_reg;
@@ -388,6 +390,7 @@ typedef struct {
 } ExecEnv;
 #define envctx(envp) chunkctx(envp->stack_brk)
 
+void writeProgram(Program* src, FILE* dst);
 BRBLoadError loadProgram(FILE* fd, Program* dst, heapctx_t ctx);
 void printLoadError(BRBLoadError err);
 ExecEnv execProgram(Program* program, int8_t flags, char** args, volatile bool* interruptor);

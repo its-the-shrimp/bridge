@@ -1,11 +1,69 @@
 # BRB Specification
 
-## Operations
+The following is a specification of the Visual BRidge Bytecode format.\
+Bytecode executable is a collection of modules, with the root module as the one from which execution starts.
+
+## Module Structure
+
+A module is a single file with a collection of defined segments.
+Currently there are 4 segment types:
+- `data`
+- `memory`
+- `meta`
+- `exec`
+They can be specified in any order. The following is the description of each of the segments:\
+
+### `data` Segment
+The `data` segment is a set of pre-defined sequences of bytes, provided as string enclosed in double quotes, with a name assigned to them.
+Defined memory blocks can be referenced in the program by their name to get ther runtime address.\
+The syntax of the `data` segment is the following:\
+```
+data {
+    foo "some data as a set of UTF-8 characters.\n" block2 "некоторые данные в виде последовательности символов UTF-8.\n"
+    bar "9\x05"
+}
+```
+Hexadecimal and octal literals are supported in the definition of data blocks.
+Specifying data blocks one per line isn't necessary, they can be defined one after the other.
+
+### `memory` Segment
+The `memory` segment is a set of named memory blocks, that are zero-initialized before the start of the program. Unlike memory blocks defined in the `data` segment, these cannot be pre-defined, and only need their size to be specified.\
+The syntax of the `memory` segment is the following:\
+```
+memory {
+    foo 32 baz 19
+    bar 155
+}
+```
+The size of memory blocks is provided in bytes.
+Specifying data blocks one per line isn't necessary, they can be defined one after the other.
+
+### `stacksize` Segment
+Default stack size in the BRidge virtual machine is 512 KBs. This parameter can be changed using the `stacksize` segment. Unlike other segments, its syntax is much shorter:\
+`stacksize 1234`\
+the number after the word `stacksize`, in this case - 1234, is the specified stack size, in bytes. Numbers below or equal to 0 are invalid.\
+
+### `exec` Segment
+The `exec` segment contains operations to be executed by the virtual machine. The syntax of this segment is the following:\
+```
+exec {
+    op1 arg1 arg2
+    op2 arg1 arg2 arg3 op3 arg1
+}
+```
+Operations and their arguments are defined one by one, without any delimiters other than spaces and newlines.
+There are 3 types of arguments to the operations:\
+- `value`: constant integer value, specified as either decimal, octal or hexadecimal literal. Must be in range between -2^63 and 2^63 - 1.
+- `register`: register field, `r0`, `r1`, up to `r7`.
+- `name`: a name, containing UTF-8 alpha-numeric characters, and other symbols except for '{', '}', and ':'. Must not be longer than 256 bytes.
+The following describes all the available operations:\
+
+#### Operations
 
 1. `nop` (code: 0x0):\
     `nop` operation basically does nothing.
 
-### Operations on registers
+##### Operations on registers
 
 4. `set <dst: register> <value: integer>` (code: 0x3):\
     `set` operation sets the value of register `dst` to `value`.
@@ -13,8 +71,7 @@
 5. `setr <dst: register> <src: register>` (code: 0x4):\
     `setr` operation copies the value of register `src` to register `dst`.
 
-
-### Arithmetic Operations
+##### Arithmetic Operations
 
 1. `add <dst: register> <src: register> <value: integer>` (code: 0x8):\
     `add` operation writes the sum of the value of `src` register and `value` to
@@ -46,7 +103,7 @@
     `divr` operation saves the quotient of the values of registers `src` and `src2` to register `dst`.\
     `divsr` operation is the same but performs signed division.
 
-### Bitwise operations
+##### Bitwise operations
 
 1. `and <dst: register> <src: register> <value: integer>` (code: 0x10):\
     `and` operation writes the result of logical conjunction of the value of
@@ -94,7 +151,7 @@
     by the amount of bits specified in register `src2`, shifting in zeros, to register `dst`.
     `shrsr` is the same operation, but shifts in copies of the sign bit.
 
-### Comparison operations
+##### Comparison operations
 
 1. `cmp <src: register> <value: integer>` (code: 0xE):\
     `cmp` operation sets the arguments of a condition to the value of register `src`
@@ -104,21 +161,21 @@
     `cmpr` operation sets the arguments of a condition to the values of registers
     `src` and `src2`.
 
-### Control flow operations
+##### Control flow operations
 
-1. `mark <mark_name: string>` (code: 0x2):\
+1. `mark <mark_name: name>` (code: 0x2):\
     `mark` operation binds its index in the operation sequence to `mark_name`
     so that this index can be jumped to from other parts of the procedure.
 
-2. `goto <mark_name: string>` (code: 0xD):\
+2. `goto <mark_name: name>` (code: 0xD):\
     `goto` operation jumps to an operation index bound to `mark_name`.
     to avoid stack corruption cases, only marks in the same procedure can be accessed.
 
-4. `proc <proc_name: string>` (code: 0x1D):\
+4. `proc <proc_name: name>` (code: 0x1D):\
     `proc` operation startы the definition of procedure with the name `proc_name`.
     It is a compile-time marker and is a no-op at runtime.
 
-5. `call <mark_name: string>` (code: 0x1E):\
+5. `call <mark_name: name>` (code: 0x1E):\
     `call` operation saves current execution frame
     (e.g. current operation index and stack head position) on the stack
     and jumps to a procedure bound to `mark_name`.
@@ -139,7 +196,7 @@
     This operation is implicitly placed by the assembler at the end of the
     execution sequence, so one is not required to specify it themselves.
 
-### Operations on the stack
+##### Operations on the stack
 
 1. `var <var_size: integer>` (code: 0x29):\
     `var` operation allocates `var_size` bytes on the stack, creating a new variable on the local stack frame.
@@ -148,14 +205,14 @@
     `setv` operation sets the value of register `dst` to an address of a local variable with the index specified by `var_id`.
     Variables outside of the local stack frame cannot be accessed.
 
-### Memory manipulation operations
+##### Memory manipulation operations
 
-1. `setd <dst: register> <block_name: string>` (code: 0x5):\
+1. `setd <dst: register> <block_name: name>` (code: 0x5):\
     `setd` operation copies address the of data block `block_name` to 
     register `dst`.\
     The difference between memory and data blocks is that data blocks contain predefined data, while memory blocks are simply zero-initialized blocks of memory that are free to be written to.
 
-2. `setm <dst: register> <block_name: string>` (code: 0x7):\
+2. `setm <dst: register> <block_name: name>` (code: 0x7):\
     `setm` operation copies address of the memory block `block_name` to
     register `dst`.
 
@@ -191,25 +248,25 @@
     `str8` operation stores 8 lower bits of register `src` at the address
     in register `dst`.
     
-### System interaction and platform-specific operations
+##### System interaction and platform-specific operations
 
-1. `setb <dst: register> <builtin_name: string>` (code: 0x6):\
+1. `setb <dst: register> <builtin_name: name>` (code: 0x6):\
     `setb` operation copies the runtime value of the built-in value `builtin_name`
     to register `dst`.
     See (Built-ins)[#built-ins] for further information and all defined built-ins.
 
-2. `sys <sys_op_name: string>` (code: 0xC):\
+2. `sys <sys_op_name: name>` (code: 0xC):\
     `sys` operation performs a cross-platform system call bound to `sys_op_name`.
     See (System Calls)[#system-calls] for all defined system calls.
 
-## Conditions
+#### Conditions
 
 In BRidge Bytecode, all operations with a few exceptions can be executed conditionally. 
 Conditions are different comparisons on 2 arguments specified by `cmp` or `cmpr` operations.
 The syntax for a conditionally executed operation is the following:\
 `<op>:<condition> <args>`\
 
-### Condition codes
+#### Condition codes
 1. `non` - always evaluates to true; the default condition code for all operations.\
 2. `equ` - evaluates to true if the arguments are equal.\
 3. `neq` - evaluates to true if the arguments are not equal.\
@@ -222,20 +279,20 @@ The syntax for a conditionally executed operation is the following:\
 6. `les` - evaluates to true if the first argument is less than or equal to the second one; the comparison is signed.\
 7. `ges` - evaluates to true if the first argument is greater than or equal to the second one; the comparison is signed.\
 
-### Exceptions
+##### Exceptions
 The following operations cannot have a condition specified:\
 - `mark`
 - `proc`
 - `endproc`
 - `var`
 
-## Built-ins
+#### Built-ins
 
 **Built-ins** are a crossplatform way to get platform- and execution-specific
 data, they may have different values on different systems and between different
 executions, but they are bound to a name that is constant and universal.
 
-### All defined built-ins
+##### All defined built-ins
 
 1. `stdin` (index: 0x0):\
     `stdin` is used in operations on file descriptors, it is a special
@@ -250,13 +307,13 @@ executions, but they are bound to a name that is constant and universal.
     write-only file, that represents error output of the program, e.g. to
     the terminal.
 
-## System Calls
+#### System Calls
 
 **System Calls** are a crossplatform way to interact with the current system,
 they might have different call conventions and implementations on different systems,
 but a BRF system call is used the same way on any system that BRF supports.
 
-### All defined system calls
+##### All defined system calls
 
 1. `exit` (index: 0x1):\
     `exit` system call sets the exit code and stops the execution.
