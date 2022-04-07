@@ -206,7 +206,7 @@ sbuf _sbufsplitesc(sbuf* src, sbuf* dst, ...)
 			if (sbufstartswith(*src, delim) && prevchar != '\\')
 			{
 				sbufpshift(src, delim.length);
-		va_end(args);
+				va_end(args);
 				return (sbuf){ .data = src->data - delim.length, .length = delim.length };
 			}
 		}

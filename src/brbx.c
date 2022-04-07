@@ -18,7 +18,6 @@ void printUsageMsg(FILE* fd, char* exec_name)
 	fprintf(fd, "\t-h     Output this message and exit\n");
 	fprintf(fd, "\t-t     Trace data alignment and validate arguments to the operations. Provides precise error tracking and verbose reporting\n");
 	fprintf(fd, "\t-m     Output contents of memory blocks after execution of the program\n");
-	fprintf(fd, "\t-c     Stop execution if any system call fails and report an error. Without `-r` or `-s` flags, this flag does nothing\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -32,7 +31,6 @@ int main(int argc, char* argv[]) {
 					case 'h': printUsageMsg(stdout, argv[0]); return 0;
 					case 't': exec_flags |= BRBX_TRACING; break;
 					case 'm': exec_flags |= BRBX_PRINT_MEMBLOCKS; break;
-					case 'c': exec_flags |= BRBX_CHECK_SYSCALLS; break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
 			}

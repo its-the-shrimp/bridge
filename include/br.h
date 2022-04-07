@@ -21,6 +21,7 @@ extern bool IS_BIG_ENDIAN;
 extern bool IS_LITTLE_ENDIAN;
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
+#define class typedef struct
 
 void initBREnv(void);
 char* getAbsolutePath(char* src, heapctx_t ctx);
@@ -32,7 +33,7 @@ float endTimerAt(struct timespec* src);
 #define startTimer() startTimerAt(&TIME)
 #define endTimer() endTimerAt(&TIME)
 
-typedef struct process_info {
+class {
 	uint8_t exitcode;
 	bool exited;
 	FILE* in;
@@ -49,6 +50,7 @@ bool execProcess(char* command, ProcessInfo* info);
 // assumes that sub_size > 0 and size > 0
 #define maxInt(a, b) ( a > b ? a : b )
 #define minInt(a, b) ( a < b ? a : b )
-#define absInt(x) ( x < 0 ? x * -1 : x )
+#define absInt(x) (x<0?-x:x)
+#define absNegInt(x) (x<0?x:-x)
 
 #endif

@@ -484,56 +484,56 @@ VBRBError compileOpSetv(BRP* obj, Program* dst, CompilerCtx* ctx)
 }
 
 OpCompiler op_compilers[] = {
-	&compileNoArgOp, // OP_NONE
-	&compileNoArgOp, // OP_END
-	&compileMarkOp, //OP_MARK
-	&compileRegImmOp, // OP_SET
-	&compile2RegOp, // OP_SETR
-	&compileOpSetd,
-	&compileOpSetb,
-	&compileOpSetm,
-	&compile2RegImmOp, // OP_ADD
-	&compile3RegOp, // OP_ADDR
-	&compile2RegImmOp, // OP_SUB
-	&compile3RegOp, // OP_SUBR
-	&compileOpSyscall, // OP_SYSCALL
-	&compileJumpOp, // OP_GOTO
-	&compileOpCmp, // OP_CMP
-	&compileOpCmpr, // OP_CMPR
-	&compile2RegImmOp, // OP_AND
-	&compile3RegOp, // OP_ANDR
-	&compile2RegImmOp, // OP_OR
-	&compile3RegOp, // OP_ORR
-	&compile2RegOp, // OP_NOT
-	&compile2RegImmOp, // OP_XOR
-	&compile3RegOp, // OP_XORR
-	&compile2RegImmOp, // OP_SHL
-	&compile3RegOp, // OP_SHLR
-	&compile2RegImmOp, // OP_SHR
-	&compile3RegOp, // OP_SHRR
-	&compile2RegImmOp, // OP_SHRS
-	&compile3RegOp, // OP_SHRSR
-	&compileOpProc,
-	&compileJumpOp, // OP_CALL
-	&compileNoArgOp, // OP_RET
-	&compileOpEndproc, // OP_ENDPROC
-	&compile2RegOp, // OP_LD64
-	&compile2RegOp, // OP_STR64
-	&compile2RegOp, // OP_LD32
-	&compile2RegOp, // OP_STR32
-	&compile2RegOp, // OP_LD16
-	&compile2RegOp, // OP_STR16
-	&compile2RegOp, // OP_LD8
-	&compile2RegOp, // OP_STR8
-	&compileOpVar,
-	&compileOpSetv,
-	&compile2RegImmOp, // OP_MUL
-	&compile3RegOp, // OP_MULR
-	&compile2RegImmOp, // OP_DIV
-	&compile3RegOp, // OP_DIVR
-	&compile2RegImmOp, // OP_DIVS
-	&compile3RegOp, // OP_DIVSR
-	&compileOpProc // OP_EXTPROC
+	[OP_NONE] = &compileNoArgOp,
+	[OP_END] = &compileNoArgOp,
+	[OP_MARK] = &compileMarkOp,
+	[OP_SET] = &compileRegImmOp,
+	[OP_SETR] = &compile2RegOp,
+	[OP_SETD] = &compileOpSetd,
+	[OP_SETB] = &compileOpSetb,
+	[OP_SETM] = &compileOpSetm,
+	[OP_ADD] = &compile2RegImmOp,
+	[OP_ADDR] = &compile3RegOp,
+	[OP_SUB] = &compile2RegImmOp,
+	[OP_SUBR] = &compile3RegOp,
+	[OP_SYS] = &compileOpSyscall,
+	[OP_GOTO] = &compileJumpOp,
+	[OP_CMP] = &compileOpCmp,
+	[OP_CMPR] = &compileOpCmpr,
+	[OP_AND] = &compile2RegImmOp,
+	[OP_ANDR] = &compile3RegOp,
+	[OP_OR] = &compile2RegImmOp,
+	[OP_ORR] = &compile3RegOp,
+	[OP_NOT] = &compile2RegOp,
+	[OP_XOR] = &compile2RegImmOp,
+	[OP_XORR] = &compile3RegOp,
+	[OP_SHL] = &compile2RegImmOp,
+	[OP_SHLR] = &compile3RegOp,
+	[OP_SHR] = &compile2RegImmOp,
+	[OP_SHRR] = &compile3RegOp,
+	[OP_SHRS] = &compile2RegImmOp,
+	[OP_SHRSR] = &compile3RegOp,
+	[OP_PROC] = &compileOpProc,
+	[OP_CALL] = &compileJumpOp,
+	[OP_RET] = &compileNoArgOp,
+	[OP_ENDPROC] = &compileOpEndproc,
+	[OP_LD64] = &compile2RegOp,
+	[OP_STR64] = &compile2RegOp,
+	[OP_LD32] = &compile2RegOp,
+	[OP_STR32] = &compile2RegOp,
+	[OP_LD16] = &compile2RegOp,
+	[OP_STR16] = &compile2RegOp,
+	[OP_LD8] = &compile2RegOp,
+	[OP_STR8] = &compile2RegOp,
+	[OP_VAR] = &compileOpVar,
+	[OP_SETV] = &compileOpSetv,
+	[OP_MUL] = &compile2RegImmOp,
+	[OP_MULR] = &compile3RegOp,
+	[OP_DIV] = &compile2RegImmOp,
+	[OP_DIVR] = &compile3RegOp,
+	[OP_DIVS] = &compile2RegImmOp,
+	[OP_DIVSR] = &compile3RegOp,
+	[OP_EXTPROC] = &compileOpProc
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 
@@ -772,8 +772,8 @@ VBRBError compileSourceCode(BRP* obj, Program* dst, heapctx_t ctx)
 	array_foreach(ExecMark, unresolved, compctx.exec_unresolved, {
 		array_foreach(ExecMark, mark, compctx.marks,
 			if (streq(getTokenWord(obj, mark.name), getTokenWord(obj, unresolved.name))) {
-				dst->execblock.data[unresolved.id].op_offset = unresolved.id - mark.id;
-				if (dst->execblock.data[mark.id].type != OP_PROC && dst->execblock.data[unresolved.id].type == OP_CALL) {
+				dst->execblock.data[unresolved.id].symbol_id = mark.id;
+				if (dst->execblock.data[mark.id].type != OP_PROC && dst->execblock.data[mark.id].type != OP_EXTPROC && dst->execblock.data[unresolved.id].type == OP_CALL) {
 					exit_tempctx(funcctx);
 					return ((VBRBError){
 						.code = VBRB_ERR_NON_PROC_CALL,

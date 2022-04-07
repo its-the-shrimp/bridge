@@ -17,7 +17,7 @@ typedef enum {
 	OP_SUB, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_SUBR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_SYS, // uses Op::syscall_id
-	OP_GOTO, // uses Op::symbol_id
+	OP_GOTO, // uses Op::op_offset
 	OP_CMP, // uses Op::src_reg and Op::value
 	OP_CMPR, // uses Op::src_reg and Op::src2_reg
 	OP_AND, // uses Op::dst_reg, Op::src_reg and Op::value
@@ -53,7 +53,7 @@ typedef enum {
 	OP_DIVR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
 	OP_DIVS, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_DIVSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
-	OP_EXTPROC,
+	OP_EXTPROC, // uses Op::mark_name
 	N_OPS
 } OpType;
 
@@ -147,14 +147,19 @@ typedef enum {
 	BRB_ERR_NO_MARK_NAME,
 	BRB_ERR_NO_OP_ARG,
 	BRB_ERR_INVALID_OPCODE,
-	BRB_ERR_UNKNOWN_SEGMENT_SPEC,
+	BRB_ERR_NO_DATA_SEGMENT,
+	BRB_ERR_NO_MEMORY_SEGMENT,
+	BRB_ERR_NO_EXEC_SEGMENT,
+	BRB_ERR_NO_NAME_SEGMENT,
+	BRB_ERR_NO_NAME_SPEC,
 	BRB_ERR_INVALID_COND_ID,
+	BRB_ERR_NO_COND_ID,
 	BRB_ERR_NO_STACK_SIZE,
 	BRB_ERR_NO_ENTRY,
 	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
-typedef struct {
+class {
 	BRBLoadErrorCode code;
 	union {
 		sbuf segment_spec; // for BRB_ERR_UNKNOWN_SEGMENT_SPEC
@@ -178,11 +183,6 @@ typedef enum {
 	EC_OK
 } ExitCode;
 static_assert(EC_OK == 0, "all special exit codes must have a value below 0");
-
-const sbuf DATA_SEGMENT_START = fromcstr("D\n");
-const sbuf MEMBLOCK_SEGMENT_START = fromcstr("M\n");
-const sbuf EXEC_SEGMENT_START = fromcstr("X\n");
-const sbuf STACKSIZE_SEGMENT_START = fromcstr("s:");
 const sbuf SEP = fromcstr(":");
 
 typedef enum {
@@ -227,7 +227,7 @@ ConditionCode opposite_conditions[N_CONDS] = {
 	BRP_KEYWORD("les"), \
 	BRP_KEYWORD("ges") \
 
-typedef struct op {
+class {
 	int8_t type;
 	int8_t dst_reg;
 	int8_t src_reg;
@@ -236,7 +236,6 @@ typedef struct op {
 	union {
 		int64_t value;
 		int64_t symbol_id;
-		uint64_t op_offset;
 		char* mark_name;
 		uint8_t syscall_id; 
 		int8_t src2_reg;
@@ -245,7 +244,7 @@ typedef struct op {
 declArray(Op);
 static_assert(sizeof(Op) == 16, "checking compactness of operations' storage");
 
-typedef struct {
+class {
 	char* name;
 	int64_t value;
 } BRBuiltin;
@@ -265,25 +264,26 @@ const BRBuiltin builtins[] = {
 	}
 };
 
-typedef struct {
+class {
 	char* name;
 	int64_t size;
 } MemBlock;
 declArray(MemBlock);
 
-typedef struct {
+class {
 	char* name;
 	sbuf spec;
 } DataBlock;
 declArray(DataBlock);
 
-typedef struct program {
+class {
 	OpArray execblock;
 	MemBlockArray memblocks;
 	DataBlockArray datablocks;
 	int64_t entry_opid;
 	int64_t stack_size;
 } Program;
+#define programctx(program) arrayctx((program).execblock)
 
 typedef enum {
 	DS_INT8,

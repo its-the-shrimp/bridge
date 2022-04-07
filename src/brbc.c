@@ -128,14 +128,14 @@ void compileSysSetErrnoNative(Program* program, int index, CompCtx* ctx)
 }
 
 OpNativeCompiler native_syscall_compilers[] = {
-	&compileSysNoneNative,
-	&compileSysExitNative,
-	&compileSysWriteNative,
-	&compileSysArgcNative,
-	&compileSysArgvNative,
-	&compileSysReadNative,
-	&compileSysGetErrnoNative,
-	&compileSysSetErrnoNative
+	[SYS_OP_INVALID] = &compileSysNoneNative,
+	[SYS_OP_EXIT] = &compileSysExitNative,
+	[SYS_OP_WRITE] = &compileSysWriteNative,
+	[SYS_OP_ARGC] = &compileSysArgcNative,
+	[SYS_OP_ARGV] = &compileSysArgvNative,
+	[SYS_OP_READ] = &compileSysReadNative,
+	[SYS_OP_GET_ERRNO] = &compileSysGetErrnoNative,
+	[SYS_OP_SET_ERRNO] = &compileSysSetErrnoNative
 };
 static_assert(
 	N_SYS_OPS == sizeof(native_syscall_compilers) / sizeof(native_syscall_compilers[0]),
@@ -675,56 +675,56 @@ void compileOpExtprocNative(Program* program, int index, CompCtx* ctx)
 
 
 OpNativeCompiler native_op_compilers[] = {
-	&compileNopNative,
-	&compileOpEndNative,
-	&compileOpMarkNative,
-	&compileOpSetNative,
-	&compileOpSetrNative,
-	&compileOpSetdNative,
-	&compileOpSetbNative,
-	&compileOpSetmNative,
-	&compileOpAddNative,
-	&compileOpAddrNative,
-	&compileOpSubNative,
-	&compileOpSubrNative,
-	&compileOpSyscallNative,
-	&compileOpGotoNative,
-	&compileOpCmpNative,
-	&compileOpCmprNative,
-	&compileOpAndNative,
-	&compileOpAndrNative,
-	&compileOpOrNative,
-	&compileOpOrrNative,
-	&compileOpNotNative,
-	&compileOpXorNative,
-	&compileOpXorrNative,
-	&compileOpShlNative,
-	&compileOpShlrNative,
-	&compileOpShrNative,
-	&compileOpShrrNative,
-	&compileOpShrsNative,
-	&compileOpShrsrNative,
-	&compileOpProcNative,
-	&compileOpCallNative,
-	&compileOpRetNative,
-	&compileOpEndprocNative,
-	&compileOpLd64Native,
-	&compileOpStr64Native,
-	&compileOpLd32Native,
-	&compileOpStr32Native,
-	&compileOpLd16Native,
-	&compileOpStr16Native,
-	&compileOpLd8Native,
-	&compileOpStr8Native,
-	&compileOpVarNative,
-	&compileOpSetvNative,
-	&compileOpMulNative,
-	&compileOpMulrNative,
-	&compileOpDivNative,
-	&compileOpDivrNative,
-	&compileOpDivsNative,
-	&compileOpDivsrNative,
-	&compileOpExtprocNative
+	[OP_NONE] = &compileNopNative,
+	[OP_END] = &compileOpEndNative,
+	[OP_MARK] = &compileOpMarkNative,
+	[OP_SET] = &compileOpSetNative,
+	[OP_SETR] = &compileOpSetrNative,
+	[OP_SETD] = &compileOpSetdNative,
+	[OP_SETB] = &compileOpSetbNative,
+	[OP_SETM] = &compileOpSetmNative,
+	[OP_ADD] = &compileOpAddNative,
+	[OP_ADDR] = &compileOpAddrNative,
+	[OP_SUB] = &compileOpSubNative,
+	[OP_SUBR] = &compileOpSubrNative,
+	[OP_SYS] = &compileOpSyscallNative,
+	[OP_GOTO] = &compileOpGotoNative,
+	[OP_CMP] = &compileOpCmpNative,
+	[OP_CMPR] = &compileOpCmprNative,
+	[OP_AND] = &compileOpAndNative,
+	[OP_ANDR] = &compileOpAndrNative,
+	[OP_OR] = &compileOpOrNative,
+	[OP_ORR] = &compileOpOrrNative,
+	[OP_NOT] = &compileOpNotNative,
+	[OP_XOR] = &compileOpXorNative,
+	[OP_XORR] = &compileOpXorrNative,
+	[OP_SHL] = &compileOpShlNative,
+	[OP_SHLR] = &compileOpShlrNative,
+	[OP_SHR] = &compileOpShrNative,
+	[OP_SHRR] = &compileOpShrrNative,
+	[OP_SHRS] = &compileOpShrsNative,
+	[OP_SHRSR] = &compileOpShrsrNative,
+	[OP_PROC] = &compileOpProcNative,
+	[OP_CALL] = &compileOpCallNative,
+	[OP_RET] = &compileOpRetNative,
+	[OP_ENDPROC] = &compileOpEndprocNative,
+	[OP_LD64] = &compileOpLd64Native,
+	[OP_STR64] = &compileOpStr64Native,
+	[OP_LD32] = &compileOpLd32Native,
+	[OP_STR32] = &compileOpStr32Native,
+	[OP_LD16] = &compileOpLd16Native,
+	[OP_STR16] = &compileOpStr16Native,
+	[OP_LD8] = &compileOpLd8Native,
+	[OP_STR8] = &compileOpStr8Native,
+	[OP_VAR] = &compileOpVarNative,
+	[OP_SETV] = &compileOpSetvNative,
+	[OP_MUL] = &compileOpMulNative,
+	[OP_MULR] = &compileOpMulrNative,
+	[OP_DIV] = &compileOpDivNative,
+	[OP_DIVR] = &compileOpDivrNative,
+	[OP_DIVS] = &compileOpDivsNative,
+	[OP_DIVSR] = &compileOpDivsrNative,
+	[OP_EXTPROC] = &compileOpExtprocNative
 };
 static_assert(
 	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),
@@ -743,7 +743,7 @@ void compileByteCode(Program* src, FILE* dst)
 	if (src->datablocks.length) {
 		fprintf(dst, ".data\n");
 		array_foreach(DataBlock, block, src->datablocks, 
-			fprintf(dst, "\t%s: .asciz \"", block.name);
+			fprintf(dst, "\t%s: .ascii \"", block.name);
 			fputsbufesc(dst, block.spec, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
 			fprintf(dst, "\"\n");
 		);
@@ -756,14 +756,16 @@ void compileByteCode(Program* src, FILE* dst)
 	fprintf(dst, "\t.errno: .word\n");
 
 	fprintf(dst, ".text\n.align 4\n");
-	fprintf(
-		dst,
-		".global "DEFAULT_ENTRY_NAME"\n"
-		DEFAULT_ENTRY_NAME":\n"
-		"\tmov x28, x0\n"
-		"\tmov x27, x1\n"
-	);
-	if (src->entry_opid) fprintf(dst, "\tb %s\n", src->execblock.data[src->entry_opid].mark_name);
+	if (src->entry_opid >= 0) {
+		fprintf(
+			dst,
+			".global "DEFAULT_ENTRY_NAME"\n"
+			DEFAULT_ENTRY_NAME":\n"
+			"\tmov x28, x0\n"
+			"\tmov x27, x1\n%s",
+			src->entry_opid ? "\tb main\n" : ""
+		);
+	}
 	for (int i = 0; i < src->execblock.length; i++) {
 		native_op_compilers[src->execblock.data[i].type](src, i, &ctx);
 	}
@@ -892,7 +894,7 @@ int main(int argc, char* argv[])
 	} else if (proc_res.exitcode) {
 		eprintf("error: native assembler exited with code %hhu\n", proc_res.exitcode);
 		sbuf err_output = filecontent(proc_res.err, GLOBAL_CTX);
-		eprintf("assembler output:\n"sbuf_format"\n", unpack(err_output));
+		eprintf("assembler output:\n\t\""sbuf_format"\"\n", unpack(err_output));
 		unlink(asm_output_path);
 		return 1;
 	}
@@ -907,8 +909,7 @@ int main(int argc, char* argv[])
 
 	snprintf(
 		cmd, sizeof(cmd),
-		"ld -arch arm64 -e %s -syslibroot `xcrun --show-sdk-path` -lSystem -o %s %s",
-		program.entry_opid ? program.execblock.data[program.entry_opid].mark_name : DEFAULT_ENTRY_NAME,
+		"ld -arch arm64 -e "DEFAULT_ENTRY_NAME" -syslibroot `xcrun --show-sdk-path` -lSystem -o %s %s",
 		exec_output_path,
 		obj_output_path
 	);
@@ -918,7 +919,7 @@ int main(int argc, char* argv[])
 	} else if (proc_res.exitcode) {
 		eprintf("error: linker exited with code %hhu\n", proc_res.exitcode);
 		sbuf err_output = filecontent(proc_res.err, GLOBAL_CTX);
-		eprintf("linker output:\n"sbuf_format"\n", unpack(err_output));
+		eprintf("linker output:\n\t\""sbuf_format"\"\n", unpack(err_output));
 		unlink(asm_output_path);
 		unlink(obj_output_path);
 		return 1;
