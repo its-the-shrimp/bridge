@@ -6,7 +6,6 @@
 #include "datasets.h"
 #include "errno.h"
 
-
 #ifdef _WIN32_
 #define PATHSEP NT_PATHSEP
 #define NEWLINE NT_NEWLINE
@@ -88,7 +87,7 @@ typedef struct {
 #define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
 // hidden symbols are delimiters that are not returned as geenrated tokens
 
-BRP newBRP(sbuf delims[], sbuf keywords[], heapctx_t ctx);
+BRP newBRP(sbuf delims[], sbuf keywords[]);
 bool setInputFrom(BRP* obj, char* name, sbuf input);
 bool setInput(BRP* obj, char* name);
 Token fetchToken(BRP* obj);
@@ -121,16 +120,16 @@ int printBRPError(FILE* fd, BRP* obj);
 #ifdef BRP_IMPLEMENTATION
 #undef BRP_IMPLEMENTATION
 
-BRP newBRP(sbuf delims[], sbuf keywords[], heapctx_t ctx)
+BRP newBRP(sbuf delims[], sbuf keywords[])
 {
 	BRP res = {
 		.delims = delims,
 		.keywords = keywords,
-		.sources = InputCtxArray_new(ctx, -1),
+		.sources = InputCtxArray_new(-1),
 		.error_code = PREP_ERR_OK,
 		.error_loc = (TokenLoc){ .src_id = 1 },
 		._nl_delim_id = 1,
-		.pending = TokenQueue_new(ctx, 0)
+		.pending = TokenQueue_new(0)
 	};
 
 	for (int i = 0; delims[i].data; i++)
@@ -173,7 +172,7 @@ bool setInput(BRP* obj, char* name)
 		obj->sys_errno = errno;
 		return false;
 	}
-	sbuf input = filecontent(fd, arrayctx(obj->sources));
+	sbuf input = filecontent(fd);
 	if (!input.data) {
 		obj->error_code = PREP_ERR_NO_MEMORY;
 		return false;
@@ -196,7 +195,7 @@ Token fetchToken(BRP* obj)
 		input = obj->sources.data + i;
 		if (input->content.length) { break; }
 	}
-	if (!input) { return (Token){0}; }
+	if (!input) return (Token){0};
 
 	char* orig_ptr = input->content.data;
 	while (input->content.length > 0) {
@@ -217,7 +216,7 @@ Token fetchToken(BRP* obj)
 
 		res.type = TOKEN_STRING;
 		res.loc = input->cur_loc;
-		res.word = tostr(arrayctx(obj->sources), new);
+		res.word = tostr(new);
 
 		input->cur_loc.colno += sbufutf8len(delim) + 2;
 		return res;
@@ -241,7 +240,7 @@ Token fetchToken(BRP* obj)
 				}
 			}
 			if (res.type == TOKEN_WORD) {
-				res.word = tostr(arrayctx(obj->sources), new);
+				res.word = tostr(new);
 			}
 
 			res.loc = input->cur_loc;
@@ -337,10 +336,7 @@ char* getTokenTypeName(TokenType type)
 
 char* getTokenWord(BRP* obj, Token token)
 {
-	char intlit_size;
 	switch (token.type) {
-		case TOKEN_NONE: 
-			return "\0";
 		case TOKEN_WORD:
 		case TOKEN_STRING:
 			return token.word;
@@ -348,15 +344,6 @@ char* getTokenWord(BRP* obj, Token token)
 			return obj->keywords[token.keyword_id].data;
 		case TOKEN_SYMBOL:
 			return obj->delims[token.symbol_id].data;
-		case TOKEN_INT:
-			intlit_size = floorf(logf(token.value));
-			char* res = ctxalloc_new(intlit_size + 2, arrayctx(obj->sources));
-			res[intlit_size + 1] = '\0';
-			for (char i = 0; i <= intlit_size; i++) {
-				res[intlit_size - i] = token.value % 10 + '0';
-				token.value /= 10;
-			}
-			return res;
 		default: return NULL;
 	}
 }

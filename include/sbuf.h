@@ -7,7 +7,6 @@
 #include "string.h"
 #include "stdbool.h"
 #include "stdarg.h"
-#include "ctxalloc.h"
 
 #define sbuf_format "%.*s"
 #define unpack(array) (int)array.length, array.data
@@ -18,9 +17,9 @@
 #define sbufshift(obj, offset) obj.length -= offset; obj.data += offset;
 #define sbufpshift(obj, offset) obj->length -= offset; obj->data += offset;
 
-#define fromcstr(src) (sbuf){ .data = src, .length = sizeof(src) - 1 }
-#define fromstr(src) (sbuf){ .data = src, .length = strlen(src) }
-#define sbufslice(obj, start, end) (sbuf){ .data = (obj).data + start, .length = (end < 0 ? (obj).length : end) - start }
+#define fromcstr(src) ((sbuf){ .data = src, .length = sizeof(src) - 1 })
+#define fromstr(src) ((sbuf){ .data = src, .length = strlen(src) })
+#define sbufslice(obj, start, end) ((sbuf){ .data = (obj).data + start, .length = (end < 0 ? (obj).length : end) - start })
 
 #define BYTEFMT_OCT         0b00000001
 #define BYTEFMT_HEX         0b00000010
@@ -40,14 +39,14 @@ typedef struct sbuf {
 
 #define CSTRTERM ((sbuf){ .data = "\0", .length = 1 })
 
-sbuf _sbufconcat(heapctx_t ctx, ...);
-sbuf filecontent(FILE* fd, heapctx_t ctx);
+sbuf _sbufconcat(int _, ...);
+sbuf filecontent(FILE* fd);
 char lowerchar(char src);
 sbuf _sbufsplitesc(sbuf* src, sbuf* dst, ...);
 int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[]);
 sbuf _sbufsplit(sbuf* src, sbuf* dst, ...);
 int sbufsplitv(sbuf* src, sbuf* dst, sbuf delims[]);
-sbuf sbufunesc(sbuf src, heapctx_t ctx);
+sbuf sbufunesc(sbuf src);
 sbuf_size_t sbufutf8len(sbuf obj);
 bool sbufascii(sbuf obj);
 bool sbufspace(sbuf obj);
@@ -61,17 +60,18 @@ char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format);
 sbuf_size_t sbufindex(sbuf obj, sbuf sub);
 sbuf_size_t sbufcount(sbuf obj, sbuf items);
-sbuf sbufcopy(sbuf obj, heapctx_t ctx);
+sbuf sbufcopy(sbuf obj);
 sbuf _sbufcut(sbuf* src, ...);
 sbuf sbufwrite(sbuf dst, sbuf src, sbuf_size_t offset);
-// Sized Contextual Allocator - context-based memory allocator using sized buffers
-sbuf sctxalloc_new(long length, heapctx_t ctx);
-long sctxalloc_resize(sbuf* obj, long new_length);
-long sctxalloc_free(sbuf* obj);
+
+sbuf smalloc(sbuf_size_t size);
+sbuf_size_t srealloc(sbuf* obj, sbuf_size_t size);
+void sfree(sbuf* obj);
 
 #define streq(str1, str2) sbufeq(fromstr(str1), fromstr(str2))
-#define sbufconcat(ctx, ...) _sbufconcat(ctx, __VA_ARGS__, (sbuf){0})
-#define tostr(ctx, ...) (sbufconcat(ctx, __VA_ARGS__, CSTRTERM).data)
+#define sbufconcat(...) _sbufconcat(0, __VA_ARGS__, (sbuf){0})
+#define tostr(...) (sbufconcat(__VA_ARGS__, CSTRTERM).data)
+#define strcopy(ptr) (sbufconcat(fromstr(ptr), CSTRTERM).data)
 #define sbufsplit(src, dst, ...) _sbufsplit(src, dst, __VA_ARGS__, (sbuf){0})
 #define sbufsplitesc(src, dst, ...) _sbufsplitesc(src, dst, __VA_ARGS__, (sbuf){0})
 #define sbufcut(src, ...) _sbufcut(src, __VA_ARGS__, (sbuf){0})
@@ -95,15 +95,15 @@ long sctxalloc_free(sbuf* obj);
 
 #define cast(type, expr) (type)(expr)
 
-sbuf _sbufconcat(heapctx_t ctx, ...)
+sbuf _sbufconcat(int _, ...)
 {
 	va_list args;
-	va_start(args, ctx);
-	sbuf res = sctxalloc_new(0, ctx);
+	va_start(args, _);
+	sbuf res = smalloc(0);
 	sbuf new;
 	while ((new = va_arg(args, sbuf)).data) {
-		if (!sctxalloc_resize(&res, res.length + new.length)) {
-			sctxalloc_free(&res);
+		if (!srealloc(&res, res.length + new.length)) {
+			sfree(&res);
 			return (sbuf){0};
 		}
 		memcpy(res.data + res.length - new.length, new.data, new.length);
@@ -115,20 +115,20 @@ sbuf _sbufconcat(heapctx_t ctx, ...)
 
 //returns a sized buffer created containing output fetched from the file descriptor `fd`.
 // if an error occures, a zero-initialized sized string is returned.
-sbuf filecontent(FILE* fd, heapctx_t ctx)
+sbuf filecontent(FILE* fd)
 {
 	if (fd == NULL || ferror(fd) || feof(fd)) { 
 		return (sbuf){0}; 
 	}
 	char temp[1024];
-	sbuf res = sctxalloc_new(0, ctx);
+	sbuf res = smalloc(0);
 	int chunk_size;
 
 	while (feof(fd) == 0 && ferror(fd) == 0)
 	{
 		int chunk_size = fread(temp, 1, sizeof(temp), fd);
-		if (!sctxalloc_resize(&res, res.length + chunk_size)) {
-			sctxalloc_free(&res);
+		if (!srealloc(&res, res.length + chunk_size)) {
+			sfree(&res);
 			return (sbuf){0};
 		}
 		memcpy(res.data + res.length - chunk_size, temp, chunk_size);
@@ -241,9 +241,9 @@ int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[])
 }
 
 // returns a newly allocated string with data from the sized string `src` unescaped.
-sbuf sbufunesc(sbuf src, heapctx_t ctx)
+sbuf sbufunesc(sbuf src)
 {
-	sbuf res = sctxalloc_new(src.length, ctx);
+	sbuf res = smalloc(src.length);
 	res.length = 0;
 
 	for (int i = 0; src.length > 0; i++) {
@@ -320,7 +320,7 @@ bool sbufstartswith(sbuf obj, sbuf sub)
 bool sbufendswith(sbuf obj, sbuf sub)
 {
 	size_t offset = obj.length - sub.length;
-	if (sub.length > obj.length) { return false; }
+	if (sub.length > obj.length) return false;
 	for (sbuf_size_t i = offset; i < obj.length; i++) {
 		if (obj.data[i] != sub.data[i - offset]) return false;
 	}
@@ -482,9 +482,9 @@ sbuf_size_t sbufcount(sbuf obj, sbuf items)
 }
 
 // copies data of the sized buffer `obj` to the heap and returns sized string with the copied data 
-sbuf sbufcopy(sbuf obj, heapctx_t ctx)
+sbuf sbufcopy(sbuf obj)
 {
-	sbuf res = sctxalloc_new(obj.length, ctx);
+	sbuf res = smalloc(obj.length);
 	memcpy(res.data, obj.data, obj.length);
 	return res;
 }
@@ -514,31 +514,27 @@ sbuf sbufwrite(sbuf dst, sbuf src, sbuf_size_t offset)
 	return dst;
 }
 
-sbuf sctxalloc_new(long length, heapctx_t ctx)
+sbuf smalloc(long length)
 {
-	char* temp = ctxalloc_new(length, ctx);
+	char* temp = malloc(length);
 	return (sbuf){ .data = temp, .length = temp ? length : 0 };
 }
 
-long sctxalloc_resize(sbuf* obj, long new_length)
+sbuf_size_t srealloc(sbuf* obj, sbuf_size_t new_length)
 {
-	long prevlen = obj->length;
+	sbuf_size_t prevlen = obj->length;
 	void* new;
-	if ((new = ctxalloc_resize(obj->data, new_length))) {
+	if ((new = realloc(obj->data, new_length))) {
 		obj->length = new_length;
 		obj->data = new;
 		return new_length - prevlen;
 	}
 	return 0;
 }
-long sctxalloc_free(sbuf* obj)
+
+void sfree(sbuf* obj)
 {
-	long prevsize = obj->length;
-	if (!ctxalloc_free(obj->data)) {
-		obj->length = 0;
-		return 0 - prevsize;
-	}
-	return 0;
+	free(obj->data);
 }
 
 #endif // SBUF_IMPLEMENTATION

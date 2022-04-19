@@ -5,6 +5,7 @@
 #include "math.h"
 #include "time.h"
 #include "errno.h"
+#include "fcntl.h"
 #include "spawn.h"
 #include "sys/wait.h"
 extern char** environ;
@@ -17,23 +18,21 @@ bool IS_BIG_ENDIAN, IS_LITTLE_ENDIAN;
 
 void initBREnv(void)
 {
-	ctxalloc_init();
 	int _e = 0xDEADBEEF;
 	IS_BIG_ENDIAN = *(char*)&_e == 0xDE;
 	IS_LITTLE_ENDIAN = !IS_BIG_ENDIAN;
 }
 
-char* getAbsolutePath(char* src, heapctx_t ctx)
+char* getAbsolutePath(char* src)
 {
-	enter_tempctx(funcctx, 0);
 	sbuf input = fromstr(src);
 	if (!sbufstartswith(input, PATHSEP)) {
 		char resbuf[MAXPATHLEN];
 		getwd(resbuf);
-		input = sbufconcat(TEMP_CTX, fromstr(resbuf), PATHSEP, input);
+		input = sbufconcat(fromstr(resbuf), PATHSEP, input);
 	}
 
-	sbufArray components = sbufArray_new(TEMP_CTX, sbufcount(input, PATHSEP) * -1 - 1);
+	sbufArray components = sbufArray_new(sbufcount(input, PATHSEP) * -1 - 1);
 	sbuf new;
 	
 	while (input.length) {
@@ -44,10 +43,10 @@ char* getAbsolutePath(char* src, heapctx_t ctx)
 			sbufArray_append(&components, new);
 		}
 	}
-	sbuf res = sctxalloc_new(input.length + 1, ctx);
+	sbuf res = smalloc(input.length + 1);
 	memset(res.data, 0, res.length);
 	if (!res.data) {
-		exit_tempctx(funcctx);
+		sbufArray_clear(&components);
 		return NULL;
 	}
 	res.length = 0;
@@ -57,7 +56,7 @@ char* getAbsolutePath(char* src, heapctx_t ctx)
 		memcpy(res.data + res.length, component.data, component.length);
 		res.length += component.length;
 	);
-	exit_tempctx(funcctx);
+	free(components.data);
 	return res.data;
 }
 
@@ -142,4 +141,33 @@ bool execProcess(char* command, ProcessInfo* info)
 	info->exitcode = info->exited ? WEXITSTATUS(exit_status) : WTERMSIG(exit_status);
 
 	return true;
+}
+
+FILE* fopenat(FILE* dir, const char* path, const char* mode)
+{
+	int oflag = 0;
+	if (!mode ? true : !mode[0]) {
+		errno = EINVAL;
+		return NULL;
+	}
+	switch (mode[0]) {
+		case 'r':
+			if (mode[1] == '+') {
+				oflag = O_RDWR;
+			} else {
+				oflag = O_RDONLY;
+			}
+			break;
+		case 'w':
+			oflag = O_WRONLY;
+			break;
+		default:
+			errno = EINVAL;
+			return NULL;
+	}
+	int res = openat(fileno(dir), path, oflag);
+	if (res < 0) {
+		return NULL;
+	}
+	return fdopen(res, mode);
 }

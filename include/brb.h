@@ -3,6 +3,10 @@
 
 #include "br.h"
 
+#define BRB_EXT fromcstr(".brb")
+#define VBRB_EXT fromcstr(".vbrb")
+#define BR_EXT fromcstr(".br")
+
 typedef enum {
 	OP_NONE,
 	OP_END,
@@ -156,13 +160,15 @@ typedef enum {
 	BRB_ERR_NO_COND_ID,
 	BRB_ERR_NO_STACK_SIZE,
 	BRB_ERR_NO_ENTRY,
+	BRB_ERR_NO_LOAD_SEGMENT,
+	BRB_ERR_MODULE_NOT_FOUND,
 	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
 class {
 	BRBLoadErrorCode code;
 	union {
-		sbuf segment_spec; // for BRB_ERR_UNKNOWN_SEGMENT_SPEC
+		char* module_name; // for BRB_ERR_MODULE_NOT_FOUND
 		int32_t opcode; // for BRB_ERR_INVALID_OPCODE and BRB_ERR_NO_OP_ARG
 		uint8_t cond_id; // for BRB_ERR_INVALID_COND_ID
 	};
@@ -236,6 +242,7 @@ class {
 	union {
 		int64_t value;
 		int64_t symbol_id;
+		int64_t op_offset;
 		char* mark_name;
 		uint8_t syscall_id; 
 		int8_t src2_reg;
@@ -276,14 +283,20 @@ class {
 } DataBlock;
 declArray(DataBlock);
 
+typedef char* str;
+declArray(str);
+
 class {
 	OpArray execblock;
 	MemBlockArray memblocks;
 	DataBlockArray datablocks;
 	int64_t entry_opid;
 	int64_t stack_size;
-} Program;
-#define programctx(program) arrayctx((program).execblock)
+	strArray submodules;
+	int _root_db_start;
+	int _root_mb_start;
+	int _root_eb_start;
+} Module;
 
 typedef enum {
 	DS_INT8,
@@ -298,14 +311,14 @@ typedef enum {
 } DataType;
 
 static const char DataTypeSizes[] = {
-	1, // DS_INT8
-	2, // DS_INT16
-	0, // DS_VOID
-	4, // DS_INT32
-	1, // DS_BOOL
-	8, // DS_CONST
-	8, // DS_PTR
-	8, // DS_INT64
+	[DS_INT8] = 1,
+	[DS_INT16] = 2,
+	[DS_VOID] = 0,
+	[DS_INT32] = 4,
+	[DS_BOOL] = 1,
+	[DS_CONST] = 8,
+	[DS_PTR] = 8,
+	[DS_INT64] = 8,
 };
 static_assert(N_DS_TYPES == sizeof(DataTypeSizes), "not all tracers have their sizes set");
 #define dataSpecSize(spec) ( (spec).type != DS_VOID ? DataTypeSizes[(spec).type] : (spec).size )
@@ -337,12 +350,12 @@ typedef struct {
 } DataSpec;
 declArray(DataSpec);
 
-typedef struct {
+class {
 	int8_t size;
 	int32_t n_elements;
 } Var;
 
-typedef struct {
+class {
 	DataSpecArray vars;
 	int64_t prev_opid;
 	int64_t call_id;
@@ -353,13 +366,13 @@ declArray(ProcFrame);
 #define N_USER_REGS 8
 #define CONDREG1_ID 8
 #define CONDREG2_ID 9
-#define DEFAULT_STACK_SIZE (512 * 1024) // 512 Kb, just like in JVM
+#define DEFAULT_STACK_SIZE 512 // 512 Kb, just like in JVM
 
 #define BRBX_TRACING         0b00000001
 #define BRBX_CHECK_SYSCALLS  0b00000100
 #define BRBX_PRINT_MEMBLOCKS 0b00001000
 
-typedef struct {
+class {
 	sbuf heap;
 	void* stack_brk;
 	void* stack_head;
@@ -388,13 +401,16 @@ typedef struct {
 	sbuf* exec_argv;
 	int64_t call_count;
 } ExecEnv;
-#define envctx(envp) chunkctx(envp->stack_brk)
 
-void writeProgram(Program* src, FILE* dst);
-BRBLoadError loadProgram(FILE* fd, Program* dst, heapctx_t ctx);
+void writeModule(Module* src, FILE* dst);
+FILE* findModule(char* name, strArray search_paths);
+Module* mergeModule(Module* src, Module* dst);
+void resolveModule(Module* dst);
+BRBLoadError preloadModule(FILE* src, Module* dst, strArray search_paths);
+BRBLoadError loadModule(FILE* src, Module* dst, strArray search_paths);
 void printLoadError(BRBLoadError err);
-ExecEnv execProgram(Program* program, int8_t flags, char** args, volatile bool* interruptor);
-void printExecState(FILE* fd, ExecEnv* env, Program* program);
-void printRuntimeError(FILE* fd, ExecEnv* env, Program* program);
+ExecEnv execModule(Module* module, int8_t flags, char** args, volatile bool* interruptor);
+void printExecState(FILE* fd, ExecEnv* env, Module* module);
+void printRuntimeError(FILE* fd, ExecEnv* env, Module* module);
 
 #endif // _BRB_

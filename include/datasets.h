@@ -1,7 +1,7 @@
 #ifndef _DATASETS_
 #define _DATASETS_
 
-#include "ctxalloc.h"
+#include "stdlib.h"
 #include "string.h"
 #include "stdbool.h"
 #include "stdarg.h"
@@ -46,8 +46,9 @@
 #define arrayctx(array) chunkctx((array).data)
 #define declArray(t) \
 	typedef struct { int length; t* data; } t##Array; \
-	t##Array t##Array_new(heapctx_t ctx, int n, ...); \
+	t##Array t##Array_new(int n, ...); \
 	t* t##Array_append(t##Array* array, t object); \
+	t* t##Array_extend(t##Array* array, t##Array sub); \
 	t t##Array_get(t##Array array, int index); \
 	void t##Array_set(t##Array* array, int index, t object); \
 	bool t##Array_move(t##Array* array, int index, size_t n, t dst[]); \
@@ -57,27 +58,35 @@
 	long t##Array_index(t##Array array, t obj); \
 	bool t##Array_insert(t##Array* array, t##Array sub, int index); \
 	bool t##Array_clear(t##Array* array); \
+	t* t##Array_resize(t##Array* array, int n); \
 
 #define defArray(t) \
-	t##Array t##Array_new(heapctx_t ctx, int n, ...) { \
+	t##Array t##Array_new(int n, ...) { \
 		va_list args; \
 		va_start(args, n); \
 		t##Array res = (t##Array){  \
 			.length = (n < 0 ? 0 : n), \
-			.data = ctxalloc_new(sizeof(t) * (n < 0 ? n * -1 : n), ctx), \
+			.data = malloc(sizeof(t) * absInt(n)), \
 		}; \
-		for (int i = 0; i < n; i++) \
-		{ \
+		for (int i = 0; i < n; i++) { \
 			res.data[i] = va_arg(args, t); \
 		} \
 		va_end(args); \
 		return res; \
 	} \
 	t* t##Array_append(t##Array* array, t object) { \
-		void* res = ctxalloc_resize(array->data, (array->length + 1) * sizeof(t)); \
+		void* res = realloc(array->data, (array->length + 1) * sizeof(t)); \
 		if (!res) return NULL; \
 		array->data = res; \
 		array->data[array->length++] = object; \
+		return arrayhead(*array); \
+	} \
+	t* t##Array_extend(t##Array* array, t##Array sub) { \
+		void* res = realloc(array->data, (array->length + sub.length) * sizeof(t)); \
+		if (!res) return NULL; \
+		array->data = res; \
+		memcpy(array->data + array->length, sub.data, sub.length * sizeof(t)); \
+		array->length += sub.length; \
 		return arrayhead(*array); \
 	} \
 	t t##Array_get(t##Array array, int index) { \
@@ -95,7 +104,7 @@
 		for (int i = index; i + n < array->length; i++) { \
 			array->data[i] = array->data[i + n]; \
 		} \
-		void* res = ctxalloc_resize(array->data, (array->length - n) * sizeof(t)); \
+		void* res = realloc(array->data, (array->length - n) * sizeof(t)); \
 		if (res) { \
 			array->data = res; \
 			array->length -= n; \
@@ -139,7 +148,7 @@
 		if (index > array->length) { \
 			return false; \
 		} \
-		void* res = ctxalloc_resize(array->data, (array->length + sub.length - 1) * sizeof(t)); \
+		void* res = realloc(array->data, (array->length + sub.length - 1) * sizeof(t)); \
 		if (!res) { return false; } \
 		array->data = res; \
 		for (int i = array->length - sub.length - 1; i > index; i--) { \
@@ -150,11 +159,17 @@
 		} \
 		return true; \
 	} \
+	t* t##Array_resize(t##Array* array, int n) { \
+		t* res = realloc(array->data, (array->length + n) * sizeof(t)); \
+		if (!res) return NULL; \
+		array->length += n; \
+		array->data = res; \
+		return array->data + array->length - n; \
+	} \
 	bool t##Array_clear(t##Array* array) { \
 		if (!array->length) return true; \
-		heapctx_t ctx = chunkctx(array->data); \
-		if (!ctxalloc_free(array->data)) return false; \
-		array->data = (t*)ctx; \
+		free(array->data); \
+		array->data = malloc(0); \
 		array->length = 0; \
 		return true; \
 	} \
@@ -163,18 +178,18 @@
 #define defChain(t) \
 	typedef struct t##_node { struct t##_node* prev; t value; struct t##_node* next; } t##Node; \
 	typedef struct t##_chain { t##Node* start; t##Node* end; } t##Chain; \
-	t##Chain t##Chain_new(heapctx_t ctx, int n, ...) { \
-		if (n == 0) { return (t##Chain){ .start = ctxalloc_new(0, ctx), .end = NULL }; } \
+	t##Chain t##Chain_new(int n, ...) { \
+		if (n == 0) return (t##Chain){0}; \
 		va_list args; \
 		va_start(args, n); \
 		t##Chain res; \
-		t##Node* _res = ctxalloc_new(sizeof(t##Node), ctx); \
+		t##Node* _res = malloc(sizeof(t##Node)); \
 		_res->prev = NULL; \
 		_res->value = va_arg(args, t); \
 		_res->next = NULL; \
 		res.start = res.end = _res; \
 		for (int i = 1; i < n; i++) { \
-			_res = ctxalloc_new(sizeof(t##Node), ctx);  \
+			_res = malloc(sizeof(t##Node));  \
 			_res->prev = res.end; \
 			_res->value = va_arg(args, t); \
 			_res->next = NULL; \
@@ -184,12 +199,12 @@
 		return res; \
 	} \
 	t* t##Chain_append(t##Chain* chain, t obj) { \
-		t##Node* _res = ctxalloc_new(sizeof(t##Node), chainctx(*chain)); \
-		if (!_res) { return NULL; } \
+		t##Node* _res = malloc(sizeof(t##Node)); \
+		if (!_res) return NULL; \
 		_res->prev = chain->end; \
 		_res->next = NULL; \
 		_res->value = obj; \
-		if (!isheapchunk(chain->start)) { chain->start = _res; } \
+		if (!chain->start) { chain->start = _res; } \
 		else { chain->end->next = _res; } \
 		chain->end = _res; \
 		return &chain->end->value; \
@@ -211,8 +226,7 @@
 		return res ? res->value : (t){0}; \
 	} \
 	bool t##Chain_insert(t##Chain* chain, t##Chain sub, t##Node* prev) { \
-		if (chainctx(*chain) != chainctx(sub)) { return false; } \
-		if (!sub.start) { return true; } \
+		if (!sub.start) return true; \
 		if (!chain->start) { \
 			chain->start = sub.start; \
 			chain->end = sub.end; \
@@ -233,30 +247,29 @@
 		return true; \
 	} \
 	t t##Chain_pop(t##Chain* chain, t##Node* node) { \
-		if (!node) { return (t){0}; } \
 		if (node == chain->start) { chain->start = chain->start->next; } \
 		if (node == chain->end) { chain->end = chain->end->prev; } \
 		if (node->prev) { node->prev->next = node->next; } \
 		if (node->next) { node->next->prev = node->prev; } \
 		t res = node->value; \
-		ctxalloc_free(node); \
+		free(node); \
 		return res; \
 	} \
 	t t##Chain_popstart(t##Chain* chain) { \
-		if (!isheapchunk(chain->start)) return (t){0}; \
+		if (!chain->start) return (t){0}; \
 		t##Node res = *(chain->start); \
 		if (chain->start == chain->end) { \
-			chain->start = (t##Node*)chunkctx(chain->end); \
-			ctxalloc_free(chain->end); \
+			chain->start = NULL; \
+			free(chain->end); \
 			chain->end = NULL; \
 		} else { \
-			ctxalloc_free(chain->start); \
+			free(chain->start); \
 			chain->start = res.next; \
 		} \
 		return res.value; \
 	} \
 	t t##Chain_getstart(t##Chain* chain) { \
-		if (!isheapchunk(chain->start)) return (t){0}; \
+		if (!chain->start) return (t){0}; \
 		return chain->start->value; \
 	} \
 	int t##Chain_length(t##Chain chain) { \
@@ -270,7 +283,7 @@
 		chain->start = (t##Node*)chainctx(*chain); \
 		for (t##Node* node = chain->start; node != NULL; node = prevnode) { \
 			prevnode = node->prev; \
-			if (!ctxalloc_free(node)) return false; \
+			free(node); \
 		} \
 		chain->end = NULL; \
 		return true; \
@@ -278,14 +291,14 @@
 
 #define declQueue(t) \
 	typedef struct { int input_end, output_end; long length; } t##Queue; \
-	t##Queue t##Queue_new(heapctx_t ctx, int n, ...); \
+	t##Queue t##Queue_new(int n, ...); \
 	bool t##Queue_add(t##Queue* queue, t obj); \
 	bool t##Queue_fetch(t##Queue* queue, t* dst); \
 	bool t##Queue_peek(t##Queue* queue, t* dst); \
 	bool t##Queue_delete(t##Queue* queue) \
 
 #define defQueue(t) \
-	t##Queue t##Queue_new(heapctx_t ctx, int n, ...) { \
+	t##Queue t##Queue_new(int n, ...) { \
 		int fds[2]; \
 		pipe(fds); \
 		t##Queue res = { .length = n, .input_end = fds[1], .output_end = fds[0] }; \

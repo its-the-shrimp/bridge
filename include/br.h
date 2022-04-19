@@ -9,7 +9,7 @@
 
 #include "datasets.h"
 #include "sbuf.h"
-#include "ctxalloc.h"
+#include "assert.h"
 #include "brp.h"
 #include "stdint.h"
 #include "stdio.h"
@@ -24,7 +24,7 @@ extern bool IS_LITTLE_ENDIAN;
 #define class typedef struct
 
 void initBREnv(void);
-char* getAbsolutePath(char* src, heapctx_t ctx);
+char* getAbsolutePath(char* src);
 void* BRByteOrder(void* src, long length);
 
 static struct timespec TIME;
@@ -42,6 +42,8 @@ class {
 } ProcessInfo;
 
 bool execProcess(char* command, ProcessInfo* info);
+
+FILE* fopenat(FILE* dir, const char* path, const char* mode);
 
 #define isTempPath(path) sbufstartswith(fromstr(path), fromcstr("/tmp")) 
 #define inRange(x, start, end) ( (int64_t)(x) >= (int64_t)(start) && (int64_t)(x) < (int64_t)(end) )
