@@ -52,10 +52,14 @@ int main(int argc, char* argv[]) {
 	}
 
 	Module module;
-	strArray search_paths = strArray_new(1, ".");
-	BRBLoadError err = loadModule(input_fd, &module, search_paths);
+	char* module_search_paths[] = { ".", NULL };
+	BRBLoadError err = loadModule(input_fd, &module, module_search_paths, BRB_EXECUTABLE);
 	if (err.code) {
 		printLoadError(err);
+		return 1;
+	}
+	if (module.entry_opid < 0) {
+		eputs("error: no entry point, i.e. the \"main\" procedure found\n");
 		return 1;
 	}
 

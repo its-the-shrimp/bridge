@@ -7,6 +7,7 @@
 #include "errno.h"
 #include "fcntl.h"
 #include "spawn.h"
+#include "sys/stat.h"
 #include "sys/wait.h"
 extern char** environ;
 
@@ -143,31 +144,78 @@ bool execProcess(char* command, ProcessInfo* info)
 	return true;
 }
 
-FILE* fopenat(FILE* dir, const char* path, const char* mode)
+bool execProcess_s(sbuf command, ProcessInfo* info)
 {
-	int oflag = 0;
-	if (!mode ? true : !mode[0]) {
-		errno = EINVAL;
-		return NULL;
-	}
-	switch (mode[0]) {
-		case 'r':
-			if (mode[1] == '+') {
-				oflag = O_RDWR;
-			} else {
-				oflag = O_RDONLY;
-			}
+	char temp[command.length + 1];
+	memcpy(temp, command.data, command.length);
+	temp[command.length] = '\0';
+	return execProcess(temp, info);
+}
+
+bool isPathDir(char* path)
+{
+	struct stat info;
+	if (lstat(path, &info)) return false;
+	return S_ISDIR(info.st_mode);
+}
+
+bool isPathDir_s(sbuf path)
+{
+	char temp[path.length + 1];
+	memcpy(temp, path.data, path.length);
+	temp[path.length] = '\0';
+	return isPathDir(temp);
+}
+
+char* setFileExt(char* path, char* ext)
+{
+	sbuf src = fromstr(path);
+	sbuf noext;
+	sbufsplit(&src, &noext, fromcstr("."));
+	return tostr(noext, fromstr(ext));
+}
+
+sbuf setFileExt_s(sbuf path, sbuf ext)
+{
+	sbuf noext;
+	sbufsplit(&path, &noext, fromcstr("."));
+	return sbufconcat(noext, ext);
+}
+
+char* fileBaseName(char* path)
+{
+	sbuf src = fromstr(path);
+	sbuf res;
+	sbufsplit(&src, &res, fromcstr("."));
+	for (char* ptr = res.data + res.length - 1; ptr >= res.data; ptr--) {
+		if (*ptr == '/') {
+			res.data = ptr;
 			break;
-		case 'w':
-			oflag = O_WRONLY;
+		}
+	}
+	return tostr(res);
+}
+
+sbuf fileBaseName_s(sbuf path)
+{
+	sbuf res;
+	sbufsplit(&path, &res, fromcstr("."));
+	for (char* ptr = res.data + res.length - 1; ptr >= res.data; ptr--) {
+		if (*ptr == '/') {
+			res.data = ptr;
 			break;
-		default:
-			errno = EINVAL;
-			return NULL;
+		}
 	}
-	int res = openat(fileno(dir), path, oflag);
-	if (res < 0) {
-		return NULL;
-	}
-	return fdopen(res, mode);
+	return res;
+}
+
+bool fpipe(FILE** readable_end_ptr, FILE** writable_end_ptr)
+{
+	int fds[2];
+	if (pipe(fds) != 0) return false;
+
+	*readable_end_ptr = fdopen(fds[0], "r");
+	*writable_end_ptr = fdopen(fds[1], "w");
+	
+	return true;
 }

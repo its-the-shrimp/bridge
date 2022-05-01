@@ -1,4 +1,4 @@
-// The BRidge BRP
+// The BRidge Preprocessor
 #ifndef _BRP_
 #define _BRP_
 
@@ -53,24 +53,25 @@ declArray(sbuf);
 declQueue(Token);
 
 typedef enum {
-	PREP_ERR_OK,
-	PREP_ERR_UNCLOSED_STR,
-	PREP_ERR_NO_NEWLINE_DELIM,
-	PREP_ERR_NO_MEMORY,
-	PREP_ERR_FILE_NOT_FOUND,
+	BRP_ERR_OK,
+	BRP_ERR_UNCLOSED_STR,
+	BRP_ERR_NO_MEMORY,
+	BRP_ERR_FILE_NOT_FOUND,
 	N_PARSER_ERRORS
 } BRPError;
 
 typedef struct {
 	char* name;
-	sbuf content;
+	FILE* src;
 	TokenLoc cur_loc;
 } InputCtx;
 declArray(InputCtx);
 
+
 typedef struct {
 	sbuf* keywords;
-	sbuf* delims;
+	sbuf* symbols;
+	sbuf* hidden_symbols;
 	BRPError error_code;
 	union {
 		TokenLoc error_loc;
@@ -78,17 +79,23 @@ typedef struct {
 		int32_t sys_errno;
 	};
 	InputCtxArray sources;
-	int _nl_delim_id;
 	TokenQueue pending;
+	sbuf buffer;
 } BRP;
 
 #define BRP_KEYWORD(spec) fromcstr(spec)
 #define BRP_SYMBOL(spec) fromcstr(spec)
 #define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
-// hidden symbols are delimiters that are not returned as geenrated tokens
+// hidden symbols are delimiters that are not returned as generated tokens
 
-BRP newBRP(sbuf delims[], sbuf keywords[]);
-bool setInputFrom(BRP* obj, char* name, sbuf input);
+BRP* initBRP(BRP* obj);
+void delBRP(BRP* obj);
+
+bool _setKeywords(BRP* obj, ...);
+bool _setSymbols(BRP* obj, ...);
+#define setKeywords(obj, ...) _setKeywords(obj, __VA_ARGS__, (sbuf){0})
+#define setSymbols(obj, ...) _setSymbols(obj, __VA_ARGS__, (sbuf){0})
+bool setInputFrom(BRP *obj, char *name, FILE* fd);
 bool setInput(BRP* obj, char* name);
 Token fetchToken(BRP* obj);
 Token peekToken(BRP* obj);
@@ -98,15 +105,16 @@ int fprintTokenStr(FILE* fd, Token token, BRP* obj);
 int fprintToken(FILE* fd, Token token, BRP* obj);
 char* getTokenTypeName(TokenType type);
 char* getTokenWord(BRP* obj, Token token);
-int printBRPError(FILE* fd, BRP* obj);
+void printBRPErrorStr(FILE* fd, BRP* obj);
+void printBRPError(FILE* fd, BRP* obj);
 
 
 #define setBRPError(prep, code, loc) \
-	if ((prep)->error_code == PREP_ERR_OK) { \
+	if ((prep)->error_code == BRP_ERR_OK) { \
 		(prep)->error_code = code; \
 		(prep)->error_loc = loc; \
 	}
-#define BRPempty(prep) ( (prep)->sources.length ? (prep)->sources.data[0].content.length == 0 : true )
+#define BRPempty(prep) ( (prep)->sources.length ? feof((prep)->sources.data[0].src) || ferror((prep)->sources.data[0].src) : true )
 #define printTokenLoc(loc, parser) fprintTokenLoc(stdout, loc, parser)
 #define printTokenStr(token, parser) fprintTokenStr(stdout, token, parser)
 #define printToken(token, parser) fprintToken(stdout, token, parser)
@@ -117,47 +125,83 @@ int printBRPError(FILE* fd, BRP* obj);
 
 #endif 
 
+
 #ifdef BRP_IMPLEMENTATION
 #undef BRP_IMPLEMENTATION
 
-BRP newBRP(sbuf delims[], sbuf keywords[])
+BRP* initBRP(BRP* obj)
 {
-	BRP res = {
-		.delims = delims,
-		.keywords = keywords,
-		.sources = InputCtxArray_new(-1),
-		.error_code = PREP_ERR_OK,
-		.error_loc = (TokenLoc){ .src_id = 1 },
-		._nl_delim_id = 1,
-		.pending = TokenQueue_new(0)
-	};
+	*obj = (BRP){0};
+	obj->sources = InputCtxArray_new(-1);
+	if (!obj->sources.data) return NULL;
+	obj->pending = TokenQueue_new(0);
+	obj->error_loc = (TokenLoc){ .src_id = 1 };
 
-	for (int i = 0; delims[i].data; i++)
-	{
-		if (sbufeq(delims[i], NEWLINE)) {
-			res._nl_delim_id = i;
-			break;
-		}
-	}
-
-	return res;
+	return obj;
 }
 
-bool setInputFrom(BRP *obj, char *name, sbuf input)
+bool _setKeywords(BRP* obj, ...)
+{
+	va_list args;
+	va_start(args, obj);
+	sbuf kw;
+	int n_kws = 1;
+// calculating amount of keywords
+	while ((kw = va_arg(args, sbuf)).data) { n_kws++; }
+	va_end(args);
+// copying the keywords array
+	va_start(args, obj);
+	obj->keywords = malloc(n_kws * sizeof(sbuf));
+	if (!obj->keywords) return false;
+	for (int i = 0; i < n_kws; i++) {
+		obj->keywords[i] = va_arg(args, sbuf);
+	}
+
+	return true;
+}
+
+bool _setSymbols(BRP* obj, ...)
+{
+	va_list args;
+	va_start(args, obj);
+	sbuf symbol;
+	int n_symbols = 1;
+	int n_hidden_symbols = 1;
+// calculating amount of symbols
+	while ((symbol = va_arg(args, sbuf)).data) {
+		n_symbols++;
+		if (isSymbolSpecHidden(symbol)) n_hidden_symbols++;
+	}
+	va_end(args);
+// copying the symbols array
+	va_start(args, obj);
+	obj->symbols = malloc(n_symbols * sizeof(sbuf));
+	obj->hidden_symbols = malloc(n_hidden_symbols * sizeof(sbuf));
+	if (!obj->symbols || !obj->hidden_symbols) return false;
+	n_hidden_symbols = 0;
+	for (int i = 0; i < n_symbols; i++) {
+		obj->symbols[i] = va_arg(args, sbuf);
+		if (obj->symbols[i].data ? isSymbolSpecHidden(obj->symbols[i]) : true) obj->hidden_symbols[n_hidden_symbols++] = obj->symbols[i];
+	}
+	va_end(args);
+
+	return true;
+}
+
+bool setInputFrom(BRP *obj, char *name, FILE* fd)
 {
 	if (!InputCtxArray_append(
 		&obj->sources,
 		(InputCtx){
 			.name = name,
-			.content = input,
+			.src = fd,
 			.cur_loc = (TokenLoc){
 				.src_id = obj->sources.length,
-				.lineno = 1,
 				.colno = 1
 			}
 		}
 	)) {
-		obj->error_code = PREP_ERR_NO_MEMORY;
+		obj->error_code = BRP_ERR_NO_MEMORY;
 		return false;
 	}
 
@@ -168,48 +212,59 @@ bool setInput(BRP* obj, char* name)
 {
 	FILE* fd = fopen(name, "r");
 	if (!fd) {
-		obj->error_code = PREP_ERR_FILE_NOT_FOUND;
+		obj->error_code = BRP_ERR_FILE_NOT_FOUND;
 		obj->sys_errno = errno;
 		return false;
 	}
-	sbuf input = filecontent(fd);
-	if (!input.data) {
-		obj->error_code = PREP_ERR_NO_MEMORY;
-		return false;
+	return setInputFrom(obj, name, fd);
+}
+
+InputCtx* updateLineBuffer(BRP* obj)
+{
+	InputCtx* input = NULL;
+	for (int i = obj->sources.length - 1; i >= 0; i--) {
+		input = obj->sources.data + i;
+		if (feof(input->src) || ferror(input->src)) break;
+	}
+	if (!input) return NULL;
+
+	if (obj->buffer.length) input->cur_loc.colno += sbufstriplv(&obj->buffer, obj->hidden_symbols);
+	while (!obj->buffer.length) {
+		obj->buffer.data = fgetln(input->src, (size_t*)&obj->buffer.length);
+		if (!obj->buffer.data) return NULL;
+		if (obj->buffer.data[obj->buffer.length - 1] == '\n') obj->buffer.length--;
+		input->cur_loc.lineno++;
+		input->cur_loc.colno = sbufstriplv(&obj->buffer, obj->hidden_symbols) + 1;
 	}
 
-	fclose(fd);
-	return setInputFrom(obj, name, input);
+	return input;
 }
 
 Token fetchToken(BRP* obj)
 {
 	Token res = {0};
 	TokenQueue_fetch(&obj->pending, &res);
-	if (res.type && !sbufspace(fromstr(getTokenWord(obj, res)))) {
+	static_assert(N_TOKEN_TYPES == 6, "not all token types are handled");
+	switch (res.type) {
+		case TOKEN_NONE: break;
+		case TOKEN_SYMBOL: if (isSymbolSpecHidden(obj->symbols[res.symbol_id])) break;
+		return res;
+		case TOKEN_STRING:
+		case TOKEN_WORD: if (sbufspace(fromstr(res.word))) break;
+		case TOKEN_KEYWORD:
+		case TOKEN_INT:
 		return res;
 	}
 
-	InputCtx* input = NULL;
-	for (int i = obj->sources.length - 1; i >= 0; i--) {
-		input = obj->sources.data + i;
-		if (input->content.length) { break; }
-	}
+	InputCtx* input = updateLineBuffer(obj);
 	if (!input) return (Token){0};
+	char* orig_ptr = obj->buffer.data;
 
-	char* orig_ptr = input->content.data;
-	while (input->content.length > 0) {
-		if (input->content.data[0] == '\n') { input->cur_loc.lineno++; input->cur_loc.colno = 1; }
-		else if (input->content.data[0] > 32) { break; }
-		else { input->cur_loc.colno++; }
-		sbufshift(input->content, 1);
-	}
-
-	if (sbufcut(&input->content, DQUOTE).data) {
+	if (sbufcut(&obj->buffer, DQUOTE).data) {
 		sbuf new;
-		sbuf delim = sbufsplitesc(&input->content, &new, DQUOTE, NEWLINE);
+		sbuf delim = sbufsplitesc(&obj->buffer, &new, DQUOTE);
 		if (!sbufeq(delim, DQUOTE)) {
-			obj->error_code = PREP_ERR_UNCLOSED_STR;
+			obj->error_code = BRP_ERR_UNCLOSED_STR;
 			obj->error_loc = input->cur_loc;
 			return (Token){0};
 		}
@@ -218,12 +273,12 @@ Token fetchToken(BRP* obj)
 		res.loc = input->cur_loc;
 		res.word = tostr(new);
 
-		input->cur_loc.colno += sbufutf8len(delim) + 2;
+		input->cur_loc.colno += sbufutf8len(new) + 2;
 		return res;
 	} else {
 		res.type = TOKEN_WORD;
 		sbuf new;
-		int delim_id = sbufsplitv(&input->content, &new, obj->delims);
+		int delim_id = sbufsplitv(&obj->buffer, &new, obj->symbols);
 
 		if (new.length) {
 			for (int i = 0; obj->keywords[i].data; i++) {
@@ -246,7 +301,7 @@ Token fetchToken(BRP* obj)
 			res.loc = input->cur_loc;
 			input->cur_loc.colno += new.length;
 
-            if (delim_id >= 0 ? !isSymbolSpecHidden(obj->delims[delim_id]) : false) {
+            if (delim_id >= 0 ? !isSymbolSpecHidden(obj->symbols[delim_id]) : false) {
                 TokenQueue_add(
                     &obj->pending,
                     (Token){
@@ -262,12 +317,7 @@ Token fetchToken(BRP* obj)
 			res.symbol_id = delim_id;
 		}
 
-		if (delim_id == obj->_nl_delim_id) {
-			input->cur_loc.lineno++;
-			input->cur_loc.colno = 1;
-		} else {
-			input->cur_loc.colno += obj->delims[delim_id].length;
-		}
+		input->cur_loc.colno += obj->symbols[delim_id].length;
 
 		return res;
 	}
@@ -307,7 +357,7 @@ int fprintTokenStr(FILE* fd, Token token, BRP* obj)
 		case TOKEN_STRING: 
 			return fprintf(fd, "string \"") + fputsbufesc(fd, fromstr(token.word), BYTEFMT_HEX) + fputc('"', fd);
 		case TOKEN_KEYWORD: return fprintf(fd, "keyword `"sbuf_format"`", unpack(obj->keywords[token.keyword_id]));
-		case TOKEN_SYMBOL: return fprintf(fd, "symbol `"sbuf_format"`", unpack(obj->delims[token.symbol_id]));
+		case TOKEN_SYMBOL: return fprintf(fd, "symbol `"sbuf_format"`", unpack(obj->symbols[token.symbol_id]));
 		default: return fprintf(fd, "nothing");
 	}
 }
@@ -343,26 +393,40 @@ char* getTokenWord(BRP* obj, Token token)
 		case TOKEN_KEYWORD:
 			return obj->keywords[token.keyword_id].data;
 		case TOKEN_SYMBOL:
-			return obj->delims[token.symbol_id].data;
+			return obj->symbols[token.symbol_id].data;
 		default: return NULL;
 	}
 }
 
-int printBRPError(FILE* fd, BRP* obj) {
+void printBRPErrorStr(FILE* fd, BRP* obj) {
 	switch (obj->error_code) {
-		case PREP_ERR_OK: return 0;
-		fprintTokenLoc(fd, obj->error_loc, obj);
-		case PREP_ERR_UNCLOSED_STR: 
-			return fprintf(fd, "preprocessing error: unclosed string literal\n");
-		case PREP_ERR_NO_NEWLINE_DELIM: 
-			return fprintf(fd, "preprocessing error: no newline delimiter provided\n");
-		case PREP_ERR_NO_MEMORY: 
-			return fprintf(fd, "preprocessing error: memory allocation failure\n");
-		case PREP_ERR_FILE_NOT_FOUND: 
-			return fprintf(fd, "preprocessing error: could not open provided file (reason: %s)\n", strerror(obj->sys_errno));
-		default: return fprintf(fd, "unreachable\n");
+		case BRP_ERR_OK: break;
+		case BRP_ERR_UNCLOSED_STR: 
+			fprintf(fd, "preprocessing error: unclosed string literal ");
+		case BRP_ERR_NO_MEMORY: 
+			fprintf(fd, "preprocessing error: memory allocation failure ");
+		case BRP_ERR_FILE_NOT_FOUND: 
+			fprintf(fd, "preprocessing error: could not open provided file (reason: %s) ", strerror(obj->sys_errno));
+		default: fprintf(fd, "unreachable");
 	}
 }
 
+void printBRPError(FILE* fd, BRP* obj)
+{
+	if (obj->error_code) {
+		fprintTokenLoc(fd, obj->error_loc, obj);
+		printBRPErrorStr(fd, obj);
+		fputc('\n', fd);
+	}
+}
 
-#endif
+void delBRP(BRP* obj)
+{
+	free(obj->keywords);
+	free(obj->symbols);
+	free(obj->hidden_symbols);
+	TokenQueue_delete(&obj->pending);
+	InputCtxArray_clear(&obj->sources);
+}
+
+#endif // _BRP_

@@ -3,7 +3,7 @@ data {
 }
 exec {
     proc main
-    setb r0 stdout
+    setb r0 STDOUT
     setd r1 helloworld
     set r2 13
     sys write

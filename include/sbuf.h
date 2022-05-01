@@ -7,6 +7,7 @@
 #include "string.h"
 #include "stdbool.h"
 #include "stdarg.h"
+#include "stdlib.h"
 
 #define sbuf_format "%.*s"
 #define unpack(array) (int)array.length, array.data
@@ -55,12 +56,15 @@ bool sbufendswith(sbuf obj, sbuf sub);
 bool sbufeq(sbuf item1, sbuf item2);
 bool sbufint(sbuf src);
 long sbuftoint(sbuf obj);
-sbuf_size_t sbufstripl(sbuf* src, sbuf items);
+sbuf_size_t sbufstriplv(sbuf* src, sbuf items[]);
+sbuf_size_t _sbufstripl(sbuf* src, ...);
 char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format);
 sbuf_size_t sbufindex(sbuf obj, sbuf sub);
 sbuf_size_t sbufcount(sbuf obj, sbuf items);
 sbuf sbufcopy(sbuf obj);
+sbuf sbufcutv(sbuf* src, sbuf items[]);
+sbuf sbufcutva(sbuf* src, va_list args);
 sbuf _sbufcut(sbuf* src, ...);
 sbuf sbufwrite(sbuf dst, sbuf src, sbuf_size_t offset);
 
@@ -69,12 +73,16 @@ sbuf_size_t srealloc(sbuf* obj, sbuf_size_t size);
 void sfree(sbuf* obj);
 
 #define streq(str1, str2) sbufeq(fromstr(str1), fromstr(str2))
+
 #define sbufconcat(...) _sbufconcat(0, __VA_ARGS__, (sbuf){0})
 #define tostr(...) (sbufconcat(__VA_ARGS__, CSTRTERM).data)
 #define strcopy(ptr) (sbufconcat(fromstr(ptr), CSTRTERM).data)
+
 #define sbufsplit(src, dst, ...) _sbufsplit(src, dst, __VA_ARGS__, (sbuf){0})
 #define sbufsplitesc(src, dst, ...) _sbufsplitesc(src, dst, __VA_ARGS__, (sbuf){0})
 #define sbufcut(src, ...) _sbufcut(src, __VA_ARGS__, (sbuf){0})
+
+#define sbufstripl(src, ...) _sbufstripl(src, __VA_ARGS__, (sbuf){0})
 
 #define fputsbuflnesc(fd, obj, format) fputsbufesc(fd, obj, format); fputc('\n', fd)
 #define putsbufesc(obj, format) fputsbufesc(stdout, obj, format)
@@ -92,8 +100,6 @@ void sfree(sbuf* obj);
 
 #ifdef SBUF_IMPLEMENTATION
 #undef SBUF_IMPLEMENTATION
-
-#define cast(type, expr) (type)(expr)
 
 sbuf _sbufconcat(int _, ...)
 {
@@ -393,16 +399,30 @@ long sbuftoint(sbuf obj)
 	return res;
 }
 
+sbuf_size_t sbufstriplv(sbuf* src, sbuf items[])
+{
+	sbuf_size_t n_stripped = 0;
+	while (true) {
+		sbuf item = sbufcutv(src, items);
+		if (!item.length) break;
+		n_stripped += item.length;
+	}
+	return n_stripped;
+}
 // strips the sbuf object `src` of the characters in an sbuf object `items` from the left, 
 // and returns the number of characters stripped
-sbuf_size_t sbufstripl(sbuf* src, sbuf items)
+sbuf_size_t _sbufstripl(sbuf* src, ...)
 {
-	sbuf_size_t orig_length = src->length;
-	while (src->length > 0) if (memmem(items.data, items.length, src->data, 1) != NULL)
-	{
-		sbufpshift(src, 1);
-	} else break;
-	return orig_length - src->length;
+	sbuf_size_t n_stripped = 0;
+	va_list args;
+	while (true) {
+		va_start(args, src);
+		sbuf item = sbufcutva(src, args);
+		va_end(args);
+		if (!item.length) break;
+		n_stripped += item.length;
+	}
+	return n_stripped;
 }
 
 // writes the character `obj` with escaping specified by a set of flags `format` to the file descriptor `fd`
@@ -489,20 +509,36 @@ sbuf sbufcopy(sbuf obj)
 	return res;
 }
 
-sbuf _sbufcut(sbuf* src, ...)
+sbuf sbufcutv(sbuf* src, sbuf items[])
 {
-	va_list args;
-	va_start(args, src);
+	for (int i = 0; items[i].data; i++) {
+		if (sbufstartswith(*src, items[i])) {
+			sbufpshift(src, items[i].length);
+			return items[i];
+		}
+	}
+	return (sbuf){0};
+}
+
+sbuf sbufcutva(sbuf* src, va_list args)
+{
 	sbuf new;
-	while ((new = va_arg(args, sbuf)).data != NULL) {
+	while ((new = va_arg(args, sbuf)).data) {
 		if (sbufstartswith(*src, new)) {
-			va_end(args);
 			sbufpshift(src, new.length);
 			return new;
 		}
 	}
-	va_end(args);
 	return (sbuf){0};
+}
+
+sbuf _sbufcut(sbuf* src, ...)
+{
+	va_list args;
+	va_start(args, src);
+	sbuf res = sbufcutva(src, args);
+	va_end(args);
+	return res;
 }
 
 sbuf sbufwrite(sbuf dst, sbuf src, sbuf_size_t offset)

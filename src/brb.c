@@ -12,7 +12,7 @@ defArray(DataSpec)
 defArray(ProcFrame);
 defArray(str);
 
-class {
+typedef struct {
 	Module* src;
 	FILE* dst;
 	strArray consts;
@@ -21,7 +21,7 @@ class {
 typedef str* field;
 declArray(field);
 defArray(field);
-class {
+typedef struct {
 	Module* dst;
 	FILE* src;
 	fieldArray unresolved;
@@ -161,6 +161,20 @@ void writeOpVar(ModuleWriter* writer, Op op)
 	fputc(op.var_size, writer->dst);
 }
 
+void writeOpLdv(ModuleWriter* writer, Op op)
+{
+	fputc(op.dst_reg, writer->dst);
+	writeInt(writer->dst, op.symbol_id);
+	fputc(op.var_size, writer->dst);
+}
+
+void writeOpStrv(ModuleWriter* writer, Op op)
+{
+	writeInt(writer->dst, op.symbol_id);
+	fputc(op.var_size, writer->dst);
+	fputc(op.src_reg, writer->dst);
+}
+
 const OpWriter op_writers[] = {
 	[OP_NONE] = &writeNoArgOp,
 	[OP_END] = &writeNoArgOp,
@@ -211,7 +225,9 @@ const OpWriter op_writers[] = {
 	[OP_DIVR] = &write3RegOp,
 	[OP_DIVS] = &write2RegImmOp,
 	[OP_DIVSR] = &write3RegOp,
-	[OP_EXTPROC] = &writeMarkOp
+	[OP_EXTPROC] = &writeMarkOp,
+	[OP_LDV] = &writeOpLdv,
+	[OP_STRV] = &writeOpStrv
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
 
@@ -418,7 +434,7 @@ BRBLoadError loadRegImmOp(ModuleLoader* loader, Op* dst)
 	dst->dst_reg = loadInt8(loader->src, &status);
 	dst->value = loadInt(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -428,7 +444,7 @@ BRBLoadError load2RegOp(ModuleLoader* loader, Op* dst)
 	dst->dst_reg = loadInt8(loader->src, &status);
 	dst->src_reg = loadInt8(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -438,7 +454,7 @@ BRBLoadError loadRegSymbolIdOp(ModuleLoader* loader, Op* dst)
 	dst->dst_reg = loadInt8(loader->src, &status);
 	dst->symbol_id = loadInt(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -446,7 +462,7 @@ BRBLoadError loadRegNameOp(ModuleLoader* loader, Op* dst)
 {
 	long status = 0;
 	dst->dst_reg = loadInt8(loader->src, &status);
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
 	if (!loadName(loader, &dst->mark_name)) return (BRBLoadError){.code = BRB_ERR_NO_OP_ARG};
 	return (BRBLoadError){0};
@@ -457,7 +473,7 @@ BRBLoadError loadOpSyscall(ModuleLoader* loader, Op* dst)
 	long status = 0;
 	dst->syscall_id = loadInt8(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -466,7 +482,7 @@ BRBLoadError loadOpGoto(ModuleLoader* loader, Op* dst)
 	long status = 0;
 	dst->op_offset = loadInt(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){.code = BRB_ERR_NO_OP_ARG}; }
+	if (!status) return (BRBLoadError){.code = BRB_ERR_NO_OP_ARG};
 	return (BRBLoadError){0};
 }
 
@@ -476,7 +492,7 @@ BRBLoadError loadOpCmp(ModuleLoader* loader, Op* dst)
 	dst->src_reg = loadInt8(loader->src, &status);
 	dst->value = loadInt(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -486,7 +502,7 @@ BRBLoadError loadOpCmpr(ModuleLoader* loader, Op* dst)
 	dst->src_reg = loadInt8(loader->src, &status);
 	dst->src2_reg = loadInt8(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -497,7 +513,7 @@ BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 	dst->src_reg = loadInt8(loader->src, &status);
 	dst->value = loadInt(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -508,7 +524,7 @@ BRBLoadError load3RegOp(ModuleLoader* loader, Op* dst)
 	dst->src_reg = loadInt8(loader->src, &status);
 	dst->src2_reg = loadInt8(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -517,7 +533,29 @@ BRBLoadError loadOpVar(ModuleLoader* loader, Op* dst)
 	long status = 0;
 	dst->var_size = loadInt8(loader->src, &status);
 
-	if (!status) { return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG }; }
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	return (BRBLoadError){0};
+}
+
+BRBLoadError loadOpLdv(ModuleLoader* loader, Op* dst)
+{
+	long status = 0;
+	dst->dst_reg = loadInt8(loader->src, &status);
+	dst->symbol_id = loadInt(loader->src, &status);
+	dst->var_size = loadInt8(loader->src, &status);
+
+	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	return (BRBLoadError){0};
+}
+
+BRBLoadError loadOpStrv(ModuleLoader* loader, Op* dst)
+{
+	long status = 0;
+	dst->symbol_id = loadInt(loader->src, &status);
+	dst->var_size = loadInt8(loader->src, &status);
+	dst->src_reg = loadInt8(loader->src, &status);
+
+	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -571,18 +609,21 @@ OpLoader op_loaders[] = {
 	[OP_DIVR] = &load3RegOp,
 	[OP_DIVS] = &load2RegImmOp,
 	[OP_DIVSR] = &load3RegOp,
-	[OP_EXTPROC] = &loadMarkOp
+	[OP_EXTPROC] = &loadMarkOp,
+	[OP_LDV] = &loadOpLdv,
+	[OP_STRV] = &loadOpStrv
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
-FILE* findModule(char* name, strArray search_paths)
+FILE* findModule(char* name, char* search_paths[])
 {
-	for (int i = 0; i < search_paths.length; i++) {
+	for (int i = 0; search_paths[i]; i++) {
 		char path[256];
-		snprintf(path, sizeof(path), "%s/%s.brb", search_paths.data[i], name);
+		snprintf(path, sizeof(path), "%s/%s.brb", search_paths[i], name);
 
 		FILE* module_fd = fopen(path, "r");
 		if (module_fd) return module_fd;
+		errno = 0;
 	}
 	return NULL;
 }
@@ -600,7 +641,7 @@ Module* mergeModule(Module* src, Module* dst)
 	return dst;
 }
 
-BRBLoadError preloadModule(FILE* src, Module* dst, strArray module_paths)
+BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 {
 	ModuleLoader loader = {
 		.dst = dst,
@@ -611,6 +652,9 @@ BRBLoadError preloadModule(FILE* src, Module* dst, strArray module_paths)
 	dst->memblocks = MemBlockArray_new(0);
 	dst->execblock = OpArray_new(0);
 	dst->submodules = strArray_new(0);
+	dst->_root_db_start = 0;
+	dst->_root_eb_start = 0;
+	dst->_root_mb_start = 0;
 
 	long status = 0;
 // loading stack size
@@ -620,8 +664,8 @@ BRBLoadError preloadModule(FILE* src, Module* dst, strArray module_paths)
 			.code = BRB_ERR_NO_STACK_SIZE
 		};
 		dst->stack_size = DEFAULT_STACK_SIZE;
-		dst->stack_size *= 1024;
 	}
+	dst->stack_size *= 1024;
 // loading dependencies
 	int64_t n = loadInt(src, &status);
 	if (!status) return (BRBLoadError){
@@ -713,7 +757,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, strArray module_paths)
 				.cond_id = op->cond_id
 			};
 		}
-		if (!inRange(op->type, 0, N_OPS)) return (BRBLoadError){
+		if (op->type >= N_OPS) return (BRBLoadError){
 			.code = BRB_ERR_INVALID_OPCODE,
 			.opcode = op->type
 		};
@@ -746,7 +790,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, strArray module_paths)
 	return (BRBLoadError){0};
 }
 
-void resolveModule(Module* dst)
+void resolveModule(Module* dst, bool for_exec)
 {
 	for (int i = 0; i < dst->execblock.length; i++) {
 		Op* op = dst->execblock.data + i;
@@ -785,21 +829,25 @@ void resolveModule(Module* dst)
 		}
 	}
 //  resolving entry
-	dst->entry_opid = -1;
-	for (int i = dst->_root_eb_start; i < dst->execblock.length; i++) {
-		Op* op = dst->execblock.data + i;
-		if (op->type == OP_PROC || op->type == OP_EXTPROC) {
-			dst->entry_opid = i;
-			break;
+	if (for_exec) {
+		dst->entry_opid = -1;
+		for (int i = dst->_root_eb_start; i < dst->execblock.length; i++) {
+			Op* op = dst->execblock.data + i;
+			if (op->type == OP_PROC || op->type == OP_EXTPROC) {
+				if (sbufeq(fromstr(op->mark_name), fromcstr("main"))) {
+					dst->entry_opid = i;
+					break;
+				}
+			}
 		}
 	}
 }
 
-BRBLoadError loadModule(FILE* src, Module* dst, strArray lib_paths)
+BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags)
 {
-	BRBLoadError err = preloadModule(src, dst, lib_paths);
+	BRBLoadError err = preloadModule(src, dst, search_paths);
 	if (err.code) return err;
-	resolveModule(dst);
+	resolveModule(dst, flags & BRB_EXECUTABLE);
 	return (BRBLoadError){0};
 }
 
@@ -983,8 +1031,8 @@ void printExecState(FILE* fd, ExecEnv* env, Module* module)
 			fd, 
 			"total stack usage: %.3f/%.3f Kb (%.3f%%)\n",
 			(float)(env->stack_brk + module->stack_size - env->stack_head) / 1024.0f,
-			DEFAULT_STACK_SIZE / 1024.0f,
-			(float)(env->stack_brk + module->stack_size - env->stack_head)	/ (float)DEFAULT_STACK_SIZE * 100.0f
+			module->stack_size / 1024.0f,
+			(float)(env->stack_brk + module->stack_size - env->stack_head)	/ (float)module->stack_size * 100.0f
 		);
 
 		fprintf(fd, "registers:\n");
@@ -2220,6 +2268,49 @@ bool handleOpDivsr(ExecEnv* env, Module* module)
 	return false;
 }
 
+bool handleOpLdv(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		env->regs_trace[op.dst_reg] = getStackSpec(env, env->stack_head + op.symbol_id, op.var_size);
+		if (env->regs_trace[op.dst_reg].type == DS_VOID) {
+			if (!env->exitcode) {
+				env->exitcode = EC_UNDEFINED_STACK_LOAD;
+				env->err_ptr = env->stack_head + op.symbol_id;
+			}
+			return true;
+		}
+	}
+
+	env->registers[op.dst_reg] = 0;
+	memcpy(env->registers + op.dst_reg, env->stack_head + op.symbol_id, op.var_size);
+	env->op_id++;
+	return false;
+}
+
+bool handleOpStrv(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		if (!setStackSpec(
+			env,
+			env->stack_head + op.symbol_id,
+			dataSpecSize(env->regs_trace[op.src_reg]) == op.var_size ? env->regs_trace[op.src_reg] : intSpecFromSize(op.var_size)
+		)) {
+			env->exitcode = EC_ACCESS_FAILURE;
+			env->err_ptr = env->stack_head + op.symbol_id;
+			env->err_access_length = 2;
+			return true;
+		}
+	}
+
+	memcpy(env->stack_head + op.symbol_id, env->registers + op.src_reg, op.var_size);
+	env->op_id++;
+	return false;
+}
+
 ExecHandler op_handlers[] = {
 	[OP_NONE] = &handleNop,
 	[OP_END] = &handleOpEnd,
@@ -2270,7 +2361,9 @@ ExecHandler op_handlers[] = {
 	[OP_DIVR] = &handleOpDivr,
 	[OP_DIVS] = &handleOpDivs,
 	[OP_DIVSR] = &handleOpDivsr,
-	[OP_EXTPROC] = &handleNop
+	[OP_EXTPROC] = &handleNop,
+	[OP_LDV] = &handleOpLdv,
+	[OP_STRV] = &handleOpStrv
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 

@@ -1,0 +1,3 @@
+void main() {
+    syscall write(builtin STDOUT, "Hello, World\n", 13);
+}

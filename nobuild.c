@@ -28,12 +28,16 @@ int main(int argc, char* argv[])
 #	define BRS_MODIFIED  mod_flags[2]
 #	define BRBX_MODIFIED mod_flags[3]
 #	define BRBC_MODIFIED mod_flags[4]
+#	define BRC_MODIFIED  mod_flags[5]
+#	define VBRB_MODIFIED mod_flags[6]
 	bool mod_flags[] = {
 		is_path1_modified_after_path2(PATH("src", "core.c"), PATH(LIBPATH, "libbr.dylib")),
 		is_path1_modified_after_path2(PATH("src", "brb.c"), PATH(LIBPATH, "libbrb.dylib")),
 		is_path1_modified_after_path2(PATH("src", "brs.c"), PATH(BINPATH, "brs")),
 		is_path1_modified_after_path2(PATH("src", "brbx.c"), PATH(BINPATH, "brbx")),
-		is_path1_modified_after_path2(PATH("src", "brbc.c"), PATH(BINPATH, "brbc"))
+		is_path1_modified_after_path2(PATH("src", "brbc.c"), PATH(BINPATH, "brbc")),
+		is_path1_modified_after_path2(PATH("src", "brc.c"), PATH(BINPATH, "brc")),
+		is_path1_modified_after_path2(PATH("src", "vbrb.c"), PATH(LIBPATH, "libbrb.dylib")),
 	};
 
 	if (argc > 1 ? !strcmp("-f", argv[1]) : false) {
@@ -50,7 +54,7 @@ int main(int argc, char* argv[])
 compilation:
 
 // compiling libbr
-	if (CORE_MODIFIED || BRB_MODIFIED) {
+	if (CORE_MODIFIED || BRB_MODIFIED || VBRB_MODIFIED) {
 		CMD(
 			"cc", 
 			"-Wno-deprecated-declarations", 
@@ -62,7 +66,7 @@ compilation:
 		); 
 		CMD(
 			"cc", 
-			"-shared", 
+			"-shared",
 			"-o", PATH(LIBPATH, "libbr.dylib"), 
 			PATH(LIBPATH, "core.o")
 		);
@@ -76,13 +80,22 @@ compilation:
 		); 
 		CMD(
 			"cc", 
+			"-c",
+			"-o", PATH(LIBPATH, "vbrb.o"), 
+			"-I", INCLUDEPATH,
+			PATH(SRCPATH, "vbrb.c")
+		); 
+		CMD(
+			"cc", 
 			"-shared", 
 			"-o", PATH(LIBPATH, "libbrb.dylib"), 
 			PATH(LIBPATH, "core.o"),
-			PATH(LIBPATH, "brb.o")
+			PATH(LIBPATH, "brb.o"),
+			PATH(LIBPATH, "vbrb.o")
 		);
 		CMD("rm", PATH(LIBPATH, "brb.o"));
 		CMD("rm", PATH(LIBPATH, "core.o"));
+		CMD("rm", PATH(LIBPATH, "vbrb.o"));
 	}
 
 	if (BRS_MODIFIED) {
@@ -118,6 +131,18 @@ compilation:
 		);
 	}
 
+	if (BRC_MODIFIED) {
+		CMD(
+			"cc",
+			"-Wno-initializer-overrides",
+			"-I", "include",
+			"-L", PATH("build", "lib"),
+			"-lbrb",
+			"-o", PATH("build", "bin", "brc"),
+			PATH("src", "brc.c")
+		);
+	}
+
 	if (!PATH_EXISTS("/usr/local/bin/brs")) {
 		CMD("sudo", "ln", "-sF", "$PWD/build/bin/brs", "/usr/local/bin/brs");
 	}
@@ -126,5 +151,8 @@ compilation:
 	}
 	if (!PATH_EXISTS("/usr/local/bin/brbc")) {
 		CMD("sudo", "ln", "-sF", "$PWD/build/bin/brbc", "/usr/local/bin/brbc");
+	}
+	if (!PATH_EXISTS("/usr/local/bin/brc")) {
+		CMD("sudo", "ln", "-sF", "$PWD/build/bin/brc", "/usr/local/bin/brc");
 	}
 }

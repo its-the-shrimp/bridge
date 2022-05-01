@@ -3,10 +3,6 @@
 
 #include "br.h"
 
-#define BRB_EXT fromcstr(".brb")
-#define VBRB_EXT fromcstr(".vbrb")
-#define BR_EXT fromcstr(".br")
-
 typedef enum {
 	OP_NONE,
 	OP_END,
@@ -58,6 +54,8 @@ typedef enum {
 	OP_DIVS, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_DIVSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
 	OP_EXTPROC, // uses Op::mark_name
+	OP_LDV, // uses Op::src_reg, Op::symbol_id and Op::var_size
+	OP_STRV, // uses Op::dst_reg, Op::symbol_id and Op::var_size
 	N_OPS
 } OpType;
 
@@ -111,9 +109,11 @@ typedef enum {
 	BRP_KEYWORD("divr"), \
 	BRP_KEYWORD("divs"), \
 	BRP_KEYWORD("divsr"), \
-	BRP_KEYWORD("extproc")
+	BRP_KEYWORD("extproc"), \
+	BRP_KEYWORD("ldv"), \
+	BRP_KEYWORD("strv") \
 
-sbuf opNames[] = { _opNames };
+static sbuf opNames[] = { _opNames };
 
 
 typedef enum {
@@ -138,8 +138,7 @@ typedef enum {
 	BRP_KEYWORD("get_errno"), \
 	BRP_KEYWORD("set_errno")
 
-sbuf syscallNames[] = { _syscallNames };
-
+static sbuf syscallNames[] = { _syscallNames };
 
 typedef enum {
 	BRB_ERR_OK,
@@ -165,7 +164,7 @@ typedef enum {
 	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
-class {
+typedef struct {
 	BRBLoadErrorCode code;
 	union {
 		char* module_name; // for BRB_ERR_MODULE_NOT_FOUND
@@ -189,7 +188,6 @@ typedef enum {
 	EC_OK
 } ExitCode;
 static_assert(EC_OK == 0, "all special exit codes must have a value below 0");
-const sbuf SEP = fromcstr(":");
 
 typedef enum {
 	COND_NON,
@@ -206,7 +204,7 @@ typedef enum {
 	N_CONDS
 } ConditionCode;
 
-ConditionCode opposite_conditions[N_CONDS] = {
+static ConditionCode opposite_conditions[N_CONDS] = {
 	[COND_NON] = COND_NON,
 	[COND_EQU] = COND_NEQ,
 	[COND_NEQ] = COND_EQU,
@@ -233,11 +231,11 @@ ConditionCode opposite_conditions[N_CONDS] = {
 	BRP_KEYWORD("les"), \
 	BRP_KEYWORD("ges") \
 
-class {
+typedef struct {
 	int8_t type;
 	int8_t dst_reg;
 	int8_t src_reg;
-	int8_t var_size;
+	uint8_t var_size;
 	uint8_t cond_id;
 	union {
 		int64_t value;
@@ -251,33 +249,34 @@ class {
 declArray(Op);
 static_assert(sizeof(Op) == 16, "checking compactness of operations' storage");
 
-class {
+typedef struct {
 	char* name;
 	int64_t value;
 } BRBuiltin;
 
-const BRBuiltin builtins[] = {
+#define N_BUILTINS 3
+static const BRBuiltin builtins[N_BUILTINS] = {
 	(BRBuiltin){
-		.name = "stdin",
-		.value = 0
+		.name = "STDIN",
+		.value = STDIN_FILENO
 	},
 	(BRBuiltin){
-		.name = "stdout",
-		.value = 1
+		.name = "STDOUT",
+		.value = STDOUT_FILENO
 	},
 	(BRBuiltin){
-		.name = "stderr",
-		.value = 2
+		.name = "STDERR",
+		.value = STDERR_FILENO
 	}
 };
 
-class {
+typedef struct {
 	char* name;
 	int64_t size;
 } MemBlock;
 declArray(MemBlock);
 
-class {
+typedef struct {
 	char* name;
 	sbuf spec;
 } DataBlock;
@@ -286,7 +285,7 @@ declArray(DataBlock);
 typedef char* str;
 declArray(str);
 
-class {
+typedef struct {
 	OpArray execblock;
 	MemBlockArray memblocks;
 	DataBlockArray datablocks;
@@ -297,6 +296,60 @@ class {
 	int _root_mb_start;
 	int _root_eb_start;
 } Module;
+
+// special value for error reporting
+#define TOKEN_REG_ID 125
+
+typedef enum {
+	VBRB_ERR_OK,
+	VBRB_ERR_BLOCK_NAME_EXPECTED,
+	VBRB_ERR_STACK_SIZE_EXPECTED,
+	VBRB_ERR_NO_MEMORY,
+	VBRB_ERR_SEGMENT_START_EXPECTED,
+	VBRB_ERR_BLOCK_SPEC_EXPECTED,
+	VBRB_ERR_BLOCK_SIZE_EXPECTED,
+	VBRB_ERR_UNKNOWN_SEGMENT_SPEC,
+	VBRB_ERR_UNCLOSED_SEGMENT,
+	VBRB_ERR_INVALID_ARG,
+	VBRB_ERR_INVALID_OP,
+	VBRB_ERR_UNKNOWN_SYSCALL,
+	VBRB_ERR_EXEC_MARK_NOT_FOUND,
+	VBRB_ERR_DATA_BLOCK_NOT_FOUND,
+	VBRB_ERR_MEM_BLOCK_NOT_FOUND,
+	VBRB_ERR_INVALID_REG_ID,
+	VBRB_ERR_INVALID_VAR_SIZE,
+	VBRB_ERR_UNKNOWN_CONST,
+	VBRB_ERR_NON_PROC_CALL,
+	VBRB_ERR_UNKNOWN_VAR_NAME,
+	VBRB_ERR_UNCLOSED_PROC,
+	VBRB_ERR_UNKNOWN_CONDITION,
+	VBRB_ERR_INVALID_MODULE_NAME,
+	VBRB_ERR_MODULE_NOT_FOUND,
+	VBRB_ERR_MODULE_NOT_LOADED,
+	VBRB_ERR_PREPROCESSOR_FAILURE,
+	N_VBRB_ERRORS
+} VBRBErrorCode;
+
+typedef struct vbrb_error {
+	VBRBErrorCode code;
+	BRP* prep;
+	Token loc;
+	union {
+		struct { // for VBRB_ERR_INVALID_ARG
+			int8_t arg_id;
+			uint8_t op_type;
+			uint8_t expected_token_type;
+		};
+		int64_t item_size;
+		char* mark_name;
+		char* module_name;
+		BRBLoadError load_error;
+	};
+} VBRBError;
+
+VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags);
+void printVBRBError(FILE* dst, VBRBError err);
+void cleanupVBRBCompiler(VBRBError status);
 
 typedef enum {
 	DS_INT8,
@@ -350,12 +403,13 @@ typedef struct {
 } DataSpec;
 declArray(DataSpec);
 
-class {
+typedef struct {
+	char* name;
 	int8_t size;
 	int32_t n_elements;
 } Var;
 
-class {
+typedef struct {
 	DataSpecArray vars;
 	int64_t prev_opid;
 	int64_t call_id;
@@ -368,11 +422,11 @@ declArray(ProcFrame);
 #define CONDREG2_ID 9
 #define DEFAULT_STACK_SIZE 512 // 512 Kb, just like in JVM
 
-#define BRBX_TRACING         0b00000001
-#define BRBX_CHECK_SYSCALLS  0b00000100
+#define BRBX_TRACING         0b00000001 // used in execModule function to enable value tracing, it helps in debugging memory access errors, but reduces execution speed
+#define BRB_EXECUTABLE       0b00000010 // used in loadModule function to make the loaded module executable with execModule
 #define BRBX_PRINT_MEMBLOCKS 0b00001000
 
-class {
+typedef struct {
 	sbuf heap;
 	void* stack_brk;
 	void* stack_head;
@@ -403,11 +457,11 @@ class {
 } ExecEnv;
 
 void writeModule(Module* src, FILE* dst);
-FILE* findModule(char* name, strArray search_paths);
+FILE* findModule(char* name, char* search_paths[]);
 Module* mergeModule(Module* src, Module* dst);
-void resolveModule(Module* dst);
-BRBLoadError preloadModule(FILE* src, Module* dst, strArray search_paths);
-BRBLoadError loadModule(FILE* src, Module* dst, strArray search_paths);
+void resolveModule(Module* dst, bool for_exec);
+BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);
+BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);
 void printLoadError(BRBLoadError err);
 ExecEnv execModule(Module* module, int8_t flags, char** args, volatile bool* interruptor);
 void printExecState(FILE* fd, ExecEnv* env, Module* module);

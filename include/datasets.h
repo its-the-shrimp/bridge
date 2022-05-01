@@ -23,6 +23,14 @@
 		} \
 	} while (0) \
 
+#define chain_foreach_from(t, item, chain, start, body) \
+	do { \
+		for (t##Node* _##item = t##Chain_getnode(chain, start); _##item != NULL; _##item = _##item->next) { \
+			t item = _##item->value; \
+			do { body } while (0); \
+		} \
+	} while (0) \
+
 #define chain_foreach(t, item, chain, body) \
 	do { \
 		for (t##Node* _##item = (chain).start; _##item != NULL; _##item = _##item->next) { \
@@ -50,14 +58,14 @@
 	t* t##Array_append(t##Array* array, t object); \
 	t* t##Array_extend(t##Array* array, t##Array sub); \
 	t t##Array_get(t##Array array, int index); \
+	t* t##Array_getref(t##Array array, int index); \
 	void t##Array_set(t##Array* array, int index, t object); \
-	bool t##Array_move(t##Array* array, int index, size_t n, t dst[]); \
 	t##Array t##Array_slice(t##Array array, int index, size_t n); \
 	bool t##Array_del(t##Array* array, int index, size_t n); \
 	t t##Array_pop(t##Array* array, int index); \
-	long t##Array_index(t##Array array, t obj); \
 	bool t##Array_insert(t##Array* array, t##Array sub, int index); \
 	bool t##Array_clear(t##Array* array); \
+	int t##Array_length(t##Array array); \
 	t* t##Array_resize(t##Array* array, int n); \
 
 #define defArray(t) \
@@ -94,6 +102,11 @@
 		if (index > array.length - 1) return (t){0}; \
 		return array.data[index]; \
 	}; \
+	t* t##Array_getref(t##Array array, int index) { \
+		index = index >= 0 ? index : array.length + index; \
+		if (index > array.length - 1) return NULL; \
+		return array.data + index; \
+	} \
 	void t##Array_set(t##Array* array, int index, t object) { \
 		*(array->data + (index >= 0 ? index : array->length + index)) = object; \
 	} \
@@ -112,14 +125,6 @@
 		} \
 		return false; \
 	} \
-	t##Array t##Array_slice(t##Array array, int index, size_t n) { \
-		index = index >= 0 ? index : array.length + index; \
-		if (index + n > array.length) return (t##Array){0}; \
-		return (t##Array){ \
-			.length = n, \
-			.data = array.data + index, \
-		}; \
-	} \
 	bool t##Array_del(t##Array* array, int index, size_t n) { \
 		t deleted[n]; \
 		index = index >= 0 ? index : array->length + index; \
@@ -136,12 +141,6 @@
 		t res = (t){0}; \
 		if (!t##Array_move(array, index, 1, &res)) return (t){0}; \
 		return res; \
-	} \
-	long t##Array_index(t##Array array, t obj) { \
-		for (int i = 0; i < array.length; i++) { \
-			if (memcmp(array.data + i, &obj, sizeof(t))) return i; \
-		} \
-		return -1; \
 	} \
 	bool t##Array_insert(t##Array* array, t##Array sub, int index) { \
 		index = index >= 0 ? index : array->length + index; \
@@ -166,6 +165,9 @@
 		array->data = res; \
 		return array->data + array->length - n; \
 	} \
+	int t##Array_length(t##Array array) { \
+		return array.length; \
+	} \
 	bool t##Array_clear(t##Array* array) { \
 		if (!array->length) return true; \
 		free(array->data); \
@@ -175,9 +177,20 @@
 	} \
 
 #define chainctx(chain) chunkctx((chain).start)
-#define defChain(t) \
+#define declChain(t) \
 	typedef struct t##_node { struct t##_node* prev; t value; struct t##_node* next; } t##Node; \
 	typedef struct t##_chain { t##Node* start; t##Node* end; } t##Chain; \
+	t##Chain t##Chain_new(int n, ...); \
+	t* t##Chain_append(t##Chain* chain, t object); \
+	t* t##Chain_extend(t##Chain* chain, t##Chain sub); \
+	t t##Chain_get(t##Chain chain, int index); \
+	t* t##Chain_getref(t##Chain chain, int index); \
+	void t##Chain_set(t##Chain* chain, int index, t object); \
+	t t##Chain_pop(t##Chain* chain, int index); \
+	bool t##Chain_insert(t##Chain* chain, t##Chain sub, int index); \
+	bool t##Chain_clear(t##Chain* chain); \
+
+#define defChain(t) \
 	t##Chain t##Chain_new(int n, ...) { \
 		if (n == 0) return (t##Chain){0}; \
 		va_list args; \
@@ -225,7 +238,16 @@
 		t##Node* res = t##Chain_getnode(chain, index); \
 		return res ? res->value : (t){0}; \
 	} \
-	bool t##Chain_insert(t##Chain* chain, t##Chain sub, t##Node* prev) { \
+	t* t##Chain_getref(t##Chain chain, int index) { \
+		t##Node* res = t##Chain_getnode(chain, index); \
+		return res ? &res->value : NULL; \
+	} \
+	void t##Chain_set(t##Chain* chain, int index, t object) { \
+		t##Node* res = t##Chain_getnode(*chain, index); \
+		res->value = object; \
+	} \
+	bool t##Chain_insert(t##Chain* chain, t##Chain sub, int index) { \
+		t##Node* prev = t##Chain_getnode(*chain, index); \
 		if (!sub.start) return true; \
 		if (!chain->start) { \
 			chain->start = sub.start; \
@@ -246,7 +268,8 @@
 		} \
 		return true; \
 	} \
-	t t##Chain_pop(t##Chain* chain, t##Node* node) { \
+	t t##Chain_pop(t##Chain* chain, int index) { \
+		t##Node* node = t##Chain_getnode(*chain, index); \
 		if (node == chain->start) { chain->start = chain->start->next; } \
 		if (node == chain->end) { chain->end = chain->end->prev; } \
 		if (node->prev) { node->prev->next = node->next; } \
@@ -255,37 +278,20 @@
 		free(node); \
 		return res; \
 	} \
-	t t##Chain_popstart(t##Chain* chain) { \
-		if (!chain->start) return (t){0}; \
-		t##Node res = *(chain->start); \
-		if (chain->start == chain->end) { \
-			chain->start = NULL; \
-			free(chain->end); \
-			chain->end = NULL; \
-		} else { \
-			free(chain->start); \
-			chain->start = res.next; \
-		} \
-		return res.value; \
-	} \
-	t t##Chain_getstart(t##Chain* chain) { \
-		if (!chain->start) return (t){0}; \
-		return chain->start->value; \
-	} \
 	int t##Chain_length(t##Chain chain) { \
 		int res = 0; \
 		chain_foreach(t, item, chain, res++; ); \
 		return res; \
 	} \
-	bool t##Chain_delete(t##Chain* chain) { \
+	bool t##Chain_clear(t##Chain* chain) { \
 		if (!chain->end) return true; \
-		t##Node* prevnode; \
-		chain->start = (t##Node*)chainctx(*chain); \
-		for (t##Node* node = chain->start; node != NULL; node = prevnode) { \
-			prevnode = node->prev; \
+		t##Node* nextnode; \
+		for (t##Node* node = chain->start; node != NULL; node = nextnode) { \
+			nextnode = node->next; \
 			free(node); \
 		} \
 		chain->end = NULL; \
+		chain->start = NULL; \
 		return true; \
 	} \
 
