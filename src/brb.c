@@ -175,6 +175,18 @@ void writeOpStrv(ModuleWriter* writer, Op op)
 	fputc(op.src_reg, writer->dst);
 }
 
+void writeOpPopv(ModuleWriter* writer, Op op)
+{
+	fputc(op.dst_reg, writer->dst);
+	fputc(op.var_size, writer->dst);
+}
+
+void writeOpPushv(ModuleWriter* writer, Op op)
+{
+	fputc(op.var_size, writer->dst);
+	fputc(op.src_reg, writer->dst);
+}
+
 const OpWriter op_writers[] = {
 	[OP_NONE] = &writeNoArgOp,
 	[OP_END] = &writeNoArgOp,
@@ -227,7 +239,9 @@ const OpWriter op_writers[] = {
 	[OP_DIVSR] = &write3RegOp,
 	[OP_EXTPROC] = &writeMarkOp,
 	[OP_LDV] = &writeOpLdv,
-	[OP_STRV] = &writeOpStrv
+	[OP_STRV] = &writeOpStrv,
+	[OP_POPV] = &writeOpPopv,
+	[OP_PUSHV] = &writeOpPushv
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
 
@@ -559,6 +573,27 @@ BRBLoadError loadOpStrv(ModuleLoader* loader, Op* dst)
 	return (BRBLoadError){0};
 }
 
+BRBLoadError loadOpPopv(ModuleLoader* loader, Op* dst)
+{
+	long status = 0;
+	dst->dst_reg = loadInt8(loader->src, &status);
+	dst->var_size = loadInt8(loader->src, &status);
+
+	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	return (BRBLoadError){0};
+}
+
+BRBLoadError loadOpPushv(ModuleLoader* loader, Op* dst)
+{
+	long status = 0;
+	dst->var_size = loadInt8(loader->src, &status);
+	dst->src_reg = loadInt8(loader->src, &status);
+
+	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	return (BRBLoadError){0};
+}
+
+
 OpLoader op_loaders[] = {
 	[OP_NONE] = &loadNoArgOp,
 	[OP_END] = &loadNoArgOp,
@@ -611,7 +646,9 @@ OpLoader op_loaders[] = {
 	[OP_DIVSR] = &load3RegOp,
 	[OP_EXTPROC] = &loadMarkOp,
 	[OP_LDV] = &loadOpLdv,
-	[OP_STRV] = &loadOpStrv
+	[OP_STRV] = &loadOpStrv,
+	[OP_POPV] = &loadOpPopv,
+	[OP_PUSHV] = &loadOpPushv
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
@@ -895,7 +932,7 @@ BufferRef classifyPtr(ExecEnv* env, Module* module, void* ptr)
 {
 	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
 
-	if (inRange(ptr, env->stack_head, env->stack_brk + module->stack_size - env->stack_head)) {
+	if (inRange(ptr, env->stack_head, env->stack_brk + module->stack_size)) {
 		return (BufferRef){ .type = BUF_VAR };
 	}
 
@@ -925,7 +962,7 @@ sbuf getBufferByRef(ExecEnv* env, Module* module, BufferRef ref)
 	switch (ref.type) {
 		case BUF_DATA: return module->datablocks.data[ref.id].spec;
 		case BUF_MEMORY: return env->memblocks.data[ref.id];
-		case BUF_VAR: return (sbuf){ .data = env->stack_head, .length = env->stack_brk + module->stack_size - env->stack_head };
+		case BUF_VAR: return (sbuf){ .data = env->stack_head, .length = getCurStackSize(env, module) };
 		case BUF_ARGV: return env->exec_argv[ref.id];
 		default: return (sbuf){0};
 	}
@@ -1030,9 +1067,9 @@ void printExecState(FILE* fd, ExecEnv* env, Module* module)
 		fprintf(
 			fd, 
 			"total stack usage: %.3f/%.3f Kb (%.3f%%)\n",
-			(float)(env->stack_brk + module->stack_size - env->stack_head) / 1024.0f,
+			(float)getCurStackSize(env, module) / 1024.0f,
 			module->stack_size / 1024.0f,
-			(float)(env->stack_brk + module->stack_size - env->stack_head)	/ (float)module->stack_size * 100.0f
+			(float)getCurStackSize(env, module) / (float)module->stack_size * 100.0f
 		);
 
 		fprintf(fd, "registers:\n");
@@ -2090,6 +2127,12 @@ bool handleOpVar(ExecEnv* env, Module* module)
 				.size = op.var_size
 			}
 		);
+
+		if (env->stack_head - op.var_size < env->stack_brk) {
+			env->exitcode = EC_STACK_OVERFLOW;
+			env->err_push_size = op.var_size;
+			return true;
+		}
 	}
 
 	env->stack_head -= op.var_size;
@@ -2311,6 +2354,60 @@ bool handleOpStrv(ExecEnv* env, Module* module)
 	return false;
 }
 
+bool handleOpPopv(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		if (env->stack_head + op.var_size > env->stack_brk + module->stack_size) {
+			env->exitcode = EC_STACK_UNDERFLOW;
+			env->err_pop_size = op.var_size;
+			return true;
+		}
+
+		env->regs_trace[op.dst_reg] = DataSpecArray_pop(&arrayhead(env->vars)->vars, -1);
+		if (env->regs_trace[op.dst_reg].type == DS_VOID) {
+			if (!env->exitcode) {
+				env->exitcode = EC_UNDEFINED_STACK_LOAD;
+				env->err_ptr = env->stack_head;
+			}
+			return true;
+		}
+	}
+
+	env->registers[op.dst_reg] = 0;
+	memcpy(env->registers + op.dst_reg, env->stack_head, op.var_size);
+	env->stack_head += op.var_size;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpPushv(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		DataSpecArray_append(
+			&arrayhead(env->vars)->vars,
+			dataSpecSize(env->regs_trace[op.src_reg]) == op.var_size ? env->regs_trace[op.src_reg] : (DataSpec){
+				.type = DS_VOID,
+				.size = op.var_size
+			}
+		);
+
+		if (env->stack_head - op.var_size < env->stack_brk) {
+			env->exitcode = EC_STACK_OVERFLOW;
+			env->err_push_size = op.var_size;
+			return true;
+		}
+	}
+
+	memcpy((env->stack_head -= op.var_size), env->registers + op.src_reg, op.var_size);
+	env->op_id++;
+	return false;
+}
+
+
 ExecHandler op_handlers[] = {
 	[OP_NONE] = &handleNop,
 	[OP_END] = &handleOpEnd,
@@ -2363,7 +2460,9 @@ ExecHandler op_handlers[] = {
 	[OP_DIVSR] = &handleOpDivsr,
 	[OP_EXTPROC] = &handleNop,
 	[OP_LDV] = &handleOpLdv,
-	[OP_STRV] = &handleOpStrv
+	[OP_STRV] = &handleOpStrv,
+	[OP_POPV] = &handleOpPopv,
+	[OP_PUSHV] = &handleOpPushv
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 

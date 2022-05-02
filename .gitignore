@@ -5,7 +5,6 @@ build
 .vscode
 .DS_Store
 a.out
-test.vbrb
 *.S
 *.o
-test
+test*

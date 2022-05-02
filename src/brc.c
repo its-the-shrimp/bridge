@@ -8,13 +8,13 @@ defArray(str);
 #define STR_PREFIX "._s"
 
 typedef enum {
+    KW_VOID,
     KW_INT8,
     KW_INT16,
     KW_INT32,
     KW_INT64,
-    KW_SYSCALL,
+    KW_SYS,
     KW_BUILTIN,
-    KW_VOID,
     N_KWS
 } BRKeyword;
 
@@ -26,6 +26,7 @@ typedef enum {
     SYMBOL_BLOCK_END,
     SYMBOL_SEMICOLON,
     SYMBOL_ASSIGNMENT,
+    SYMBOL_REF,
     N_SYMBOLS
 } BRSymbol;
 
@@ -47,20 +48,43 @@ typedef enum {
     BR_ERR_INVALID_FUNC_DEF,
     BR_ERR_UNKNOWN_VAR,
     BR_ERR_VAR_EXISTS,
+    BR_ERR_INVALID_TYPE,
+    BR_ERR_TYPE_MISMATCH,
+    BR_ERR_VOID_VAR_DECL,
     N_BR_ERRORS
 } BRErrorCode;
+
+
+typedef enum {
+    KIND_NONE,
+    KIND_INT,
+    KIND_PTR,
+    KIND_BUILTIN_VAL,
+    KIND_VOID,
+    N_TYPE_KINDS
+} TypeKind;
+
+typedef struct typedef_t {
+    TypeKind kind;
+    union {
+        int int_size;
+        struct typedef_t* base;
+    };
+} TypeDef;
+
+static TypeDef STR_LITERAL_TYPE;
 
 typedef struct {
     BRErrorCode code;
     Token loc;
     union {
-        int n_syscall_args;
+        int n_syscall_args; // for BR_ERR_TOO_MANY_SYSCALL_ARGS
+        struct { // for BR_ERR_VAR_TYPE_MISMATCH
+            TypeDef field_type;
+            TypeDef entry_type;
+        };
     };
 } BRError;
-
-typedef struct {
-    int8_t int_size;
-} TypeDef;
 
 typedef struct {
     TokenLoc loc;
@@ -117,39 +141,59 @@ typedef struct {
     Expr globals;
 } AST;
 
-bool parseType(BRP* obj, TypeDef* dst)
+BRError parseType(BRP* obj, TypeDef* dst)
 {
+    *dst = (TypeDef){0};
     bool fetched = false;
     while (true) {
         Token token = peekToken(obj);
-        switch (getTokenKeywordId(token)) {
-            case KW_INT8:
-                fetchToken(obj);
-                fetched = true;
-                dst->int_size = 1;
-                break;
-            case KW_INT16:
-                fetchToken(obj);
-                fetched = true;
-                dst->int_size = 2;
-                break;
-            case KW_INT32:
-                fetchToken(obj);
-                fetched = true;
-                dst->int_size = 4;
-                break;
-            case KW_INT64:
-                fetchToken(obj);
-                fetched = true;
-                dst->int_size = 8;
-                break;
-            case KW_VOID:
-                fetchToken(obj);
-                fetched = true;
-                dst->int_size = 0;
-            default:
-                return fetched;
-        }
+        if (token.type == TOKEN_KEYWORD) {
+            switch (token.keyword_id) {
+                case KW_INT8:
+                case KW_INT16:
+                case KW_INT32:
+                case KW_INT64:
+                    if (dst->kind != KIND_NONE) return (BRError){
+                        .code = BR_ERR_INVALID_TYPE,
+                        .loc = token
+                    };
+
+                    fetchToken(obj);
+                    dst->kind = KIND_INT;
+                    fetched = true;
+                    dst->int_size = 1 << (token.keyword_id - KW_INT8);
+                    break;
+                case KW_VOID:
+                    if (dst->kind != KIND_NONE) return (BRError){
+                        .code = BR_ERR_INVALID_TYPE,
+                        .loc = token
+                    };
+
+                    fetchToken(obj);
+                    fetched = true;
+                    dst->kind = KIND_VOID;
+                    break;
+                default:
+                    return (BRError){ .code = fetched ? 0 : -1 };
+            }
+        } else if (token.type == TOKEN_SYMBOL) {
+            switch (token.symbol_id) {
+                case SYMBOL_REF:
+                    if (dst->kind == KIND_NONE) return (BRError){
+                        .code = BR_ERR_INVALID_TYPE,
+                        .loc = token
+                    };
+
+                    fetchToken(obj);
+                    TypeDef* new_base = malloc(sizeof(TypeDef));
+                    *new_base = *dst;
+                    dst->base = new_base;
+                    dst->kind = KIND_PTR;
+                    break;
+                default:
+                    return (BRError){ .code = fetched ? 0 : -1 };
+            }
+        } else return (BRError){ .code = fetched ? 0 : -1 };
     }
 }
 
@@ -232,12 +276,53 @@ bool isExprTerm(Token token, int flags, BRError* errp)
 
 void fprintType(FILE* dst, TypeDef type)
 {
-    switch (type.int_size) {
-        case 0: fputs("void", dst); break;
-        case 1: fputs("int8", dst); break;
-        case 2: fputs("int16", dst); break;
-        case 4: fputs("int32", dst); break;
-        case 8: fputs("int64", dst); break;
+    static_assert(N_TYPE_KINDS == 5, "not all type kinds are handled in fprintType");
+    if (type.kind == KIND_INT) {
+        switch (type.int_size) {
+            case 1: fputs("int8", dst); break;
+            case 2: fputs("int16", dst); break;
+            case 4: fputs("int32", dst); break;
+            case 8: fputs("int64", dst); break;
+        }
+    } else if (type.kind == KIND_PTR) {
+        fprintType(dst, *type.base);
+        fputc('*', dst);
+    } else if (type.kind == KIND_VOID) {
+        fputs("void", dst);
+    } else if (type.kind == KIND_BUILTIN_VAL) {
+        fputs("__builtin_val", dst);
+    } else {
+        eprintf("internal compiler bug in fprintType: unknown type kind %d\n", type.kind);
+        abort();
+    }
+}
+#define printType(type) fprintType(stdout, type)
+
+bool typeMatches(TypeDef field, TypeDef entry)
+{
+    static_assert(N_TYPE_KINDS == 5, "not all type kinds are handled in typeMatches");
+    switch (field.kind) {
+        case KIND_VOID: return entry.kind != KIND_PTR;
+        case KIND_PTR: return entry.kind == KIND_PTR ? typeMatches(*field.base, *entry.base) : false;
+        case KIND_INT: return entry.kind == KIND_INT && entry.int_size == field.int_size;
+        case KIND_BUILTIN_VAL: return entry.kind == KIND_PTR || entry.kind == KIND_INT;
+        case KIND_NONE:
+        default:
+            eprintf("internal compiler bug in typeMatches: unknown field type kind %d\n", field.kind);
+            abort();
+    }
+}
+
+int getTypeSize(TypeDef type)
+{
+    switch (type.kind) {
+        case KIND_INT: return type.int_size;
+        case KIND_PTR: return 8;
+        case KIND_VOID: return 0;
+        case KIND_NONE:
+        default:
+            eprintf("internal compiler bug in getTypeSize: unknown type kind %d\n", type.kind);
+            abort();
     }
 }
 
@@ -347,6 +432,37 @@ Expr* getVarDecl(Expr* block, char* name)
     return NULL;
 }
 
+TypeDef getVarType(Expr* block, char* name)
+{
+    Expr* var_decl = getVarDecl(block, name);
+    return var_decl ? getSubexpr(var_decl, 1)->var_type : (TypeDef){0};
+}
+
+TypeDef getExprValueType(Expr expr)
+{
+    static_assert(N_EXPR_TYPES == 12, "not all expression types are handled in getExprValueType");
+    switch (expr.type) {
+        case EXPR_INVALID:
+        case EXPR_NAME:
+        case EXPR_NEW_VAR:
+        case EXPR_TYPE:
+        case EXPR_REF:
+        case EXPR_BLOCK:
+            return (TypeDef){0};
+        case EXPR_BUILTIN:
+        case EXPR_SYSCALL:
+            return (TypeDef){ .kind = KIND_BUILTIN_VAL };
+        case EXPR_STRING: return STR_LITERAL_TYPE;
+        case EXPR_INT: return (TypeDef){ .kind = KIND_INT, .int_size = 4 };
+        case EXPR_SET_VAR: return getVarType(expr.block, getSubexpr(&expr, 0)->name);
+        case EXPR_GET_VAR: return getVarType(expr.block, expr.name);
+        case N_EXPR_TYPES:
+        default:
+            eprintf("internal compiler bug in getExprValueType: unknown expression type %d\n", expr.type);
+            abort();
+    }
+}
+
 void printAST(AST* ast, BRP* obj)
 {
     array_foreach(FuncDef, func, ast->functions, 
@@ -370,9 +486,15 @@ BRError parseExpr(BRP* obj, Expr* dst, Expr* block, int flags)
             break;
         } else if (expr_term_err.code) return expr_term_err;
 
-        if (parseType(obj, &new_type)) {
+        BRError type_err = parseType(obj, &new_type);
+        if ((int)type_err.code > 0) return type_err;
+        if (type_err.code == 0) {
             if (!setExprType(dst, EXPR_NEW_VAR)) return (BRError){
                 .code = BR_ERR_INVALID_EXPR,
+                .loc = token
+            };
+            if (new_type.kind == KIND_VOID) return (BRError){
+                .code = BR_ERR_VOID_VAR_DECL,
                 .loc = token
             };
             initExpr(dst);
@@ -407,7 +529,7 @@ BRError parseExpr(BRP* obj, Expr* dst, Expr* block, int flags)
             dst->str_literal = token.word;
         } else if (token.type == TOKEN_KEYWORD) {
             switch (token.keyword_id) {
-                case KW_SYSCALL: {
+                case KW_SYS: {
                     fetchToken(obj);
                     if (!setExprType(dst, EXPR_SYSCALL)) return (BRError){
                         .code = BR_ERR_INVALID_EXPR,
@@ -510,8 +632,19 @@ BRError parseExpr(BRP* obj, Expr* dst, Expr* block, int flags)
                         char* var_name = dst->name;
                         initExpr(dst);
                         addSubexpr(dst, (Expr){ .type = EXPR_NAME, .name = var_name, .block = block });
+
+                        Token entry_loc = peekToken(obj);
                         BRError err = parseExpr(obj, addSubexpr(dst, (Expr){0}), block, EXPRTERM_FULL | EXPR_EVALUATABLE);
                         if (err.code) return err;
+
+                        TypeDef var_type = getVarType(block, var_name);
+                        TypeDef entry_type = getExprValueType(*getSubexpr(dst, 1));
+                        if (!typeMatches(var_type, entry_type)) return (BRError){
+                            .code = BR_ERR_TYPE_MISMATCH,
+                            .loc = entry_loc,
+                            .field_type = var_type,
+                            .entry_type = entry_type
+                        };
                     } else return (BRError){
                         .code = BR_ERR_INVALID_EXPR,
                         .loc = token
@@ -592,7 +725,9 @@ BRError parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
 
     while (!BRPempty(obj)) {
         TypeDef type;
-        if (parseType(obj, &type)) { // parsing function declaration/definition
+        BRError type_err = parseType(obj, &type);
+        if ((int)type_err.code > 0) return type_err;
+        if (type_err.code == 0) { // parsing function declaration/definition
 // fetching function name
             token = fetchToken(obj);                         // void main() { ... }
             if (token.type != TOKEN_WORD) return (BRError){ //      ^
@@ -616,7 +751,9 @@ BRError parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
             };
 // fetching function prototype specification
             while (true) {
-                if (parseType(obj, &type)) {
+                BRError err = parseType(obj, &type);
+                if ((int)err.code > 0) return err;
+                if (err.code == 0) {
                     token = fetchToken(obj);
                     if (token.type != TOKEN_WORD) return (BRError){
                         .code = BR_ERR_ARG_NAME_EXPECTED,
@@ -663,7 +800,7 @@ typedef struct {
     intArray mem_blocks;
 } ASTCompilerCtx;
 
-typedef bool (*ExprCompiler) (FILE*, Expr, ASTCompilerCtx*, int);
+typedef bool (*ExprCompiler) (FILE*, Expr, ASTCompilerCtx*, regstate_t, int);
 ExprCompiler expr_compilers[N_EXPR_TYPES];
 
 static int reg_cache_counter = 0;
@@ -671,8 +808,7 @@ int compileRegCaching(FILE* dst, regstate_t state)
 {
     for (uint8_t i = 0; i < 8; i++) {
         if (state & (1 << i)) {
-            fprintf(dst, "\tvar .rc%d_%hhd 8\n", reg_cache_counter, i);
-            fprintf(dst, "\tstrv .rc%d_%hhd r%hhd\n", reg_cache_counter, i, i);
+            fprintf(dst, "\tpushv .rc%d_%hhd 8 r%hhd\n", reg_cache_counter, i, i);
         }
     }
 
@@ -681,25 +817,26 @@ int compileRegCaching(FILE* dst, regstate_t state)
 
 void compileRegUncaching(FILE* dst, regstate_t state, int cache_id)
 {
-    for (uint8_t i = 0; i < 8; i++) {
+    for (int8_t i = 7; i >= 0; i--) {
         if (state & (1 << i)) {
-            fprintf(dst, "\tldv r%hhd .rc%d_%hhd\n", i, cache_id, i);
+            fprintf(dst, "\tpopv r%hhd\n", i);
         }
     }
 }
 
-bool compileExprInvalid(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprInvalid(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
     return false;
 }
 
-bool compileExprSyscall(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprSyscall(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
-    regstate_t reg_cache_state = ((1 << (getSubexprsCount(&expr) - 1)) - 1) & ~(1 << dst_reg);
+    regstate_t reg_cache_state = ((1 << (getSubexprsCount(&expr) - 1)) - 1) & reg_state;
     int cache_id = compileRegCaching(dst, reg_cache_state);
     int i = 0;
     chain_foreach_from(Expr, subexpr, *getSubexprs(&expr), 1,
-        if (!expr_compilers[subexpr.type](dst, subexpr, ctx, i++)) return false;
+        if (!expr_compilers[subexpr.type](dst, subexpr, ctx, (1 << i) - 1, i)) return false;
+        i++;
     );
     fprintf(dst, "\tsys %s\n", getSubexpr(&expr, 0)->name);
 
@@ -709,13 +846,13 @@ bool compileExprSyscall(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
     return true;
 }
 
-bool compileExprBuiltin(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprBuiltin(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
     fprintf(dst, "\tsetb r%d %s\n", dst_reg, expr.name);
     return true;
 }
 
-bool compileExprString(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprString(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
     int str_index = -1;
     for (int i = 0; i < ctx->data_blocks.length; i++) {
@@ -733,36 +870,36 @@ bool compileExprString(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
     return true;
 }
 
-bool compileExprInt(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprInt(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
     fprintf(dst, "\tset r%d %lld\n", dst_reg, expr.int_literal);
     return true;
 }
 
-bool compileExprNewVar(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprNewVar(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
-    fprintf(dst, "\tvar %s %d\n", getSubexpr(&expr, 0)->name, getSubexpr(&expr, 1)->var_type.int_size);
+    fprintf(dst, "\tvar %s %d\n", getSubexpr(&expr, 0)->name, getTypeSize(getSubexpr(&expr, 1)->var_type));
     return true;
 }
 
-bool compileExprSetVar(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprSetVar(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
     Expr* subexpr = getSubexpr(&expr, 1);
-    if (!expr_compilers[subexpr->type](dst, *subexpr, ctx, dst_reg)) return false;
+    if (!expr_compilers[subexpr->type](dst, *subexpr, ctx, reg_state, dst_reg)) return false;
     fprintf(dst, "\tstrv %s r%d\n", getSubexpr(&expr, 0)->name, dst_reg);
     return true;
 }
 
-bool compileExprGetVar(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprGetVar(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
     fprintf(dst, "\tldv r%d %s\n", dst_reg, expr.name);
     return true;
 }
 
-bool compileExprBlock(FILE* dst, Expr expr, ASTCompilerCtx* ctx, int dst_reg)
+bool compileExprBlock(FILE* dst, Expr expr, ASTCompilerCtx* ctx, regstate_t reg_state, int dst_reg)
 {
     chain_foreach_from(Expr, subexpr, *getSubexprs(&expr), 1,
-        if (!expr_compilers[subexpr.type](dst, subexpr, ctx, 0)) return false;
+        if (!expr_compilers[subexpr.type](dst, subexpr, ctx, reg_state, 0)) return false;
     );
     return true;
 }
@@ -793,7 +930,7 @@ bool compileAST(AST* src, FILE* dst)
     fputs("exec {\n", dst);
     array_foreach(FuncDef, func, src->functions,
         fprintf(dst, "\tproc %s\n", func.name);
-        if (!expr_compilers[func.body.type](dst, func.body, &ctx, 0)) return false;
+        if (!expr_compilers[func.body.type](dst, func.body, &ctx, 0, 0)) return false;
         fputs("\tendproc\n", dst);
     );
     fputs("}\n", dst);
@@ -829,6 +966,9 @@ int main(int argc, char* argv[])
 {
     initBREnv();
     startTimer();
+    STR_LITERAL_TYPE.kind = KIND_PTR;
+    TypeDef str_lit_base = (TypeDef){ .kind = KIND_INT, .int_size = 1 };
+    STR_LITERAL_TYPE.base = &str_lit_base;
 
     bool go_on = false, print_ast = false;
     char *input_path = NULL, *brb_output_path = NULL, *vbrb_output_path = NULL;
@@ -882,16 +1022,15 @@ int main(int argc, char* argv[])
 
     if (brb_output_path) {
         if (isPathDir(brb_output_path)) {
-            brb_output_path = tostr(fromstr(brb_output_path), basename, fromcstr(BRB_EXT));
+            brb_output_path = tostr(fromstr(brb_output_path), PATHSEP, basename, fromcstr(BRB_EXT));
         }
     } else {
         brb_output_path = setFileExt(input_path, BRB_EXT);
     }
 
     if (vbrb_output_path) {
-        if (isPathDir(vbrb_output_path)) {
-            vbrb_output_path = tostr(fromstr(vbrb_output_path), basename, fromcstr(VBRB_EXT));
-        }
+        if (isPathDir(vbrb_output_path))
+            vbrb_output_path = tostr(fromstr(vbrb_output_path), PATHSEP, basename, fromcstr(VBRB_EXT));
     }
 
     char* vbrb_visual_output_path;
@@ -906,7 +1045,7 @@ int main(int argc, char* argv[])
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
         return 1;
     }
-    static_assert(N_SYMBOLS == 7, "not all symbols are handled");
+    static_assert(N_SYMBOLS == 8, "not all symbols are handled");
     setSymbols(
         &prep,
         BRP_SYMBOL("("),
@@ -916,19 +1055,20 @@ int main(int argc, char* argv[])
         BRP_SYMBOL("}"),
         BRP_SYMBOL(";"),
         BRP_SYMBOL("="),
+        BRP_SYMBOL("*"),
         BRP_HIDDEN_SYMBOL(" "),
         BRP_HIDDEN_SYMBOL("\t")
     );
     static_assert(N_KWS == 7, "not all keywords are handled");
     setKeywords(
         &prep,
+        BRP_KEYWORD("void"),
         BRP_KEYWORD("int8"),
         BRP_KEYWORD("int16"),
         BRP_KEYWORD("int32"),
         BRP_KEYWORD("int64"),
-        BRP_KEYWORD("syscall"),
-        BRP_KEYWORD("builtin"),
-        BRP_KEYWORD("void")
+        BRP_KEYWORD("sys"),
+        BRP_KEYWORD("builtin")
     );
 	if (!setInput(&prep, input_path)) {
 		printBRPError(stderr, &prep);
@@ -938,7 +1078,7 @@ int main(int argc, char* argv[])
     AST ast;
     BRError err = parseSourceCode(&prep, &ast);
     
-    static_assert(N_BR_ERRORS == 17, "not all BRidge errors are handled");
+    static_assert(N_BR_ERRORS == 20, "not all BRidge errors are handled");
     if (err.code) {
         fprintTokenLoc(stderr, err.loc.loc, &prep);
         eputs("error: ");
@@ -1016,6 +1156,21 @@ int main(int argc, char* argv[])
                 return 1;
             case BR_ERR_VAR_EXISTS:
                 eprintf("variable `%s` is aliready declared\n", err.loc.word);
+                return 1;
+            case BR_ERR_INVALID_TYPE:
+                eputs("invalid type specifier\n");
+                return 1;
+            case BR_ERR_TYPE_MISMATCH:
+                eputs("cannot assign a value of type `");
+                fprintType(stderr, err.entry_type);
+                eputs("` to a variable of type `");
+                fprintType(stderr, err.field_type);
+                eputs("`\n");
+                return 1;
+            case BR_ERR_VOID_VAR_DECL:
+                eputs("cannot declare a variable of type `");
+                fprintType(stderr, (TypeDef){ .kind = KIND_VOID });
+                eputs("`\n");
                 return 1;
             case N_BR_ERRORS:
             case BR_ERR_NONE:

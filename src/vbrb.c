@@ -63,6 +63,8 @@ typedef enum {
 	KW_EXTPROC,
 	KW_LDV,
 	KW_STRV,
+	KW_POPV,
+	KW_PUSHV,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -90,7 +92,7 @@ typedef enum {
 	KW_LOAD,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 52, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 54, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 typedef struct {
@@ -101,7 +103,7 @@ declArray(ExecMark);
 defArray(ExecMark);
 
 void printVBRBError(FILE* dst, VBRBError err) {
-	static_assert(N_VBRB_ERRORS == 26, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 27, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
 		if (err.code != VBRB_ERR_PREPROCESSOR_FAILURE) fprintTokenLoc(stderr, err.loc.loc, err.prep);
 		fprintf(dst, "error: ");
@@ -227,6 +229,9 @@ void printVBRBError(FILE* dst, VBRBError err) {
                 printBRPErrorStr(dst, err.prep);
                 fprintf(dst, ")\n");
 				break;
+			case VBRB_ERR_NO_VAR:
+				fprintf(dst, "cannot use `popv` operation; the stack is empty\n");
+				break;
 		}
 	}
 }
@@ -292,6 +297,11 @@ VBRBError getIntArg(CompilerCtx* ctx, Token src, int64_t* dst, char op_type, cha
 
 VBRBError getVarArg(CompilerCtx* ctx, Token src, int64_t* offset_p, uint8_t* var_size_p, char op_type, char arg_id)
 {
+	int64_t stub_offset;
+	uint8_t stub_var_size;
+	if (!offset_p) offset_p = &stub_offset;
+	if (!var_size_p) var_size_p = &stub_var_size;
+
 	if (!isWordToken(src)) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_INVALID_ARG,
@@ -306,7 +316,7 @@ VBRBError getVarArg(CompilerCtx* ctx, Token src, int64_t* offset_p, uint8_t* var
 	for (int i = ctx->vars.length - 1; i >= 0; i--) {
 		if (sbufeq(fromstr(ctx->vars.data[i].name), var_name)) { 
 			var_name.data = NULL;
-			if (var_size_p) *var_size_p = ctx->vars.data[i].size;
+			*var_size_p = ctx->vars.data[i].size;
 			break;
 		}
 		*offset_p += ctx->vars.data[i].size;
@@ -699,6 +709,71 @@ VBRBError compileOpStrv(CompilerCtx* ctx, Module* dst)
 	return (VBRBError){ .prep = ctx->prep };
 }
 
+VBRBError compileOpPopv(CompilerCtx* ctx, Module* dst)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	if (ctx->vars.length == 0) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_NO_VAR,
+		.loc = ctx->op_token
+	};
+	op->var_size = VarArray_get(ctx->vars, -1).size;
+	ctx->vars.length--;
+
+	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &op->dst_reg, op->type, 0);
+	if (err.code) return err;
+
+	return (VBRBError){ .prep = ctx->prep };
+}
+
+VBRBError compileOpPushv(CompilerCtx* ctx, Module* dst)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	Token token = fetchToken(ctx->prep);
+	Var* new_var;
+	if (!(new_var = VarArray_append(&ctx->vars, (Var){0}))) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_NO_MEMORY,
+		.loc = token
+	};
+
+	if (!isWordToken(token)) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_INVALID_ARG,
+		.loc = token,
+		.op_type = op->type,
+		.arg_id = 0,
+		.expected_token_type = TOKEN_WORD
+	};
+	new_var->name = getTokenWord(ctx->prep, token);
+
+	token = fetchToken(ctx->prep);
+	if (token.type != TOKEN_INT) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_INVALID_ARG,
+		.loc = token,
+		.op_type = op->type,
+		.arg_id = 1,
+		.expected_token_type = TOKEN_INT
+	};
+	if (token.value != 1 && token.value != 2 && token.value != 4 && token.value != 8) {
+		return (VBRBError){
+            .prep = ctx->prep,
+			.code = VBRB_ERR_INVALID_VAR_SIZE,
+			.loc = token
+		};
+	}
+	op->var_size = new_var->size = (int8_t)token.value;
+
+	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &op->src_reg, op->type, 2);
+	if (err.code) return err;
+
+	return (VBRBError){ .prep = ctx->prep };
+}
+
+
 OpCompiler op_compilers[] = {
 	[OP_NONE] = &compileNoArgOp,
 	[OP_END] = &compileNoArgOp,
@@ -751,7 +826,9 @@ OpCompiler op_compilers[] = {
 	[OP_DIVSR] = &compile3RegOp,
 	[OP_EXTPROC] = &compileOpProc,
 	[OP_LDV] = &compileOpLdv,
-	[OP_STRV] = &compileOpStrv
+	[OP_STRV] = &compileOpStrv,
+	[OP_POPV] = &compileOpPopv,
+	[OP_PUSHV] = &compileOpPushv
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 

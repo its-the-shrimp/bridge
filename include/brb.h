@@ -56,6 +56,8 @@ typedef enum {
 	OP_EXTPROC, // uses Op::mark_name
 	OP_LDV, // uses Op::src_reg, Op::symbol_id and Op::var_size
 	OP_STRV, // uses Op::dst_reg, Op::symbol_id and Op::var_size
+	OP_POPV, // uses Op::dst_reg, Op::var_size
+	OP_PUSHV, // uses Op::src_reg and Op::var_size
 	N_OPS
 } OpType;
 
@@ -111,7 +113,9 @@ typedef enum {
 	BRP_KEYWORD("divsr"), \
 	BRP_KEYWORD("extproc"), \
 	BRP_KEYWORD("ldv"), \
-	BRP_KEYWORD("strv") \
+	BRP_KEYWORD("strv"), \
+	BRP_KEYWORD("popv"), \
+	BRP_KEYWORD("pushv") \
 
 static sbuf opNames[] = { _opNames };
 
@@ -327,6 +331,7 @@ typedef enum {
 	VBRB_ERR_MODULE_NOT_FOUND,
 	VBRB_ERR_MODULE_NOT_LOADED,
 	VBRB_ERR_PREPROCESSOR_FAILURE,
+	VBRB_ERR_NO_VAR,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -343,6 +348,7 @@ typedef struct vbrb_error {
 		int64_t item_size;
 		char* mark_name;
 		char* module_name;
+		int var_count;
 		BRBLoadError load_error;
 	};
 } VBRBError;
@@ -455,6 +461,8 @@ typedef struct {
 	sbuf* exec_argv;
 	int64_t call_count;
 } ExecEnv;
+
+#define getCurStackSize(execenv_p, module_p) (int64_t)((execenv_p)->stack_brk + (module_p)->stack_size - (execenv_p)->stack_head)
 
 void writeModule(Module* src, FILE* dst);
 FILE* findModule(char* name, char* search_paths[]);

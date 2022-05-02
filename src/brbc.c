@@ -62,28 +62,14 @@ void compileNativeImmSet(FILE* dst, int8_t reg_id, uint64_t value)
 	}
 }
 
-
-declArray(Var);
-defArray(Var);
 typedef struct comp_ctx {
 	FILE* dst;
-	VarArray cur_frame;
+	int cur_frame_size;
 } CompCtx;
-
-
-int frameSize(VarArray frame)
-{
-	int res = 0;
-	array_foreach(Var, var, frame, 
-		res += var.size * var.n_elements;
-	);
-	return res;
-}
 
 uint64_t getNativeStackOffset(CompCtx* ctx, uint64_t offset)
 {
-	int frame_size = frameSize(ctx->cur_frame);
-	return (uint64_t)ceilf((float)frame_size / (float)ARM64_STACK_ALIGNMENT) * ARM64_STACK_ALIGNMENT - frame_size;
+	return ARM64_STACK_ALIGNMENT - ctx->cur_frame_size % ARM64_STACK_ALIGNMENT + offset;
 }
 
 typedef void (*OpNativeCompiler) (Module*, int, CompCtx*);
@@ -569,7 +555,7 @@ void compileOpEndprocNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 	fprintf(ctx->dst, "\tret\n");
-	VarArray_clear(&ctx->cur_frame);
+	ctx->cur_frame_size = 0;
 }
 
 void compileOpLd64Native(Module* module, int index, CompCtx* ctx)
@@ -631,12 +617,11 @@ void compileOpStr8Native(Module* module, int index, CompCtx* ctx)
 void compileOpVarNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
-	float frame_size = (float)frameSize(ctx->cur_frame);
 
-	if (ceilf(frame_size / ARM64_STACK_ALIGNMENT) < ceilf((frame_size + op.var_size) / ARM64_STACK_ALIGNMENT)) {
+	if (ceilf(ctx->cur_frame_size / ARM64_STACK_ALIGNMENT) < ceilf((ctx->cur_frame_size + op.var_size) / ARM64_STACK_ALIGNMENT)) {
 		fprintf(ctx->dst, "\tsub sp, sp, 16\n");
 	}
-	VarArray_append(&ctx->cur_frame, (Var){ .size = op.var_size, .n_elements = 1 });
+	ctx->cur_frame_size += op.var_size;
 }
 
 void compileOpSetvNative(Module* module, int index, CompCtx* ctx)
@@ -740,6 +725,7 @@ void compileOpLdvNative(Module* module, int index, CompCtx* ctx)
 				break;
 			case 8:
 				fprintf(ctx->dst, "\tldr x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
+				break;
 			default:
 				eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hhd\n", op.var_size);
 				abort();
@@ -749,16 +735,17 @@ void compileOpLdvNative(Module* module, int index, CompCtx* ctx)
 		compileNativeImmSet(ctx->dst, 8, stack_offset);
 		switch (op.var_size) {
 			case 1:
-				fprintf(ctx->dst, "\tldrsb w%hhd, [sp, x8]\n", op.dst_reg);
+				fprintf(ctx->dst, "\tldrsb x%hhd, [sp, x8]\n", op.dst_reg);
 				break;
 			case 2:
-				fprintf(ctx->dst, "\tldrsh w%hhd, [sp, x8]\n", op.dst_reg);
+				fprintf(ctx->dst, "\tldrsh x%hhd, [sp, x8]\n", op.dst_reg);
 				break;
 			case 4:
-				fprintf(ctx->dst, "\tldrsw w%hhd, [sp, x8]\n", op.dst_reg);
+				fprintf(ctx->dst, "\tldrsw x%hhd, [sp, x8]\n", op.dst_reg);
 				break;
 			case 8:
 				fprintf(ctx->dst, "\tldr x%hhd, [sp, x8]\n", op.dst_reg);
+				break;
 			default:
 				eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hhd\n", op.var_size);
 				abort();
@@ -787,7 +774,7 @@ void compileOpStrvNative(Module* module, int index, CompCtx* ctx)
 				fprintf(ctx->dst, "\tstr x%hhd, [sp, %lld]\n", op.src_reg, stack_offset);
 				break;
 			default:
-				eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hhd\n", op.var_size);
+				eprintf("internal compiler bug in compileOpStrvNative: unexpected variable size %hhd\n", op.var_size);
 				abort();
 		}
 	} else {
@@ -805,11 +792,69 @@ void compileOpStrvNative(Module* module, int index, CompCtx* ctx)
 				break;
 			case 8:
 				fprintf(ctx->dst, "\tstr x%hhd, [sp, x8]\n", op.src_reg);
+				break;
 			default:
-				eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hhd\n", op.var_size);
+				eprintf("internal compiler bug in compileOpStrvNative: unexpected variable size %hhd\n", op.var_size);
 				abort();
 		}
 		endConditionalOp(ctx->dst, cond_ctx);
+	}
+}
+
+void compileOpPopvNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	uint64_t offset = getNativeStackOffset(ctx, 0);
+
+	switch (op.var_size) {
+		case 1:
+			fprintf(ctx->dst, "\tldrsb x%hhd, [sp, %llu]\n", op.dst_reg, offset);
+			break;
+		case 2:
+			fprintf(ctx->dst, "\tldrsh x%hhd, [sp, %llu]\n", op.dst_reg, offset);
+			break;
+		case 4:
+			fprintf(ctx->dst, "\tldrsw x%hhd, [sp, %llu]\n", op.dst_reg, offset);
+			break;
+		case 8:
+			fprintf(ctx->dst, "\tldr x%hhd, [sp, %llu]\n", op.dst_reg, offset);
+			break;
+		default:
+			eprintf("internal compiler bug in compileOpPopvNative: unexpected variable size %hhd\n", op.var_size);
+	}
+
+	if (offset + op.var_size >= ARM64_STACK_ALIGNMENT) {
+		fprintf(ctx->dst, "\tadd sp, sp, 16\n");
+	}
+	ctx->cur_frame_size -= op.var_size;
+}
+
+void compileOpPushvNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+
+	if (ceilf(ctx->cur_frame_size / ARM64_STACK_ALIGNMENT) < ceilf((ctx->cur_frame_size + op.var_size) / ARM64_STACK_ALIGNMENT)) {
+		fprintf(ctx->dst, "\tsub sp, sp, 16\n");
+	}
+	ctx->cur_frame_size += op.var_size;
+
+	uint64_t offset = getNativeStackOffset(ctx, 0);
+	switch (op.var_size) {
+		case 1:
+			fprintf(ctx->dst, "\tstrb w%hhd, [sp, %llu]\n", op.src_reg, offset);
+			break;
+		case 2:
+			fprintf(ctx->dst, "\tstrh w%hhd, [sp, %llu]\n", op.src_reg, offset);
+			break;
+		case 4:
+			fprintf(ctx->dst, "\tstr w%hhd, [sp, %llu]\n", op.src_reg, offset);
+			break;
+		case 8:
+			fprintf(ctx->dst, "\tstr x%hhd, [sp, %llu]\n", op.src_reg, offset);
+			break;
+		default:
+			eprintf("internal compiler bug in compileOpPushvNative: unexpected variable size %hhd\n", op.var_size);
+			abort();
 	}
 }
 
@@ -866,7 +911,9 @@ OpNativeCompiler native_op_compilers[] = {
 	[OP_DIVSR] = &compileOpDivsrNative,
 	[OP_EXTPROC] = &compileOpExtprocNative,
 	[OP_LDV] = &compileOpLdvNative,
-	[OP_STRV] = &compileOpStrvNative
+	[OP_STRV] = &compileOpStrvNative,
+	[OP_POPV] = &compileOpPopvNative,
+	[OP_PUSHV] = &compileOpPushvNative
 };
 static_assert(
 	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),
@@ -879,7 +926,7 @@ void compileByteCode(Module* src, FILE* dst)
 // 		x27 - argv
 // 		x26 - errno
 {
-	CompCtx ctx = { .dst = dst, .cur_frame = VarArray_new(0) };
+	CompCtx ctx = { .dst = dst, .cur_frame_size = 0 };
 
 	if (src->datablocks.length) {
 		fprintf(dst, ".data\n");
