@@ -187,6 +187,11 @@ void writeOpPushv(ModuleWriter* writer, Op op)
 	fputc(op.src_reg, writer->dst);
 }
 
+void writeOpAtl(ModuleWriter* writer, Op op)
+{
+	writeInt(writer->dst, op.symbol_id);
+}
+
 const OpWriter op_writers[] = {
 	[OP_NONE] = &writeNoArgOp,
 	[OP_END] = &writeNoArgOp,
@@ -241,7 +246,9 @@ const OpWriter op_writers[] = {
 	[OP_LDV] = &writeOpLdv,
 	[OP_STRV] = &writeOpStrv,
 	[OP_POPV] = &writeOpPopv,
-	[OP_PUSHV] = &writeOpPushv
+	[OP_PUSHV] = &writeOpPushv,
+	[OP_ATF] = &writeMarkOp,
+	[OP_ATL] = &writeOpAtl
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
 
@@ -593,6 +600,15 @@ BRBLoadError loadOpPushv(ModuleLoader* loader, Op* dst)
 	return (BRBLoadError){0};
 }
 
+BRBLoadError loadOpAtl(ModuleLoader* loader, Op* dst)
+{
+	long status = 0;
+	dst->symbol_id = loadInt(loader->src, &status);
+	
+	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	return (BRBLoadError){0};
+}
+
 
 OpLoader op_loaders[] = {
 	[OP_NONE] = &loadNoArgOp,
@@ -648,7 +664,9 @@ OpLoader op_loaders[] = {
 	[OP_LDV] = &loadOpLdv,
 	[OP_STRV] = &loadOpStrv,
 	[OP_POPV] = &loadOpPopv,
-	[OP_PUSHV] = &loadOpPushv
+	[OP_PUSHV] = &loadOpPushv,
+	[OP_ATF] = &loadMarkOp,
+	[OP_ATL] = &loadOpAtl
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
@@ -1176,6 +1194,19 @@ bool setStackSpec(ExecEnv* env, void* ptr, DataSpec spec)
 	return false;
 }
 
+void setCurrentSrc(ExecEnv* env, Module* module)
+{
+	env->src_path = NULL;
+	env->src_line = 0;
+	for (int i = env->op_id; i >= 0; i--) {
+		Op op = module->execblock.data[i];
+		if (op.type == OP_ATF) {
+			env->src_path = op.mark_name;
+			return;
+		} else if (op.type == OP_ATL) env->src_line = op.symbol_id;
+	}
+}
+
 bool handleInvalidSyscall(ExecEnv* env, Module* module)
 {
 	env->exitcode = EC_UNKNOWN_SYSCALL;
@@ -1503,6 +1534,8 @@ bool handleOpSyscall(ExecEnv* env, Module* module)
 bool handleOpGoto(ExecEnv* env, Module* module)
 {
 	env->op_id += module->execblock.data[env->op_id].op_offset;
+	
+	if (env->flags & BRBX_TRACING) setCurrentSrc(env, module);
 	return false;
 }
 
@@ -1870,6 +1903,9 @@ bool handleOpCall(ExecEnv* env, Module* module)
 	env->prev_stack_head = env->stack_head;
 
 	env->op_id = op.symbol_id;
+
+	if (env->flags & BRBX_TRACING) setCurrentSrc(env, module);
+
 	return false;
 }
 
@@ -1895,6 +1931,8 @@ bool handleOpRet(ExecEnv* env, Module* module)
 
 	env->op_id = *(int64_t*)env->stack_head;
 	env->stack_head += sizeof(env->op_id);
+
+	if (env->flags & BRBX_TRACING) setCurrentSrc(env, module);
 
 	return false;
 }
@@ -2407,6 +2445,20 @@ bool handleOpPushv(ExecEnv* env, Module* module)
 	return false;
 }
 
+bool handleOpAtf(ExecEnv* env, Module* module)
+{
+	env->src_path = module->execblock.data[env->op_id].mark_name;
+	env->src_line = 0;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpAtl(ExecEnv* env, Module* module)
+{
+	env->src_line = module->execblock.data[env->op_id].symbol_id;
+	env->op_id++;
+	return false;
+}
 
 ExecHandler op_handlers[] = {
 	[OP_NONE] = &handleNop,
@@ -2462,93 +2514,101 @@ ExecHandler op_handlers[] = {
 	[OP_LDV] = &handleOpLdv,
 	[OP_STRV] = &handleOpStrv,
 	[OP_POPV] = &handleOpPopv,
-	[OP_PUSHV] = &handleOpPushv
+	[OP_PUSHV] = &handleOpPushv,
+	[OP_ATF] = &handleOpAtf,
+	[OP_ATL] = &handleOpAtl
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 
 void printRuntimeError(FILE* fd, ExecEnv* env, Module* module)
 {
-	switch (env->exitcode) {
-		case EC_NO_STACKFRAME:
-			fprintf(fd,"%llx:\n\truntime error: attempted to return from a global stack frame\n", env->op_id);
-			break;
-		case EC_ZERO_DIVISION:
-			fprintf(fd, "%llx:\n\truntime error: attempted to divide by zero\n", env->op_id);
-			break;
-		case EC_OUTDATED_LOCALPTR:
-			fprintf(fd, "%llx:\n\truntime error: attempted to use an outdated stack pointer\n", env->op_id);
-			fprintf(fd, "\tpointer %p references already deallocated stack frame\n", env->err_ptr);
-			break;
-		case EC_UNDEFINED_STACK_LOAD:
-			fprintf(fd, "%llx:\n\truntime error: attempted to read from an unused stack variable\n", env->op_id);
-			fprintf(fd, "\tstack variable with undefined value is at %p\n", env->err_ptr);
-			break;
-		case EC_ACCESS_FAILURE:
-			fprintf(fd,"%llx:\n\truntime error: memory access failure\n", env->op_id);
-			fprintf(fd,
-				"\tattempted to access %lld bytes from %p, which is not in bounds of the stack, the heap or any of the buffers\n",
-				env->err_access_length,
-				env->err_ptr
-			);
-			break;
-		case EC_NEGATIVE_SIZE_ACCESS:
-			fprintf(fd,"%llx:\n\truntime error: negative sized memory access\n", env->op_id);
-			fprintf(fd,
-				"\tattempted to access %lld bytes at %p; accessing memory by negative size is not allowed\n",
-				env->err_access_length, 
-				env->err_ptr
-			);
-			break;
-		case EC_STACK_OVERFLOW:
-			fprintf(fd,"%llx:\n\truntime error: stack overflow\n", env->op_id);
-			fprintf(fd,"\tattempted to expand the stack by %hhd bytes, overflowing the stack\n", env->err_push_size);
-			break;
-		case EC_STACK_UNDERFLOW:
-			fprintf(fd,"%llx:\n\truntime error: stack underflow\n", env->op_id);
-			fprintf(fd,"\tattempted to decrease the stack by %hhd bytes, underflowing the stack\n", env->err_pop_size);
-			break;
-		case EC_UNKNOWN_SYSCALL:
-			fprintf(fd,"%llx:\n\truntime error: invalid system call\n", env->op_id - 1);
-			break;
-		case EC_ACCESS_MISALIGNMENT:
-			fprintf(fd,"%llx:\n\truntime error: misaligned memory access\n", env->op_id);
-			sbuf err_buf = getBufferByRef(env, module, env->err_buf_ref);
-			static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
-			switch (env->err_buf_ref.type) {
-				case BUF_DATA:
-					fprintf(fd,
-						"\tdata block `%s` is at %p\n\tblock size: %ld bytes\n",
-						module->datablocks.data[env->err_buf_ref.id].name,
-						(void*)err_buf.data,
-						err_buf.length
-					);
-					break;
-				case BUF_MEMORY:
-					fprintf(fd,
-						"\tmemory block `%s` is at %p\n\tblock size: %ld bytes\n",
-						module->memblocks.data[env->err_buf_ref.id].name,
-						(void*)err_buf.data,
-						err_buf.length
-					);
-					break;
-				case BUF_VAR:
-					fprintf(fd,"\tstack head is at %p\n\tstack size: %ld bytes\n", err_buf.data, err_buf.length);
-					break;
-				case BUF_ARGV:
-					fprintf(fd,"\targument #%d is at %p\n\targument length: %ld bytes\n", env->err_buf_ref.id, err_buf.data, err_buf.length);
-					break;
-				default: break;
-			}
-			fprintf(fd,"\tattempted to access %lld bytes from %p\n", env->err_access_length, env->err_ptr);
-			if (env->err_ptr < (void*)err_buf.data) {
-				fprintf(fd,"\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(err_buf.data - (int64_t)env->err_ptr));
-			} else if ((void*)(env->err_ptr + env->err_access_length) > (void*)(err_buf.data + err_buf.length)) {
+	if (env->exitcode < 0) {
+		if (env->src_path) {
+			fprintf(fd, "%s:%d:\n", env->src_path, env->src_line);
+		} else fprintf(fd, "%04x:\n", env->op_id);
+
+		switch (env->exitcode) {
+			case EC_NO_STACKFRAME:
+				fprintf(fd,"\truntime error: attempted to return from a global stack frame\n");
+				break;
+			case EC_ZERO_DIVISION:
+				fprintf(fd, "\truntime error: attempted to divide by zero\n");
+				break;
+			case EC_OUTDATED_LOCALPTR:
+				fprintf(fd, "\truntime error: attempted to use an outdated stack pointer\n");
+				fprintf(fd, "\tpointer %p references already deallocated stack frame\n", env->err_ptr);
+				break;
+			case EC_UNDEFINED_STACK_LOAD:
+				fprintf(fd, "\truntime error: attempted to read from an unused stack variable\n");
+				fprintf(fd, "\tstack variable with undefined value is at %p\n", env->err_ptr);
+				break;
+			case EC_ACCESS_FAILURE:
+				fprintf(fd,"\truntime error: memory access failure\n");
 				fprintf(fd,
-					"\tthe accessed field exceeds the buffer by %lld bytes\n", 
-					(int64_t)(env->err_ptr + env->err_access_length - ((int64_t)err_buf.data + err_buf.length))
+					"\tattempted to access %lld bytes from %p, which is not in bounds of the stack, the heap or any of the buffers\n",
+					env->err_access_length,
+					env->err_ptr
 				);
-			}
-			break;
+				break;
+			case EC_NEGATIVE_SIZE_ACCESS:
+				fprintf(fd,"\truntime error: negative sized memory access\n");
+				fprintf(fd,
+					"\tattempted to access %lld bytes at %p; accessing memory by negative size is not allowed\n",
+					env->err_access_length, 
+					env->err_ptr
+				);
+				break;
+			case EC_STACK_OVERFLOW:
+				fprintf(fd,"\truntime error: stack overflow\n");
+				fprintf(fd,"\tattempted to expand the stack by %hhd bytes, overflowing the stack\n", env->err_push_size);
+				break;
+			case EC_STACK_UNDERFLOW:
+				fprintf(fd,"\truntime error: stack underflow\n");
+				fprintf(fd,"\tattempted to decrease the stack by %hhd bytes, underflowing the stack\n", env->err_pop_size);
+				break;
+			case EC_UNKNOWN_SYSCALL:
+				fprintf(fd,"\truntime error: invalid system call\n");
+				break;
+			case EC_ACCESS_MISALIGNMENT:
+				fprintf(fd,"\truntime error: misaligned memory access\n");
+				sbuf err_buf = getBufferByRef(env, module, env->err_buf_ref);
+				static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
+				switch (env->err_buf_ref.type) {
+					case BUF_DATA:
+						fprintf(fd,
+							"\tdata block `%s` is at %p\n\tblock size: %ld bytes\n",
+							module->datablocks.data[env->err_buf_ref.id].name,
+							(void*)err_buf.data,
+							err_buf.length
+						);
+						break;
+					case BUF_MEMORY:
+						fprintf(fd,
+							"\tmemory block `%s` is at %p\n\tblock size: %ld bytes\n",
+							module->memblocks.data[env->err_buf_ref.id].name,
+							(void*)err_buf.data,
+							err_buf.length
+						);
+						break;
+					case BUF_VAR:
+						fprintf(fd,"\tstack head is at %p\n\tstack size: %ld bytes\n", err_buf.data, err_buf.length);
+						break;
+					case BUF_ARGV:
+						fprintf(fd,"\targument #%d is at %p\n\targument length: %ld bytes\n", env->err_buf_ref.id, err_buf.data, err_buf.length);
+						break;
+					default: break;
+				}
+				fprintf(fd,"\tattempted to access %lld bytes from %p\n", env->err_access_length, env->err_ptr);
+				if (env->err_ptr < (void*)err_buf.data) {
+					fprintf(fd,"\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(err_buf.data - (int64_t)env->err_ptr));
+				} else if ((void*)(env->err_ptr + env->err_access_length) > (void*)(err_buf.data + err_buf.length)) {
+					fprintf(fd,
+						"\tthe accessed field exceeds the buffer by %lld bytes\n", 
+						(int64_t)(env->err_ptr + env->err_access_length - ((int64_t)err_buf.data + err_buf.length))
+					);
+				}
+				break;
+		}
 	}
 }
 

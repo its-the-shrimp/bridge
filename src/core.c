@@ -171,7 +171,7 @@ char* setFileExt(char* path, char* ext)
 {
 	sbuf src = fromstr(path);
 	sbuf noext;
-	sbufsplit(&src, &noext, fromcstr("."));
+	sbufsplitr(&src, &noext, fromcstr("."));
 	return tostr(noext, fromstr(ext));
 }
 
@@ -197,16 +197,16 @@ char* fileBaseName(char* path)
 }
 
 sbuf fileBaseName_s(sbuf path)
+// ./test|.|brb
+// .|/|test
 {
 	sbuf res;
-	sbufsplit(&path, &res, fromcstr("."));
-	for (char* ptr = res.data + res.length - 1; ptr >= res.data; ptr--) {
-		if (*ptr == '/') {
-			res.data = ptr;
-			break;
-		}
+	sbuf delim = sbufsplitr(&path, &res, fromcstr("."), PATHSEP);
+	if (!sbufeq(delim, PATHSEP)) { 
+		sbufsplitr(&res, &path, PATHSEP);
+		return res;
 	}
-	return res;
+	return path;
 }
 
 bool fpipe(FILE** readable_end_ptr, FILE** writable_end_ptr)

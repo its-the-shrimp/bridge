@@ -46,6 +46,7 @@ char lowerchar(char src);
 sbuf _sbufsplitesc(sbuf* src, sbuf* dst, ...);
 int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[]);
 sbuf _sbufsplit(sbuf* src, sbuf* dst, ...);
+sbuf _sbufsplitr(sbuf* src, sbuf* dst, ...);
 int sbufsplitv(sbuf* src, sbuf* dst, sbuf delims[]);
 sbuf sbufunesc(sbuf src);
 sbuf_size_t sbufutf8len(sbuf obj);
@@ -79,6 +80,7 @@ void sfree(sbuf* obj);
 #define strcopy(ptr) (sbufconcat(fromstr(ptr), CSTRTERM).data)
 
 #define sbufsplit(src, dst, ...) _sbufsplit(src, dst, __VA_ARGS__, (sbuf){0})
+#define sbufsplitr(src, dst, ...) _sbufsplitr(src, dst, __VA_ARGS__, (sbuf){0})
 #define sbufsplitesc(src, dst, ...) _sbufsplitesc(src, dst, __VA_ARGS__, (sbuf){0})
 #define sbufcut(src, ...) _sbufcut(src, __VA_ARGS__, (sbuf){0})
 
@@ -173,6 +175,30 @@ sbuf _sbufsplit(sbuf* src, sbuf* dst, ...)
 		va_end(args);
 		sbufpshift(src, 1);
 		dst->length++;
+	}
+	return (sbuf){0};
+}
+
+sbuf _sbufsplitr(sbuf* src, sbuf* dst, ...)
+{
+	va_list args;
+	dst->length = 0;
+	dst->data = src->data + src->length;
+	while (src->length > 0) {
+		va_start(args, dst);
+		for (sbuf delim = va_arg(args, sbuf); delim.data != NULL; delim = va_arg(args, sbuf)) {
+			if (sbufendswith(*src, delim)) {
+				src->length -= delim.length;
+				va_end(args);
+				sbuf swp = *dst;
+				*dst = *src;
+				*src = swp;
+				return (sbuf){ .data = dst->data + dst->length, .length = delim.length };
+			}
+		}
+		va_end(args);
+		src->length--;
+		sbufpshift(dst, -1);
 	}
 	return (sbuf){0};
 }

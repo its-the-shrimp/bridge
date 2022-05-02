@@ -65,6 +65,8 @@ void compileNativeImmSet(FILE* dst, int8_t reg_id, uint64_t value)
 typedef struct comp_ctx {
 	FILE* dst;
 	int cur_frame_size;
+	char* src_path;
+	int src_line;
 } CompCtx;
 
 uint64_t getNativeStackOffset(CompCtx* ctx, uint64_t offset)
@@ -858,6 +860,18 @@ void compileOpPushvNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
+void compileOpAtfNative(Module* module, int index, CompCtx* ctx)
+{
+	ctx->src_path = module->execblock.data[index].mark_name;
+	ctx->src_line = 0;
+	fprintf(ctx->dst, "// %s:%d\n", ctx->src_path, ctx->src_line);
+}
+
+void compileOpAtlNative(Module* module, int index, CompCtx* ctx)
+{
+	ctx->src_line = module->execblock.data[index].symbol_id;
+	fprintf(ctx->dst, "// %s:%d\n", ctx->src_path, ctx->src_line);
+}
 
 OpNativeCompiler native_op_compilers[] = {
 	[OP_NONE] = &compileNopNative,
@@ -913,7 +927,9 @@ OpNativeCompiler native_op_compilers[] = {
 	[OP_LDV] = &compileOpLdvNative,
 	[OP_STRV] = &compileOpStrvNative,
 	[OP_POPV] = &compileOpPopvNative,
-	[OP_PUSHV] = &compileOpPushvNative
+	[OP_PUSHV] = &compileOpPushvNative,
+	[OP_ATF] = &compileOpAtfNative,
+	[OP_ATL] = &compileOpAtlNative
 };
 static_assert(
 	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),
@@ -926,7 +942,7 @@ void compileByteCode(Module* src, FILE* dst)
 // 		x27 - argv
 // 		x26 - errno
 {
-	CompCtx ctx = { .dst = dst, .cur_frame_size = 0 };
+	CompCtx ctx = {.dst = dst};
 
 	if (src->datablocks.length) {
 		fprintf(dst, ".data\n");
@@ -941,7 +957,6 @@ void compileByteCode(Module* src, FILE* dst)
 	array_foreach(MemBlock, block, src->memblocks, 
 		fprintf(dst, "\t%s: .zero %lld\n", block.name, block.size);
 	);
-	fprintf(dst, "\t.errno: .word\n");
 
 	fprintf(dst, ".text\n.align 4\n");
 	if (src->entry_opid >= 0) {
@@ -962,13 +977,23 @@ void compileByteCode(Module* src, FILE* dst)
 
 void printUsageMsg(FILE* fd, char* execname)
 {
-    fprintf(fd, "brbc - compile BRidge bytecode `.brb` files to native executable files.\n");
-    fprintf(fd, "usage: %s [options] <file>\n", execname);
-    fprintf(fd, "options:\n");
-    fprintf(fd, "\t-h        Output this message and exit\n");
-    fprintf(fd, "\t-a <file> Output native assembly code to file <file>. By default, compiled assembly code is not saved.\n");
-    fprintf(fd, "\t-o <file> Output native executable to file <file>. Default output path is the input path without `.brb` extension.\n");
-	fprintf(fd, "\t-O <file> Output native code object to file <file>. By default, compiled code object is not saved.\n");
+    fprintf(
+		fd,
+		"brbc - compile BRidge bytecode `.brb` files to native executable files.\n"
+		"usage: %s [options] <source path>\n"
+		"options:\n"
+		"\t-h                     Output this message and exit\n"
+		"\t--asm-output <path>    Output native assembly code to <path>;\n"
+		"\t\tif <path> is a directory, output will be at <path>/<source name>.S;\n"
+		"\t\tby default, native assembly is stored in a temporary file and deleted after compilation\n"
+		"\t--obj-output <path>    Output native code object to <path>;\n"
+		"\t\tif <path> is a directory, output will be at <path>/<source name>.o;\n"
+		"\t\tby default, native code objects are stored in a temporary file and deleted after compilation\n"
+		"\t-o <path>              Output native executable to <path>;\n"
+		"\t\tif <path> is a directory, output will be at <path>/<source name>;\n"
+		"\t\tthe default output path is <source dir>/<source name>\n",
+		execname
+	);
 }
 
 int main(int argc, char* argv[])
@@ -977,8 +1002,8 @@ int main(int argc, char* argv[])
 	startTimer();
 
     char *input_path = NULL, *exec_output_path = NULL, *asm_output_path = NULL, *obj_output_path = NULL;
-    bool go_on = false; 
 	for (int i = 1; i < argc; i++) {
+		bool go_on = false;
 		if (argv[i][0] == '-') {
 			for (argv[i]++; *argv[i]; argv[i]++) {
 				if (go_on) { go_on = false; break; }
@@ -992,28 +1017,33 @@ int main(int argc, char* argv[])
 						exec_output_path = argv[i];
 						go_on = true;
 						break;
-					case 'a':
-						if (!argv[++i]) {
-							eprintf("error: `-a` option specified but no assembly code file path provided\n");
-							return 1;
-						}
-						asm_output_path = argv[i];
-						go_on = true;
-						break;
-					case 'O':
-						if (!argv[++i]) {
-							eprintf("error: `-O` option specified but no object file path provided\n");
-							return 1;
-						}
-						obj_output_path = argv[i];
-						go_on = true;
-						break;
+                    case '-':
+                        argv[i]++;
+                        if (streq(argv[i], "asm-output")) {
+                            if (!argv[++i]) {
+                                eprintf("error: `--asm-output` option specified but no path is provided\n");
+                                return 1;
+                            }
+                            asm_output_path = argv[i];
+                            go_on = true;
+                        } else if (streq(argv[i], "obj-output")) {
+                            if (!argv[++i]) {
+                                eprintf("error: `--obj-output` option specified but no path is provided\n");
+                                return 1;
+                            }
+                            obj_output_path = argv[i];
+                            go_on = true;
+                        } else {
+                            eprintf("error: unknown option `--%s`\n", argv[i]);
+                            return 1;
+                        }
+                        break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
 			}
 		} else {
 			if (input_path) {
-				eprintf("error: got more than one input paths\n");
+				eprintf("error: got more than one input paths (`%s` and `%s`)\n", argv[i], input_path);
 			}
 			input_path = argv[i];
 		}
@@ -1024,19 +1054,38 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	sbuf input_path_sbuf = fromstr(input_path), basename = {0};
-	sbufsplit(&input_path_sbuf, &basename, fromcstr("."));
-	if (!exec_output_path) {
-		exec_output_path = tostr(basename);
+	sbuf input_path_sbuf = fromstr(input_path), basepath = {0};
+	sbufsplitr(&input_path_sbuf, &basepath, fromcstr("."));
+	sbuf basename = fileBaseName_s(basepath);
+
+	if (exec_output_path) {
+		if (isPathDir(exec_output_path)) {
+			exec_output_path = tostr(fromstr(exec_output_path), PATHSEP, basename);
+		}
+	} else {
+		exec_output_path = tostr(basepath);
 	}
-	if (!asm_output_path) {
+
+	if (asm_output_path) {
+		if (isPathDir(asm_output_path)) {
+			asm_output_path = tostr(fromstr(asm_output_path), PATHSEP, basename, ASM_EXT);
+		}
+	} else {
 		asm_output_path = mktemp(tostr(fromstr("/tmp/asmXXXXXX"))); // string is copied to dynamic memory
 	}
-	if (!obj_output_path) {
+
+	if (obj_output_path) {
+		if (isPathDir(obj_output_path)) {
+			obj_output_path = tostr(fromstr(obj_output_path), PATHSEP, basename, OBJ_EXT);
+		}
+	} else {
 		obj_output_path = mktemp(tostr(fromstr("/tmp/objXXXXXX")));
 	}
-	char* asm_visual_output_path = isTempPath(asm_output_path) ? tostr(fromcstr("~"), basename, ASM_EXT) : asm_output_path;
-	char* obj_visual_output_path = isTempPath(obj_output_path) ? tostr(fromcstr("~"), basename, OBJ_EXT) : obj_output_path;
+
+	char* asm_visual_output_path = isTempPath(asm_output_path) ? tostr(fromcstr("~"), basepath, ASM_EXT) : asm_output_path;
+	char* obj_visual_output_path = isTempPath(obj_output_path) ? tostr(fromcstr("~"), basepath, OBJ_EXT) : obj_output_path;
+
+
 
 	FILE* input_fd = fopen(input_path, "rb");
 	if (!input_fd) {
@@ -1074,7 +1123,7 @@ int main(int argc, char* argv[])
 	startTimer();
 
 	char cmd[1024];
-	ProcessInfo proc_res;
+	ProcessInfo proc_res = {0};
 	snprintf(cmd, sizeof(cmd), "as -arch arm64 -o %s %s", obj_output_path, asm_output_path);
 	if (!execProcess(cmd, &proc_res)) {
 		eprintf("error: could not start the assembler (reason: %s)\n", strerror(errno));

@@ -58,6 +58,8 @@ typedef enum {
 	OP_STRV, // uses Op::dst_reg, Op::symbol_id and Op::var_size
 	OP_POPV, // uses Op::dst_reg, Op::var_size
 	OP_PUSHV, // uses Op::src_reg and Op::var_size
+	OP_ATF, // uses Op::mark_name
+	OP_ATL, // uses Op::symbol_id
 	N_OPS
 } OpType;
 
@@ -115,7 +117,9 @@ typedef enum {
 	BRP_KEYWORD("ldv"), \
 	BRP_KEYWORD("strv"), \
 	BRP_KEYWORD("popv"), \
-	BRP_KEYWORD("pushv") \
+	BRP_KEYWORD("pushv"), \
+	BRP_KEYWORD("@f"), \
+	BRP_KEYWORD("@l") \
 
 static sbuf opNames[] = { _opNames };
 
@@ -439,7 +443,7 @@ typedef struct {
 	void* prev_stack_head;
 	sbufArray memblocks;
 	int8_t exitcode;
-	int64_t op_id;
+	int op_id;
 	uint64_t* registers;
 	union {
 		int8_t err_pop_size; // for OP_POP*
@@ -460,6 +464,8 @@ typedef struct {
 	int exec_argc;
 	sbuf* exec_argv;
 	int64_t call_count;
+	char* src_path;
+	int src_line;
 } ExecEnv;
 
 #define getCurStackSize(execenv_p, module_p) (int64_t)((execenv_p)->stack_brk + (module_p)->stack_size - (execenv_p)->stack_head)

@@ -100,6 +100,7 @@ bool setInput(BRP* obj, char* name);
 Token fetchToken(BRP* obj);
 Token peekToken(BRP* obj);
 
+char* getTokenSrcPath(BRP* obj, Token token);
 int fprintTokenLoc(FILE* fd, TokenLoc loc, BRP* obj);
 int fprintTokenStr(FILE* fd, Token token, BRP* obj);
 int fprintToken(FILE* fd, Token token, BRP* obj);
@@ -340,6 +341,11 @@ Token peekToken(BRP* obj)
 		}
 	}
 	return res;
+}
+
+char* getTokenSrcPath(BRP* obj, Token token)
+{
+	return obj->sources.data[token.loc.src_id].name;
 }
 
 int fprintTokenLoc(FILE* fd, TokenLoc loc, BRP* obj)

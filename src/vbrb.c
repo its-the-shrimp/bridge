@@ -65,6 +65,8 @@ typedef enum {
 	KW_STRV,
 	KW_POPV,
 	KW_PUSHV,
+	KW_ATF,
+	KW_ATL,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -92,7 +94,7 @@ typedef enum {
 	KW_LOAD,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 54, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 56, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 typedef struct {
@@ -773,6 +775,34 @@ VBRBError compileOpPushv(CompilerCtx* ctx, Module* dst)
 	return (VBRBError){ .prep = ctx->prep };
 }
 
+VBRBError compileOpAtf(CompilerCtx* ctx, Module* dst)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	Token src_path = fetchToken(ctx->prep);
+	if (src_path.type != TOKEN_STRING) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_INVALID_ARG,
+		.loc = src_path,
+		.op_type = op->type,
+		.arg_id = 0,
+		.expected_token_type = TOKEN_STRING
+	};
+	op->mark_name = src_path.word;
+
+	return (VBRBError){ .prep = ctx->prep };
+}
+
+VBRBError compileOpAtl(CompilerCtx* ctx, Module* dst)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	VBRBError err = getIntArg(ctx, fetchToken(ctx->prep), &op->symbol_id, op->type, 0);
+	if (err.code) return err;
+
+	return (VBRBError){ .prep = ctx->prep };
+}
+
 
 OpCompiler op_compilers[] = {
 	[OP_NONE] = &compileNoArgOp,
@@ -828,7 +858,9 @@ OpCompiler op_compilers[] = {
 	[OP_LDV] = &compileOpLdv,
 	[OP_STRV] = &compileOpStrv,
 	[OP_POPV] = &compileOpPopv,
-	[OP_PUSHV] = &compileOpPushv
+	[OP_PUSHV] = &compileOpPushv,
+	[OP_ATF] = &compileOpAtf,
+	[OP_ATL] = &compileOpAtl
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 
