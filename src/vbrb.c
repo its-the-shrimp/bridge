@@ -195,7 +195,7 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				fprintf(dst, "memory block `%s` not found\n", getTokenWord(err.prep, err.loc));
 				break;
 			case VBRB_ERR_INVALID_REG_ID:
-				fprintf(dst, "invalid register index %lld\n", err.loc.value);
+				fprintf(dst, "invalid register index %d\n", err.loc.word[1] - '0');
 				break;
 			case VBRB_ERR_UNKNOWN_CONST:
 				fprintf(dst, "unknown constant `%s`\n", getTokenWord(err.prep, err.loc));

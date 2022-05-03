@@ -1055,18 +1055,19 @@ void printExecState(FILE* fd, ExecEnv* env, Module* module)
 		void* cur_stack_pos = env->prev_stack_head;
 		static_assert(N_DS_TYPES == 8, "not all tracer types are handled");
 
+		fprintf(fd, "\t[sp + %ld] start\n", cur_stack_pos - env->stack_head);
 		array_foreach(DataSpec, spec, arrayhead(env->vars)->vars,
 			int64_t input = 0;
 			switch (spec.type) {
 				case DS_VOID:
 					cur_stack_pos -= spec.size;
 					break;
+				case DS_CONST:
 				case DS_INT64:
 				case DS_PTR:
 					input = *(int64_t*)(cur_stack_pos -= 8);
 					break;
 				case DS_INT32:
-				case DS_CONST:
 					input = (int64_t)*(int32_t*)(cur_stack_pos -= 4);
 					break;
 				case DS_INT16:
@@ -1895,10 +1896,10 @@ bool handleOpCall(ExecEnv* env, Module* module)
 		);
 	}
 
-	env->stack_head -= sizeof(env->op_id);
+	env->stack_head -= 8;
 	*(int64_t*)env->stack_head = env->op_id + 1;
 
-	env->stack_head -= sizeof(env->prev_stack_head);
+	env->stack_head -= 8;
 	*(void**)env->stack_head = env->prev_stack_head;
 	env->prev_stack_head = env->stack_head;
 
@@ -1930,7 +1931,7 @@ bool handleOpRet(ExecEnv* env, Module* module)
 	env->stack_head += sizeof(env->prev_stack_head);
 
 	env->op_id = *(int64_t*)env->stack_head;
-	env->stack_head += sizeof(env->op_id);
+	env->stack_head += 8;
 
 	if (env->flags & BRBX_TRACING) setCurrentSrc(env, module);
 
@@ -2427,10 +2428,7 @@ bool handleOpPushv(ExecEnv* env, Module* module)
 	if (env->flags & BRBX_TRACING) {
 		DataSpecArray_append(
 			&arrayhead(env->vars)->vars,
-			dataSpecSize(env->regs_trace[op.src_reg]) == op.var_size ? env->regs_trace[op.src_reg] : (DataSpec){
-				.type = DS_VOID,
-				.size = op.var_size
-			}
+			dataSpecSize(env->regs_trace[op.src_reg]) == op.var_size ? env->regs_trace[op.src_reg] : intSpecFromSize(op.var_size)
 		);
 
 		if (env->stack_head - op.var_size < env->stack_brk) {

@@ -70,7 +70,7 @@ sbuf _sbufcut(sbuf* src, ...);
 sbuf sbufwrite(sbuf dst, sbuf src, sbuf_size_t offset);
 
 sbuf smalloc(sbuf_size_t size);
-sbuf_size_t srealloc(sbuf* obj, sbuf_size_t size);
+bool srealloc(sbuf* obj, sbuf_size_t size);
 void sfree(sbuf* obj);
 
 #define streq(str1, str2) sbufeq(fromstr(str1), fromstr(str2))
@@ -582,16 +582,16 @@ sbuf smalloc(long length)
 	return (sbuf){ .data = temp, .length = temp ? length : 0 };
 }
 
-sbuf_size_t srealloc(sbuf* obj, sbuf_size_t new_length)
+bool srealloc(sbuf* obj, sbuf_size_t new_length)
 {
 	sbuf_size_t prevlen = obj->length;
 	void* new;
 	if ((new = realloc(obj->data, new_length))) {
 		obj->length = new_length;
 		obj->data = new;
-		return new_length - prevlen;
+		return true;
 	}
-	return 0;
+	return false;
 }
 
 void sfree(sbuf* obj)

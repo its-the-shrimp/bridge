@@ -197,14 +197,12 @@ char* fileBaseName(char* path)
 }
 
 sbuf fileBaseName_s(sbuf path)
-// ./test|.|brb
-// .|/|test
 {
 	sbuf res;
 	sbuf delim = sbufsplitr(&path, &res, fromcstr("."), PATHSEP);
 	if (!sbufeq(delim, PATHSEP)) { 
-		sbufsplitr(&res, &path, PATHSEP);
-		return res;
+		delim = sbufsplitr(&res, &path, PATHSEP);
+		return delim.data ? res : path;
 	}
 	return path;
 }
