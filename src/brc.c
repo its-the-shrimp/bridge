@@ -27,7 +27,8 @@ typedef enum {
     SYMBOL_BLOCK_END,
     SYMBOL_SEMICOLON,
     SYMBOL_ASSIGNMENT,
-    SYMBOL_REF,
+    SYMBOL_PTR,
+    SYMBOL_PLUS,
     N_SYMBOLS
 } BRSymbol;
 
@@ -73,12 +74,13 @@ typedef enum {
 typedef struct typedef_t {
     TypeKind kind;
     union {
-        int int_size;
+        int size;
         struct typedef_t* base;
     };
 } TypeDef;
 
-static TypeDef STR_LITERAL_TYPE;
+#define INT_TYPE(_size) ((TypeDef){ .kind = KIND_INT, .size = _size })
+static TypeDef TYPE_STR_LITERAL;
 
 typedef struct {
     TokenLoc loc;
@@ -106,21 +108,22 @@ typedef enum {
     EXPR_GET_ARG, // main, self-defined, evaluatable
     EXPR_SET_ARG, // main, composite, evaluatable
     EXPR_RETURN, // main, self-defined, non-evaluatable
+    EXPR_SUM, // main, composite, evaluatable
     N_EXPR_TYPES
 } ExprType;
 
 typedef struct expr {
     union {
         bool is_func_ref; // for EXPR_REF
-        intptr_t _; // padding
+        struct expr* arg1; // for EXPR_SUM
     };
     union {
-        void* subexprs;
-        struct expr* ref;
-        int64_t int_literal;
-        TypeDef* var_type;
-        char* name;
-        char* str_literal;
+        struct expr* ref; // for EXPR_REF
+        struct expr* arg2; // for EXPR_SUM
+        int64_t int_literal; // for EXPR_INT
+        TypeDef* var_type; // for EXPR_TYPE
+        char* name; // for EXPR_NAME
+        char* str_literal; // for EXPR_STRING
     };
     struct expr* block;
     char* src_path;
@@ -180,7 +183,7 @@ BRError parseType(BRP* obj, TypeDef* dst)
                     fetchToken(obj);
                     dst->kind = KIND_INT;
                     fetched = true;
-                    dst->int_size = 1 << (token.keyword_id - KW_INT8);
+                    dst->size = 1 << (token.keyword_id - KW_INT8);
                     break;
                 case KW_VOID:
                     if (dst->kind != KIND_NONE) return (BRError){
@@ -197,7 +200,7 @@ BRError parseType(BRP* obj, TypeDef* dst)
             }
         } else if (token.type == TOKEN_SYMBOL) {
             switch (token.symbol_id) {
-                case SYMBOL_REF:
+                case SYMBOL_PTR:
                     if (dst->kind == KIND_NONE) return (BRError){
                         .code = BR_ERR_INVALID_TYPE,
                         .loc = token
@@ -249,35 +252,53 @@ static int getSubexprsCount(Expr* expr)
 static bool setExprType(Expr* expr, ExprType new_type)
 // changes the type of the expression if the new type is suitable in place of the current expression type
 {
-    static_assert(N_EXPR_TYPES == 17, "not all expression types are handled in setExprType");
+    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in setExprType");
 // override_table contains information on which expression types can be replaced by which
     static bool override_table[N_EXPR_TYPES][N_EXPR_TYPES] = {
         [EXPR_INVALID  ] = {
             [EXPR_INVALID] = false,
             [EXPR_SYSCALL ... N_EXPR_TYPES - 1] = true 
         },
-        [EXPR_SYSCALL  ] = { [0 ... N_EXPR_TYPES - 1] = false },
+        [EXPR_SYSCALL  ] = { 
+            [0 ... N_EXPR_TYPES - 1] = false,
+            [EXPR_SUM] = true
+        },
         [EXPR_NAME     ] = { [0 ... N_EXPR_TYPES - 1] = false },
-        [EXPR_BUILTIN  ] = { [0 ... N_EXPR_TYPES - 1] = false },
+        [EXPR_BUILTIN  ] = {
+            [0 ... N_EXPR_TYPES - 1] = false,
+            [EXPR_SUM] = true
+        },
         [EXPR_STRING   ] = { [0 ... N_EXPR_TYPES - 1] = false },
-        [EXPR_INT      ] = { [0 ... N_EXPR_TYPES - 1] = false },
+        [EXPR_INT      ] = {
+            [0 ... N_EXPR_TYPES - 1] = false,
+            [EXPR_SUM] = true
+        },
         [EXPR_REF      ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_NEW_VAR  ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_SET_VAR  ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_GET_VAR  ] = {
             [0 ... N_EXPR_TYPES - 1] = false,
-            [EXPR_SET_VAR] = true
+            [EXPR_SET_VAR] = true,
+            [EXPR_SUM] = true
         },
         [EXPR_BLOCK    ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_TYPE     ] = { [0 ... N_EXPR_TYPES - 1] = false },
-        [EXPR_FUNC_CALL] = { [0 ... N_EXPR_TYPES - 1] = false },
+        [EXPR_FUNC_CALL] = {
+            [0 ... N_EXPR_TYPES - 1] = false,
+            [EXPR_SUM] = true
+        },
         [EXPR_NEW_ARG  ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_GET_ARG  ] = {
             [0 ... N_EXPR_TYPES - 1] = false,
-            [EXPR_SET_ARG] = true
+            [EXPR_SET_ARG] = true,
+            [EXPR_SUM] = true
         },
         [EXPR_SET_ARG  ] = { [0 ... N_EXPR_TYPES - 1] = false },
-        [EXPR_RETURN   ] = { [0 ... N_EXPR_TYPES - 1] = false }
+        [EXPR_RETURN   ] = { [0 ... N_EXPR_TYPES - 1] = false },
+        [EXPR_SUM      ] = {
+            [0 ... N_EXPR_TYPES - 1] = false,
+            [EXPR_SUM] = true
+        }
     };
 
     bool overridable = override_table[expr->type][new_type];
@@ -306,7 +327,7 @@ void fprintType(FILE* dst, TypeDef type)
 {
     static_assert(N_TYPE_KINDS == 5, "not all type kinds are handled in fprintType");
     if (type.kind == KIND_INT) {
-        switch (type.int_size) {
+        switch (type.size) {
             case 1: fputs("int8", dst); break;
             case 2: fputs("int16", dst); break;
             case 4: fputs("int32", dst); break;
@@ -330,7 +351,7 @@ int getTypeSize(TypeDef type)
 {
     static_assert(N_TYPE_KINDS == 5, "not all type kinds are handled in getTypeSize");
     switch (type.kind) {
-        case KIND_INT: return type.int_size;
+        case KIND_INT: return type.size;
         case KIND_PTR: 
         case KIND_BUILTIN_VAL:
             return 8;
@@ -348,7 +369,7 @@ bool typeMatches(TypeDef field, TypeDef entry)
     switch (field.kind) {
         case KIND_VOID: return entry.kind != KIND_PTR;
         case KIND_PTR: return entry.kind == KIND_PTR ? typeMatches(*field.base, *entry.base) : entry.kind == KIND_BUILTIN_VAL;
-        case KIND_INT: return (entry.kind == KIND_INT && entry.int_size == field.int_size) || entry.kind == KIND_BUILTIN_VAL;
+        case KIND_INT: return (entry.kind == KIND_INT && entry.size == field.size) || entry.kind == KIND_BUILTIN_VAL;
         case KIND_BUILTIN_VAL: return getTypeSize(entry) == 8;
         case KIND_NONE:
         default:
@@ -358,7 +379,7 @@ bool typeMatches(TypeDef field, TypeDef entry)
 }
 
 bool isExprEvaluatable(ExprType type) {
-    static_assert(N_EXPR_TYPES == 17, "not all expression types are handled in isExprEvaluatable");
+    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in isExprEvaluatable");
     static bool expr_evaluatability_info[N_EXPR_TYPES] = {
         [EXPR_INVALID  ] = false,
         [EXPR_SYSCALL  ] = true,
@@ -376,8 +397,8 @@ bool isExprEvaluatable(ExprType type) {
         [EXPR_NEW_ARG  ] = false,
         [EXPR_GET_ARG  ] = true,
         [EXPR_SET_ARG  ] = true,
-        [EXPR_RETURN   ] = false
-
+        [EXPR_RETURN   ] = false,
+        [EXPR_SUM      ] = true
     };
     assert(inRange(type, 0, N_EXPR_TYPES));
     return expr_evaluatability_info[type];
@@ -389,7 +410,7 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
     for (int i = 0; i < indent_level; i++) {
         fputc('\t', dst);
     }
-    static_assert(N_EXPR_TYPES == 17, "not all expression types are handled in fprintExpr");
+    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in fprintExpr");
 
     fprintf(dst, "[%s:%d] ", expr.src_path, expr.src_line);
     switch (expr.type) {
@@ -476,6 +497,11 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             fputs("RETURN:\n", dst);
             fprintExpr(dst, *expr.ref, indent_level + 1);
             break;
+        case EXPR_SUM:
+            fputs("SUM:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
         case EXPR_INVALID:
         case N_EXPR_TYPES:
         default:
@@ -515,7 +541,7 @@ TypeDef getVarType(Expr* block, char* name)
 
 TypeDef getExprValueType(Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 17, "not all expression types are handled in getExprValueType");
+    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in getExprValueType");
     switch (expr.type) {
         case EXPR_INVALID:
         case EXPR_NAME:
@@ -529,14 +555,28 @@ TypeDef getExprValueType(Expr expr)
         case EXPR_BUILTIN:
         case EXPR_SYSCALL:
             return (TypeDef){ .kind = KIND_BUILTIN_VAL };
-        case EXPR_STRING: return STR_LITERAL_TYPE;
-        case EXPR_INT: return (TypeDef){ .kind = KIND_INT, .int_size = 4 };
+        case EXPR_STRING: return TYPE_STR_LITERAL;
+        case EXPR_INT: return INT_TYPE(4);
         case EXPR_SET_VAR: return getVarType(expr.block, getSubexpr(&expr, 0)->name);
         case EXPR_GET_VAR: return getVarType(expr.block, expr.name);
         case EXPR_FUNC_CALL: return ((FuncDecl*)getSubexpr(&expr, 0)->ref)->return_type;
         case EXPR_GET_ARG: return *getSubexpr(expr.ref, 1)->var_type;
         case EXPR_SET_ARG: return *getSubexpr(getSubexpr(&expr, 0)->ref, 1)->var_type;
-        case N_EXPR_TYPES:
+        case EXPR_SUM: {
+            TypeDef arg1_type = getExprValueType(*expr.arg1);
+            TypeDef arg2_type = getExprValueType(*expr.arg2);
+
+            if (arg1_type.kind == KIND_PTR && arg2_type.kind == KIND_PTR) return INT_TYPE(8);
+            if (arg1_type.kind == KIND_PTR) {
+                if (arg2_type.kind == KIND_INT && arg2_type.kind == KIND_BUILTIN_VAL) return arg1_type;
+            } else if (arg2_type.kind == KIND_PTR) {
+                if (arg1_type.kind == KIND_INT && arg1_type.kind == KIND_BUILTIN_VAL) return arg2_type;
+            } else if (arg1_type.kind == KIND_BUILTIN_VAL || arg2_type.kind == KIND_BUILTIN_VAL) return INT_TYPE(8);
+
+            assert(arg1_type.kind == KIND_INT && arg2_type.kind == KIND_INT);
+            return arg1_type.size == arg2_type.size ? INT_TYPE(arg1_type.size * 2) : (arg1_type.size > arg2_type.size ? arg1_type : arg2_type);
+            break;
+        } case N_EXPR_TYPES:
         default:
             eprintf("internal compiler bug in getExprValueType: unknown expression type %d\n", expr.type);
             abort();
@@ -593,7 +633,7 @@ BRError parseFuncArgs(BRP* obj, Expr* dst, FuncDecl* func, AST* ast)
 
 BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, int flags)
 {
-    static_assert(N_EXPR_TYPES == 17, "not all expression types are handled in parseExpr");
+    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in parseExpr");
     TypeDef new_type;
     BRError expr_term_err = {0};
     Token token;
@@ -883,6 +923,21 @@ BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, in
                         fetchToken(obj);
                     }
                     break;
+                } case SYMBOL_PLUS: {
+                    Expr* arg1 = malloc(sizeof(Expr));
+                    *arg1 = *dst;
+                    if (!setExprType(dst, EXPR_SUM)) return (BRError){
+                        .code = BR_ERR_INVALID_EXPR,
+                        .loc = token
+                    };
+                    dst->src_path = getTokenSrcPath(obj, token);
+                    dst->src_line = token.loc.lineno;
+
+                    dst->arg1 = arg1;
+                    dst->arg2 = calloc(1, sizeof(Expr));
+                    BRError err = parseExpr(obj, dst->arg2, block, func, ast, flags | EXPR_EVALUATABLE);
+                    if (err.code) return err;
+                    break;
                 } default: return (BRError){
                     .code = BR_ERR_INVALID_EXPR,
                     .loc = token
@@ -1153,7 +1208,7 @@ void compileSrcRef(ASTCompilerCtx* ctx, char* path, int line)
 
 regstate_t getArgCacheState(Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 17, "not all expression types are handled in getArgCacheState");
+    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in getArgCacheState");
     regstate_t res = 0;
     switch (expr.type) {
         case EXPR_SYSCALL:
@@ -1164,7 +1219,11 @@ regstate_t getArgCacheState(Expr expr)
                 res |= getArgCacheState(subexpr);
             );
             break;
-        case EXPR_RETURN: res |= getArgCacheState(*expr.ref);
+        case EXPR_RETURN: res |= getArgCacheState(*expr.ref); break;
+        case EXPR_SUM:
+            res |= getArgCacheState(*expr.arg1);
+            res |= getArgCacheState(*expr.arg2);
+            break;
         default: break;
     }
     return res;
@@ -1315,6 +1374,31 @@ bool compileExprReturn(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
     return true;
 }
 
+bool compileExprSum(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+// TODO: handle the case when there are no free registers for the second argument
+{
+    if (expr.arg1->type == EXPR_INT) {
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tadd r%d r%d %lld\n", dst_reg, dst_reg, expr.arg1->int_literal);
+    } else if (expr.arg2->type == EXPR_INT) {
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tadd r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
+    } else {
+        int arg2_dst_reg = -1;
+        for (int i = 0; i < 8; i++) {
+            if (reg_state & (1 << i) && i != dst_reg) {
+                arg2_dst_reg = i;
+                break;
+            }
+        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\taddr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+    }
+
+    return true;
+}
+
 
 ExprCompiler expr_compilers[] = {
     [EXPR_INVALID  ] = &compileExprInvalid,
@@ -1333,9 +1417,10 @@ ExprCompiler expr_compilers[] = {
     [EXPR_FUNC_CALL] = &compileExprFuncCall,
     [EXPR_GET_ARG  ] = &compileExprGetArg,
     [EXPR_SET_ARG  ] = &compileExprSetArg,
-    [EXPR_RETURN   ] = &compileExprReturn
+    [EXPR_RETURN   ] = &compileExprReturn,
+    [EXPR_SUM      ] = &compileExprSum
 };
-static_assert(N_EXPR_TYPES == 17, "not all expression types have corresponding compilers defined");
+static_assert(N_EXPR_TYPES == 18, "not all expression types have corresponding compilers defined");
 
 bool compileAST(AST* src, FILE* dst)
 {
@@ -1399,9 +1484,9 @@ int main(int argc, char* argv[])
 {
     initBREnv();
     startTimer();
-    STR_LITERAL_TYPE.kind = KIND_PTR;
-    TypeDef str_lit_base = (TypeDef){ .kind = KIND_INT, .int_size = 1 };
-    STR_LITERAL_TYPE.base = &str_lit_base;
+    TYPE_STR_LITERAL.kind = KIND_PTR;
+    TypeDef str_lit_base = (TypeDef){ .kind = KIND_INT, .size = 1 };
+    TYPE_STR_LITERAL.base = &str_lit_base;
 
     bool print_ast = false;
     char *input_path = NULL, *brb_output_path = NULL, *vbrb_output_path = NULL;
@@ -1483,7 +1568,7 @@ int main(int argc, char* argv[])
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
         return 1;
     }
-    static_assert(N_SYMBOLS == 8, "not all symbols are handled");
+    static_assert(N_SYMBOLS == 9, "not all symbols are handled");
     setSymbols(
         &prep,
         BRP_SYMBOL("("),
@@ -1494,6 +1579,7 @@ int main(int argc, char* argv[])
         BRP_SYMBOL(";"),
         BRP_SYMBOL("="),
         BRP_SYMBOL("*"),
+        BRP_SYMBOL("+"),
         BRP_HIDDEN_SYMBOL(" "),
         BRP_HIDDEN_SYMBOL("\t")
     );
@@ -1636,7 +1722,7 @@ int main(int argc, char* argv[])
             case BR_ERR_ARG_TYPE_MISMATCH:
                 eprintf("argument `%s` of function `%s` expects a value of type `", getSubexpr(err.arg_decl, 0)->name, err.func->name);
                 fprintType(stderr, *getSubexpr(err.arg_decl, 1)->var_type);
-                eputs("` instead got value of type `");
+                eputs("`, instead got value of type `");
                 fprintType(stderr, err.entry_type);
                 eprintf("`\n[ %s:%d ] note: function `%s` is declared here\n", err.func->src_path, err.func->src_line, err.func->name);
                 return 1;

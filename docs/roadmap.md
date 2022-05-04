@@ -1,0 +1,14 @@
+- ~Syscalls~
+- ~Functions~
+- ~Base type system~
+- Basic arithmetic
+- Bitwise operations
+- Basic type casting
+- `bool` type and logical operations
+- Bracketed exressions
+- BRB: array variables
+- Array variables
+- BRP: includes
+- BRP: macros
+- BRB: encapsulation
+- `public` functions and globals
