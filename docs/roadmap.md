@@ -1,9 +1,9 @@
 - ~Syscalls~
 - ~Functions~
 - ~Base type system~
-- Basic arithmetic
+- ~Basic arithmetic~
 - Bitwise operations
-- Basic type casting
+- Type casting
 - `bool` type and logical operations
 - Bracketed exressions
 - BRB: array variables

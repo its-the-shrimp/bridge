@@ -27,8 +27,10 @@ typedef enum {
     SYMBOL_BLOCK_END,
     SYMBOL_SEMICOLON,
     SYMBOL_ASSIGNMENT,
-    SYMBOL_PTR,
     SYMBOL_PLUS,
+    SYMBOL_MINUS,
+    SYMBOL_STAR,
+    SYMBOL_DIV,
     N_SYMBOLS
 } BRSymbol;
 
@@ -82,14 +84,6 @@ typedef struct typedef_t {
 #define INT_TYPE(_size) ((TypeDef){ .kind = KIND_INT, .size = _size })
 static TypeDef TYPE_STR_LITERAL;
 
-typedef struct {
-    TokenLoc loc;
-    char* name;
-    TypeDef type;
-} VarDecl;
-declArray(VarDecl);
-defArray(VarDecl);
-
 typedef enum {
     EXPR_INVALID,
     EXPR_SYSCALL, // main, composite, evaluatable
@@ -108,18 +102,21 @@ typedef enum {
     EXPR_GET_ARG, // main, self-defined, evaluatable
     EXPR_SET_ARG, // main, composite, evaluatable
     EXPR_RETURN, // main, self-defined, non-evaluatable
-    EXPR_SUM, // main, composite, evaluatable
+    EXPR_ADD, // main, self-defined, evaluatable
+    EXPR_SUB, // main, self-defined, evaluatable
+    EXPR_MUL, // main, self-defined, evaluatable
+    EXPR_DIV, // main, self-defined, evaluatable
     N_EXPR_TYPES
 } ExprType;
 
 typedef struct expr {
     union {
         bool is_func_ref; // for EXPR_REF
-        struct expr* arg1; // for EXPR_SUM
+        struct expr* arg1; // for EXPR_ADD
     };
     union {
         struct expr* ref; // for EXPR_REF
-        struct expr* arg2; // for EXPR_SUM
+        struct expr* arg2; // for EXPR_ADD
         int64_t int_literal; // for EXPR_INT
         TypeDef* var_type; // for EXPR_TYPE
         char* name; // for EXPR_NAME
@@ -200,11 +197,8 @@ BRError parseType(BRP* obj, TypeDef* dst)
             }
         } else if (token.type == TOKEN_SYMBOL) {
             switch (token.symbol_id) {
-                case SYMBOL_PTR:
-                    if (dst->kind == KIND_NONE) return (BRError){
-                        .code = BR_ERR_INVALID_TYPE,
-                        .loc = token
-                    };
+                case SYMBOL_STAR:
+                    if (dst->kind == KIND_NONE) return (BRError){ .code = fetched ? 0 : -1 };
 
                     fetchToken(obj);
                     TypeDef* new_base = malloc(sizeof(TypeDef));
@@ -252,7 +246,7 @@ static int getSubexprsCount(Expr* expr)
 static bool setExprType(Expr* expr, ExprType new_type)
 // changes the type of the expression if the new type is suitable in place of the current expression type
 {
-    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in setExprType");
+    static_assert(N_EXPR_TYPES == 21, "not all expression types are handled in setExprType");
 // override_table contains information on which expression types can be replaced by which
     static bool override_table[N_EXPR_TYPES][N_EXPR_TYPES] = {
         [EXPR_INVALID  ] = {
@@ -261,17 +255,26 @@ static bool setExprType(Expr* expr, ExprType new_type)
         },
         [EXPR_SYSCALL  ] = { 
             [0 ... N_EXPR_TYPES - 1] = false,
-            [EXPR_SUM] = true
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
         },
         [EXPR_NAME     ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_BUILTIN  ] = {
             [0 ... N_EXPR_TYPES - 1] = false,
-            [EXPR_SUM] = true
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
         },
         [EXPR_STRING   ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_INT      ] = {
             [0 ... N_EXPR_TYPES - 1] = false,
-            [EXPR_SUM] = true
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
         },
         [EXPR_REF      ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_NEW_VAR  ] = { [0 ... N_EXPR_TYPES - 1] = false },
@@ -279,25 +282,58 @@ static bool setExprType(Expr* expr, ExprType new_type)
         [EXPR_GET_VAR  ] = {
             [0 ... N_EXPR_TYPES - 1] = false,
             [EXPR_SET_VAR] = true,
-            [EXPR_SUM] = true
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
         },
         [EXPR_BLOCK    ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_TYPE     ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_FUNC_CALL] = {
             [0 ... N_EXPR_TYPES - 1] = false,
-            [EXPR_SUM] = true
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
         },
         [EXPR_NEW_ARG  ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_GET_ARG  ] = {
             [0 ... N_EXPR_TYPES - 1] = false,
             [EXPR_SET_ARG] = true,
-            [EXPR_SUM] = true
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
         },
         [EXPR_SET_ARG  ] = { [0 ... N_EXPR_TYPES - 1] = false },
         [EXPR_RETURN   ] = { [0 ... N_EXPR_TYPES - 1] = false },
-        [EXPR_SUM      ] = {
+        [EXPR_ADD      ] = {
             [0 ... N_EXPR_TYPES - 1] = false,
-            [EXPR_SUM] = true
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
+        },
+        [EXPR_SUB      ] = {
+            [0 ... N_EXPR_TYPES - 1] = false,
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
+        },
+        [EXPR_MUL      ] = {
+            [0 ... N_EXPR_TYPES - 1] = false,
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
+        },
+        [EXPR_DIV      ] = {
+            [0 ... N_EXPR_TYPES - 1] = false,
+            [EXPR_ADD] = true,
+            [EXPR_SUB] = true,
+            [EXPR_MUL] = true,
+            [EXPR_DIV] = true
         }
     };
 
@@ -379,7 +415,7 @@ bool typeMatches(TypeDef field, TypeDef entry)
 }
 
 bool isExprEvaluatable(ExprType type) {
-    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in isExprEvaluatable");
+    static_assert(N_EXPR_TYPES == 21, "not all expression types are handled in isExprEvaluatable");
     static bool expr_evaluatability_info[N_EXPR_TYPES] = {
         [EXPR_INVALID  ] = false,
         [EXPR_SYSCALL  ] = true,
@@ -398,7 +434,10 @@ bool isExprEvaluatable(ExprType type) {
         [EXPR_GET_ARG  ] = true,
         [EXPR_SET_ARG  ] = true,
         [EXPR_RETURN   ] = false,
-        [EXPR_SUM      ] = true
+        [EXPR_ADD      ] = true,
+        [EXPR_SUB      ] = true,
+        [EXPR_MUL      ] = true,
+        [EXPR_DIV      ] = true
     };
     assert(inRange(type, 0, N_EXPR_TYPES));
     return expr_evaluatability_info[type];
@@ -410,7 +449,7 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
     for (int i = 0; i < indent_level; i++) {
         fputc('\t', dst);
     }
-    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in fprintExpr");
+    static_assert(N_EXPR_TYPES == 21, "not all expression types are handled in fprintExpr");
 
     fprintf(dst, "[%s:%d] ", expr.src_path, expr.src_line);
     switch (expr.type) {
@@ -497,8 +536,23 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             fputs("RETURN:\n", dst);
             fprintExpr(dst, *expr.ref, indent_level + 1);
             break;
-        case EXPR_SUM:
-            fputs("SUM:\n", dst);
+        case EXPR_ADD:
+            fputs("ADD:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
+        case EXPR_SUB:
+            fputs("SUBTRACT:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
+        case EXPR_MUL:
+            fputs("MULTIPLY:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
+        case EXPR_DIV:
+            fputs("DIVIDE:\n", dst);
             fprintExpr(dst, *expr.arg1, indent_level + 1);
             fprintExpr(dst, *expr.arg2, indent_level + 1);
             break;
@@ -541,7 +595,8 @@ TypeDef getVarType(Expr* block, char* name)
 
 TypeDef getExprValueType(Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in getExprValueType");
+    static_assert(N_EXPR_TYPES == 21, "not all expression types are handled in getExprValueType");
+    static_assert(N_TYPE_KINDS == 5, "not all type kinds are handled in getExprValueType");
     switch (expr.type) {
         case EXPR_INVALID:
         case EXPR_NAME:
@@ -562,7 +617,8 @@ TypeDef getExprValueType(Expr expr)
         case EXPR_FUNC_CALL: return ((FuncDecl*)getSubexpr(&expr, 0)->ref)->return_type;
         case EXPR_GET_ARG: return *getSubexpr(expr.ref, 1)->var_type;
         case EXPR_SET_ARG: return *getSubexpr(getSubexpr(&expr, 0)->ref, 1)->var_type;
-        case EXPR_SUM: {
+        case EXPR_SUB:
+        case EXPR_ADD: {
             TypeDef arg1_type = getExprValueType(*expr.arg1);
             TypeDef arg2_type = getExprValueType(*expr.arg2);
 
@@ -576,6 +632,12 @@ TypeDef getExprValueType(Expr expr)
             assert(arg1_type.kind == KIND_INT && arg2_type.kind == KIND_INT);
             return arg1_type.size == arg2_type.size ? INT_TYPE(arg1_type.size * 2) : (arg1_type.size > arg2_type.size ? arg1_type : arg2_type);
             break;
+        } case EXPR_MUL:
+        case EXPR_DIV: {
+            int arg1_size = getTypeSize(getExprValueType(*expr.arg1));
+            int arg2_size = getTypeSize(getExprValueType(*expr.arg2));
+
+            return arg1_size == arg2_size ? INT_TYPE(arg1_size * 2) : INT_TYPE(maxInt(arg1_size, arg2_size));
         } case N_EXPR_TYPES:
         default:
             eprintf("internal compiler bug in getExprValueType: unknown expression type %d\n", expr.type);
@@ -633,7 +695,7 @@ BRError parseFuncArgs(BRP* obj, Expr* dst, FuncDecl* func, AST* ast)
 
 BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, int flags)
 {
-    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in parseExpr");
+    static_assert(N_EXPR_TYPES == 21, "not all expression types are handled in parseExpr");
     TypeDef new_type;
     BRError expr_term_err = {0};
     Token token;
@@ -923,10 +985,13 @@ BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, in
                         fetchToken(obj);
                     }
                     break;
-                } case SYMBOL_PLUS: {
+                } case SYMBOL_MINUS:
+                case SYMBOL_PLUS:
+                case SYMBOL_STAR:
+                case SYMBOL_DIV: {
                     Expr* arg1 = malloc(sizeof(Expr));
                     *arg1 = *dst;
-                    if (!setExprType(dst, EXPR_SUM)) return (BRError){
+                    if (!setExprType(dst, EXPR_ADD + (token.symbol_id - SYMBOL_PLUS))) return (BRError){
                         .code = BR_ERR_INVALID_EXPR,
                         .loc = token
                     };
@@ -1208,7 +1273,7 @@ void compileSrcRef(ASTCompilerCtx* ctx, char* path, int line)
 
 regstate_t getArgCacheState(Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 18, "not all expression types are handled in getArgCacheState");
+    static_assert(N_EXPR_TYPES == 21, "not all expression types are handled in getArgCacheState");
     regstate_t res = 0;
     switch (expr.type) {
         case EXPR_SYSCALL:
@@ -1220,7 +1285,10 @@ regstate_t getArgCacheState(Expr expr)
             );
             break;
         case EXPR_RETURN: res |= getArgCacheState(*expr.ref); break;
-        case EXPR_SUM:
+        case EXPR_ADD:
+        case EXPR_SUB:
+        case EXPR_MUL:
+        case EXPR_DIV:
             res |= getArgCacheState(*expr.arg1);
             res |= getArgCacheState(*expr.arg2);
             break;
@@ -1342,6 +1410,8 @@ bool compileExprFuncCall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, i
 
 bool compileExprGetArg(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
+    compileSrcRef(ctx, expr.src_path, expr.src_line);
+
     int arg_id = getVarIndex(*expr.ref);
     if (ctx->arg_cache_state & (1 << arg_id)) {
         fprintf(ctx->dst, "\tldv r%d %s\n", dst_reg, getSubexpr(expr.ref, 0)->name);
@@ -1369,14 +1439,17 @@ bool compileExprSetArg(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 
 bool compileExprReturn(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
+    compileSrcRef(ctx, expr.src_path, expr.src_line);
+
     if (!expr_compilers[expr.ref->type](ctx, *expr.ref, reg_state, 0)) return false;
     fprintf(ctx->dst, "\tret\n");
     return true;
 }
 
-bool compileExprSum(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
-// TODO: handle the case when there are no free registers for the second argument
+bool compileExprAdd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
+    compileSrcRef(ctx, expr.src_path, expr.src_line);
+
     if (expr.arg1->type == EXPR_INT) {
         if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tadd r%d r%d %lld\n", dst_reg, dst_reg, expr.arg1->int_literal);
@@ -1391,13 +1464,139 @@ bool compileExprSum(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
                 break;
             }
         }
-        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-        fprintf(ctx->dst, "\taddr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        if (arg2_dst_reg >= 0) {
+            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+            fprintf(ctx->dst, "\taddr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+        } else {
+            arg2_dst_reg = (dst_reg + 1) % 8;
+            reg_state &= ~(1 << arg2_dst_reg);
+            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
+            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+            fprintf(ctx->dst, "\taddr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
+        }
     }
 
     return true;
 }
+
+bool compileExprSub(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+{
+    compileSrcRef(ctx, expr.src_path, expr.src_line);
+
+    if (expr.arg1->type == EXPR_INT) {
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg)) return false;
+        fprintf(
+            ctx->dst,
+            "\tnot r%d r%d\n"
+            "\tadd r%d r%d %lld\n",
+            dst_reg, dst_reg,
+            dst_reg, dst_reg, expr.arg1->int_literal + 1
+        );
+    } else if (expr.arg2->type == EXPR_INT) {
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tsub r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
+    } else {
+        int arg2_dst_reg = -1;
+        for (int i = 0; i < 8; i++) {
+            if (reg_state & (1 << i) && i != dst_reg) {
+                arg2_dst_reg = i;
+                break;
+            }
+        }
+
+        if (arg2_dst_reg >= 0) {
+            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+            fprintf(ctx->dst, "\tsubr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+        } else {
+            arg2_dst_reg = (dst_reg + 1) % 8;
+            reg_state &= ~(1 << arg2_dst_reg);
+            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
+            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+            fprintf(ctx->dst, "\tsubr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
+        }
+    }
+
+    return true;
+}
+
+bool compileExprMul(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+{
+    compileSrcRef(ctx, expr.src_path, expr.src_line);
+
+    if (expr.arg1->type == EXPR_INT) {
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tmul r%d r%d %lld\n", dst_reg, dst_reg, expr.arg1->int_literal);
+    } else if (expr.arg2->type == EXPR_INT) {
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tmul r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
+    } else {
+        int arg2_dst_reg = -1;
+        for (int i = 0; i < 8; i++) {
+            if (reg_state & (1 << i) && i != dst_reg) {
+                arg2_dst_reg = i;
+                break;
+            }
+        }
+
+        if (arg2_dst_reg >= 0) {
+            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+            fprintf(ctx->dst, "\tmulr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+        } else {
+            arg2_dst_reg = (dst_reg + 1) % 8;
+            reg_state &= ~(1 << arg2_dst_reg);
+            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
+            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+            fprintf(ctx->dst, "\tmulr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
+        }
+    }
+
+    return true;
+}
+
+bool compileExprDiv(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+{
+    compileSrcRef(ctx, expr.src_path, expr.src_line);
+
+    if (expr.arg2->type == EXPR_INT) {
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tdivs r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
+    } else {
+        int arg2_dst_reg = -1;
+        for (int i = 0; i < 8; i++) {
+            if (reg_state & (1 << i) && i != dst_reg) {
+                arg2_dst_reg = i;
+                break;
+            }
+        }
+
+        if (arg2_dst_reg >= 0) {
+            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+            fprintf(ctx->dst, "\tdivsr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+        } else {
+            arg2_dst_reg = (dst_reg + 1) % 8;
+            reg_state &= ~(1 << arg2_dst_reg);
+            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
+            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+            fprintf(ctx->dst, "\tdivsr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
+        }
+    }
+
+    return true;
+}
+
 
 
 ExprCompiler expr_compilers[] = {
@@ -1418,9 +1617,12 @@ ExprCompiler expr_compilers[] = {
     [EXPR_GET_ARG  ] = &compileExprGetArg,
     [EXPR_SET_ARG  ] = &compileExprSetArg,
     [EXPR_RETURN   ] = &compileExprReturn,
-    [EXPR_SUM      ] = &compileExprSum
+    [EXPR_ADD      ] = &compileExprAdd,
+    [EXPR_SUB      ] = &compileExprSub,
+    [EXPR_MUL      ] = &compileExprMul,
+    [EXPR_DIV      ] = &compileExprDiv
 };
-static_assert(N_EXPR_TYPES == 18, "not all expression types have corresponding compilers defined");
+static_assert(N_EXPR_TYPES == 21, "not all expression types have corresponding compilers defined");
 
 bool compileAST(AST* src, FILE* dst)
 {
@@ -1568,7 +1770,7 @@ int main(int argc, char* argv[])
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
         return 1;
     }
-    static_assert(N_SYMBOLS == 9, "not all symbols are handled");
+    static_assert(N_SYMBOLS == 11, "not all symbols are handled");
     setSymbols(
         &prep,
         BRP_SYMBOL("("),
@@ -1578,8 +1780,10 @@ int main(int argc, char* argv[])
         BRP_SYMBOL("}"),
         BRP_SYMBOL(";"),
         BRP_SYMBOL("="),
-        BRP_SYMBOL("*"),
         BRP_SYMBOL("+"),
+        BRP_SYMBOL("-"),
+        BRP_SYMBOL("*"),
+        BRP_SYMBOL("/"),
         BRP_HIDDEN_SYMBOL(" "),
         BRP_HIDDEN_SYMBOL("\t")
     );
