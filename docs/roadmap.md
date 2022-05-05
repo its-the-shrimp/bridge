@@ -5,6 +5,8 @@
 - Bitwise operations
 - Type casting
 - `bool` type and logical operations
+- Conditions
+- Loops
 - Bracketed exressions
 - BRB: array variables
 - Array variables

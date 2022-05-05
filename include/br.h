@@ -83,5 +83,10 @@ bool fpipe(FILE** readable_end_ptr, FILE** writable_end_ptr);
 #define minInt(a, b) ( a < b ? a : b )
 #define absInt(x) (x<0?-x:x)
 #define absNegInt(x) (x<0?x:-x)
+#define swap(v1, v2, tmp_t) { \
+	tmp_t __tmp = v1; \
+	v1 = v2; \
+	v2 = __tmp; \
+}
 
 #endif // _BRIDGE_

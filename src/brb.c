@@ -1204,7 +1204,7 @@ void setCurrentSrc(ExecEnv* env, Module* module)
 		if (op.type == OP_ATF) {
 			env->src_path = op.mark_name;
 			return;
-		} else if (op.type == OP_ATL) env->src_line = op.symbol_id;
+		} else if (op.type == OP_ATL && !env->src_line) env->src_line = op.symbol_id;
 	}
 }
 
