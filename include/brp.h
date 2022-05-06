@@ -279,7 +279,14 @@ Token fetchToken(BRP* obj)
 	} else {
 		res.type = TOKEN_WORD;
 		sbuf new;
-		int delim_id = sbufsplitv(&obj->buffer, &new, obj->symbols);
+		int delim_id;
+		if (obj->buffer.data[0] == '-' && (obj->buffer.length > 1 ? (obj->buffer.data[1] >= '0' && obj->buffer.data[1] <= '9') : false)) {
+			sbufshift(obj->buffer, 1);
+			delim_id = sbufsplitv(&obj->buffer, &new, obj->symbols);
+			sbufshift(new, -1);
+		} else {
+			delim_id = sbufsplitv(&obj->buffer, &new, obj->symbols);
+		}
 
 		if (new.length) {
 			for (int i = 0; obj->keywords[i].data; i++) {

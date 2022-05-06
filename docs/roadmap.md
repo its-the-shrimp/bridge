@@ -2,7 +2,7 @@
 - ~Functions~
 - ~Base type system~
 - ~Basic arithmetic~
-- Bitwise operations
+- ~Bitwise operations~
 - Type casting
 - `bool` type and logical operations
 - Conditions
