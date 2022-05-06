@@ -246,7 +246,7 @@ typedef struct {
 	uint8_t var_size;
 	uint8_t cond_id;
 	union {
-		int64_t value;
+		uint64_t value;
 		int64_t symbol_id;
 		int64_t op_offset;
 		char* mark_name;

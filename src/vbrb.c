@@ -283,7 +283,7 @@ VBRBError getRegIdArg(CompilerCtx* ctx, Token src, int8_t* dst, char op_type, ch
 	return (VBRBError){ .prep = ctx->prep };
 }
 
-VBRBError getIntArg(CompilerCtx* ctx, Token src, int64_t* dst, char op_type, char arg_id)
+VBRBError getIntArg(CompilerCtx* ctx, Token src, uint64_t* dst, char op_type, char arg_id)
 {
 	if (src.type != TOKEN_INT) return (VBRBError){
         .prep = ctx->prep,
@@ -797,7 +797,7 @@ VBRBError compileOpAtl(CompilerCtx* ctx, Module* dst)
 {
 	Op* op = arrayhead(dst->execblock);
 
-	VBRBError err = getIntArg(ctx, fetchToken(ctx->prep), &op->symbol_id, op->type, 0);
+	VBRBError err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&op->symbol_id, op->type, 0);
 	if (err.code) return err;
 
 	return (VBRBError){ .prep = ctx->prep };

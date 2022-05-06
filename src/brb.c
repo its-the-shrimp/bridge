@@ -27,18 +27,18 @@ typedef struct {
 	fieldArray unresolved;
 } ModuleLoader;
 
-void writeInt(FILE* fd, int64_t x)
+void writeInt(FILE* fd, uint64_t x)
 {
 	if (x) {
-		if (inRange(x, INT8_MIN, INT8_MAX)) {
+		if (x <= UINT8_MAX) {
 			fputc(1, fd);
 			int8_t x8 = (int8_t)x;
 			fputc(x8, fd);
-		} else if (inRange(x, INT16_MIN, INT16_MAX)) {
+		} else if (x <= UINT16_MAX) {
 			fputc(2, fd);
 			int16_t x16 = (int16_t)x;
 			fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
-		} else if (inRange(x, INT32_MIN, INT32_MAX)) {
+		} else if (x <= UINT32_MAX) {
 			fputc(4, fd);
 			int32_t x32 = (int32_t)x;
 			fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
@@ -305,38 +305,38 @@ void writeModule(Module* src, FILE* dst)
 	strArray_clear(&writer.consts);
 }
 
-int8_t loadInt8(FILE* fd, long* n_fetched)
+uint8_t loadInt8(FILE* fd, long* n_fetched)
 {
 	if (feof(fd) || ferror(fd)) { *n_fetched = 0; return 0; }
 	*n_fetched = 1;
 	return fgetc(fd);
 }
 
-int16_t loadInt16(FILE* fd, long* n_fetched)
+uint16_t loadInt16(FILE* fd, long* n_fetched)
 {
 	char res[2];
-	if (fread(&res, 2, 1, fd) != 2) { *n_fetched = 0; return 0; };
+	if (fread(&res, 1, 2, fd) != 2) { *n_fetched = 0; return 0; };
 	*n_fetched = 2;
-	return *(int16_t*)BRByteOrder(&res, 2); 
+	return *(uint16_t*)BRByteOrder(&res, 2); 
 }
 
-int32_t loadInt32(FILE* fd, long* n_fetched)
+uint32_t loadInt32(FILE* fd, long* n_fetched)
 {
 	char res[4];
-	if (fread(&res, 4, 1, fd) != 4) { *n_fetched = 0; return 0; };
+	if (fread(&res, 1, 4, fd) != 4) { *n_fetched = 0; return 0; };
 	*n_fetched = 4;
-	return *(int32_t*)BRByteOrder(&res, 4);
+	return *(uint32_t*)BRByteOrder(&res, 4);
 }
 
-int64_t loadInt64(FILE* fd, long* n_fetched)
+uint64_t loadInt64(FILE* fd, long* n_fetched)
 {
 	char res[8];
-	if (fread(&res, 8, 1, fd) != 8) { *n_fetched = 0; return 0; }
+	if (fread(&res, 1, 8, fd) != 8) { *n_fetched = 0; return 0; }
 	*n_fetched = 8;
-	return *(int64_t*)BRByteOrder(&res, 8);
+	return *(uint64_t*)BRByteOrder(&res, 8);
 }
 
-int64_t loadInt(FILE* fd, long* n_fetched)
+uint64_t loadInt(FILE* fd, long* n_fetched)
 {
 	if (feof(fd) || ferror(fd)) { *n_fetched = 0; return 0; }
 	int8_t size = fgetc(fd);
@@ -533,6 +533,7 @@ BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 	dst->dst_reg = loadInt8(loader->src, &status);
 	dst->src_reg = loadInt8(loader->src, &status);
 	dst->value = loadInt(loader->src, &status);
+	printf("%llu\n", dst->value);
 
 	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
