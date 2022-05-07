@@ -81,6 +81,7 @@ typedef struct {
 	InputCtxArray sources;
 	TokenQueue pending;
 	sbuf buffer;
+	TokenLoc last_loc;
 } BRP;
 
 #define BRP_KEYWORD(spec) fromcstr(spec)
@@ -258,7 +259,7 @@ Token fetchToken(BRP* obj)
 	}
 
 	InputCtx* input = updateLineBuffer(obj);
-	if (!input) return (Token){0};
+	if (!input) return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
 	char* orig_ptr = obj->buffer.data;
 
 	if (sbufcut(&obj->buffer, DQUOTE).data) {
@@ -267,7 +268,7 @@ Token fetchToken(BRP* obj)
 		if (!sbufeq(delim, DQUOTE)) {
 			obj->error_code = BRP_ERR_UNCLOSED_STR;
 			obj->error_loc = input->cur_loc;
-			return (Token){0};
+			return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
 		}
 
 		res.type = TOKEN_STRING;
@@ -275,6 +276,7 @@ Token fetchToken(BRP* obj)
 		res.word = tostr(new);
 
 		input->cur_loc.colno += sbufutf8len(new) + 2;
+		obj->last_loc = res.loc;
 		return res;
 	} else {
 		res.type = TOKEN_WORD;
@@ -327,6 +329,7 @@ Token fetchToken(BRP* obj)
 
 		input->cur_loc.colno += obj->symbols[delim_id].length;
 
+		obj->last_loc = res.loc;
 		return res;
 	}
 }

@@ -3,11 +3,12 @@
 - ~Base type system~
 - ~Basic arithmetic~
 - ~Bitwise operations~
-- Type casting
+- ~Type casting~
 - `bool` type and logical operations
 - Conditions
 - Loops
 - Bracketed exressions
+- Referencing and dereferencing
 - BRB: array variables
 - Array variables
 - BRP: includes
