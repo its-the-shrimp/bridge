@@ -67,6 +67,7 @@ typedef enum {
 	KW_PUSHV,
 	KW_ATF,
 	KW_ATL,
+	KW_SETC,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -94,7 +95,7 @@ typedef enum {
 	KW_LOAD,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 56, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 57, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 typedef struct {
@@ -103,6 +104,13 @@ typedef struct {
 } ExecMark;
 declArray(ExecMark);
 defArray(ExecMark);
+
+char* getVBRBTokenTypeName(TokenType type)
+{
+	if (type == TOKEN_COND) return "condition";
+	if (type == TOKEN_REG_ID) return "register";
+	return getTokenTypeName(type);
+}
 
 void printVBRBError(FILE* dst, VBRBError err) {
 	static_assert(N_VBRB_ERRORS == 27, "not all VBRB errors are handled");
@@ -166,7 +174,7 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				fprintf(dst, 
 					sbuf_format" operation expects %s as argument %hhd, instead got ",
 					unpack(err.prep->keywords[err.op_type]),
-					getTokenTypeName(err.expected_token_type),
+					getVBRBTokenTypeName(err.expected_token_type),
 					err.arg_id
 				);
 				fprintTokenStr(stderr, err.loc, err.prep);
@@ -281,6 +289,20 @@ VBRBError getRegIdArg(CompilerCtx* ctx, Token src, int8_t* dst, char op_type, ch
 		.loc = src
 	};
 	return (VBRBError){ .prep = ctx->prep };
+}
+
+VBRBError getCondArg(CompilerCtx* ctx, Token src, uint8_t* dst, char op_type, char arg_id)
+{
+	*dst = getTokenKeywordId(src) - KW_COND_NON;
+	if (*dst >= N_CONDS) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_INVALID_ARG,
+		.loc = src,
+		.op_type = op_type,
+		.arg_id = arg_id,
+		.expected_token_type = TOKEN_COND
+	};
+	return (VBRBError){0};
 }
 
 VBRBError getIntArg(CompilerCtx* ctx, Token src, uint64_t* dst, char op_type, char arg_id)
@@ -803,6 +825,18 @@ VBRBError compileOpAtl(CompilerCtx* ctx, Module* dst)
 	return (VBRBError){ .prep = ctx->prep };
 }
 
+VBRBError compileOpSetc(CompilerCtx* ctx, Module* dst)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &op->dst_reg, op->type, 0);
+	if (err.code) return err;
+
+	err = getCondArg(ctx, fetchToken(ctx->prep), &op->cond_arg, op->type, 1);
+	if (err.code) return err;
+
+	return (VBRBError){ .prep = ctx->prep };
+}
 
 OpCompiler op_compilers[] = {
 	[OP_NONE] = &compileNoArgOp,
@@ -860,7 +894,8 @@ OpCompiler op_compilers[] = {
 	[OP_POPV] = &compileOpPopv,
 	[OP_PUSHV] = &compileOpPushv,
 	[OP_ATF] = &compileOpAtf,
-	[OP_ATL] = &compileOpAtl
+	[OP_ATL] = &compileOpAtl,
+	[OP_SETC] = &compileOpSetc
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 

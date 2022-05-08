@@ -873,6 +873,12 @@ void compileOpAtlNative(Module* module, int index, CompCtx* ctx)
 	fprintf(ctx->dst, "// %s:%d\n", ctx->src_path, ctx->src_line);
 }
 
+void compileOpSetcNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	fprintf(ctx->dst, "\tcset x%hhd, %s\n", op.dst_reg, conditionNames_arm64[op.cond_arg]);
+}
+
 OpNativeCompiler native_op_compilers[] = {
 	[OP_NONE] = &compileNopNative,
 	[OP_END] = &compileOpEndNative,
@@ -929,7 +935,8 @@ OpNativeCompiler native_op_compilers[] = {
 	[OP_POPV] = &compileOpPopvNative,
 	[OP_PUSHV] = &compileOpPushvNative,
 	[OP_ATF] = &compileOpAtfNative,
-	[OP_ATL] = &compileOpAtlNative
+	[OP_ATL] = &compileOpAtlNative,
+	[OP_SETC] = &compileOpSetcNative
 };
 static_assert(
 	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),

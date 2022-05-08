@@ -60,6 +60,7 @@ typedef enum {
 	OP_PUSHV, // uses Op::src_reg and Op::var_size
 	OP_ATF, // uses Op::mark_name
 	OP_ATL, // uses Op::symbol_id
+	OP_SETC, // uses Op::cond_arg and Op::dst_reg
 	N_OPS
 } OpType;
 
@@ -119,7 +120,8 @@ typedef enum {
 	BRP_KEYWORD("popv"), \
 	BRP_KEYWORD("pushv"), \
 	BRP_KEYWORD("@f"), \
-	BRP_KEYWORD("@l") \
+	BRP_KEYWORD("@l"), \
+	BRP_KEYWORD("setc") \
 
 static sbuf opNames[] = { _opNames };
 
@@ -245,6 +247,7 @@ typedef struct {
 	int8_t src_reg;
 	uint8_t var_size;
 	uint8_t cond_id;
+	uint8_t cond_arg;
 	union {
 		uint64_t value;
 		int64_t symbol_id;
@@ -307,6 +310,7 @@ typedef struct {
 
 // special value for error reporting
 #define TOKEN_REG_ID 125
+#define TOKEN_COND 126
 
 typedef enum {
 	VBRB_ERR_OK,

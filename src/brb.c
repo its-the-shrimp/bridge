@@ -192,6 +192,12 @@ void writeOpAtl(ModuleWriter* writer, Op op)
 	writeInt(writer->dst, op.symbol_id);
 }
 
+void writeOpSetc(ModuleWriter* writer, Op op)
+{
+	fputc(op.dst_reg, writer->dst);
+	fputc(op.cond_arg, writer->dst);
+}
+
 const OpWriter op_writers[] = {
 	[OP_NONE] = &writeNoArgOp,
 	[OP_END] = &writeNoArgOp,
@@ -248,7 +254,8 @@ const OpWriter op_writers[] = {
 	[OP_POPV] = &writeOpPopv,
 	[OP_PUSHV] = &writeOpPushv,
 	[OP_ATF] = &writeMarkOp,
-	[OP_ATL] = &writeOpAtl
+	[OP_ATL] = &writeOpAtl,
+	[OP_SETC] = &writeOpSetc
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
 
@@ -533,7 +540,6 @@ BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 	dst->dst_reg = loadInt8(loader->src, &status);
 	dst->src_reg = loadInt8(loader->src, &status);
 	dst->value = loadInt(loader->src, &status);
-	printf("%llu\n", dst->value);
 
 	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -610,6 +616,15 @@ BRBLoadError loadOpAtl(ModuleLoader* loader, Op* dst)
 	return (BRBLoadError){0};
 }
 
+BRBLoadError loadOpSetc(ModuleLoader* loader, Op* dst)
+{
+	long status = 0;
+	dst->dst_reg = loadInt8(loader->src, &status);
+	dst->cond_arg = loadInt8(loader->src, &status);
+
+	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	return (BRBLoadError){0};
+}
 
 OpLoader op_loaders[] = {
 	[OP_NONE] = &loadNoArgOp,
@@ -667,7 +682,8 @@ OpLoader op_loaders[] = {
 	[OP_POPV] = &loadOpPopv,
 	[OP_PUSHV] = &loadOpPushv,
 	[OP_ATF] = &loadMarkOp,
-	[OP_ATL] = &loadOpAtl
+	[OP_ATL] = &loadOpAtl,
+	[OP_SETC] = &loadOpSetc
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
@@ -2459,6 +2475,14 @@ bool handleOpAtl(ExecEnv* env, Module* module)
 	return false;
 }
 
+bool handleOpSetc(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = handleCondition(env, op.cond_arg);
+	env->op_id++;
+	return false;
+}
+
 ExecHandler op_handlers[] = {
 	[OP_NONE] = &handleNop,
 	[OP_END] = &handleOpEnd,
@@ -2515,7 +2539,8 @@ ExecHandler op_handlers[] = {
 	[OP_POPV] = &handleOpPopv,
 	[OP_PUSHV] = &handleOpPushv,
 	[OP_ATF] = &handleOpAtf,
-	[OP_ATL] = &handleOpAtl
+	[OP_ATL] = &handleOpAtl,
+	[OP_SETC] = &handleOpSetc
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 
