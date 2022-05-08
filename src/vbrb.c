@@ -107,7 +107,7 @@ defArray(ExecMark);
 void printVBRBError(FILE* dst, VBRBError err) {
 	static_assert(N_VBRB_ERRORS == 27, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
-		if (err.code != VBRB_ERR_PREPROCESSOR_FAILURE) fprintTokenLoc(stderr, err.loc.loc, err.prep);
+		if (err.code != VBRB_ERR_PREPROCESSOR_FAILURE) fprintTokenLoc(stderr, err.loc.loc);
 		fprintf(dst, "error: ");
 		switch (err.code) {
 			case N_VBRB_ERRORS: break;

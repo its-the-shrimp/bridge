@@ -9,7 +9,6 @@
 - Loops
 - Bracketed exressions
 - Referencing and dereferencing
-- BRB: array variables
 - Array variables
 - BRP: includes
 - BRP: macros

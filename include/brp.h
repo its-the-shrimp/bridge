@@ -34,9 +34,9 @@ typedef enum token_type {
 
 
 typedef struct token_loc {
-	int16_t lineno;
-	int16_t colno;
-	int16_t src_id;
+	int32_t lineno;
+	int32_t colno;
+	char* src_name;
 } TokenLoc;
 
 typedef struct token {
@@ -101,8 +101,7 @@ bool setInput(BRP* obj, char* name);
 Token fetchToken(BRP* obj);
 Token peekToken(BRP* obj);
 
-char* getTokenSrcPath(BRP* obj, Token token);
-int fprintTokenLoc(FILE* fd, TokenLoc loc, BRP* obj);
+int fprintTokenLoc(FILE* fd, TokenLoc loc);
 int fprintTokenStr(FILE* fd, Token token, BRP* obj);
 int fprintToken(FILE* fd, Token token, BRP* obj);
 char* getTokenTypeName(TokenType type);
@@ -117,7 +116,7 @@ void printBRPError(FILE* fd, BRP* obj);
 		(prep)->error_loc = loc; \
 	}
 #define BRPempty(prep) ( (prep)->sources.length ? feof((prep)->sources.data[0].src) || ferror((prep)->sources.data[0].src) : true )
-#define printTokenLoc(loc, parser) fprintTokenLoc(stdout, loc, parser)
+#define printTokenLoc(loc) fprintTokenLoc(stdout, loc)
 #define printTokenStr(token, parser) fprintTokenStr(stdout, token, parser)
 #define printToken(token, parser) fprintToken(stdout, token, parser)
 #define getTokenKeywordId(token) ( (token).type == TOKEN_KEYWORD ? (token).keyword_id : -1 )
@@ -137,7 +136,7 @@ BRP* initBRP(BRP* obj)
 	obj->sources = InputCtxArray_new(-1);
 	if (!obj->sources.data) return NULL;
 	obj->pending = TokenQueue_new(0);
-	obj->error_loc = (TokenLoc){ .src_id = 1 };
+	obj->error_loc = (TokenLoc){ .src_name = NULL };
 
 	return obj;
 }
@@ -198,7 +197,7 @@ bool setInputFrom(BRP *obj, char *name, FILE* fd)
 			.name = name,
 			.src = fd,
 			.cur_loc = (TokenLoc){
-				.src_id = obj->sources.length,
+				.src_name = name,
 				.colno = 1
 			}
 		}
@@ -353,15 +352,10 @@ Token peekToken(BRP* obj)
 	return res;
 }
 
-char* getTokenSrcPath(BRP* obj, Token token)
+int fprintTokenLoc(FILE* fd, TokenLoc loc)
 {
-	return obj->sources.data[token.loc.src_id].name;
-}
-
-int fprintTokenLoc(FILE* fd, TokenLoc loc, BRP* obj)
-{
-	if (loc.src_id != -1) {
-		return fprintf(fd, "[ %s:%hd:%hd ] ", obj->sources.data[loc.src_id].name, loc.lineno, loc.colno);
+	if (loc.src_name) {
+		return fprintf(fd, "[%s:%d:%d] ", loc.src_name, loc.lineno, loc.colno);
 	} else { return fprintf(fd, " "); }
 }
 
@@ -380,7 +374,7 @@ int fprintTokenStr(FILE* fd, Token token, BRP* obj)
 
 int fprintToken(FILE* fd, Token token, BRP* obj)
 {
-	int res = fprintTokenLoc(fd, token.loc, obj);
+	int res = fprintTokenLoc(fd, token.loc);
 	res += fprintTokenStr(fd, token, obj);
 	res += fputc('\n', fd);
 	return res;
@@ -430,7 +424,7 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 void printBRPError(FILE* fd, BRP* obj)
 {
 	if (obj->error_code) {
-		fprintTokenLoc(fd, obj->error_loc, obj);
+		fprintTokenLoc(fd, obj->error_loc);
 		printBRPErrorStr(fd, obj);
 		fputc('\n', fd);
 	}
