@@ -5,9 +5,9 @@
 - ~Bitwise operations~
 - ~Type casting~
 - ~`bool` type and logical operations~
+- Bracketed exressions
 - Conditions
 - Loops
-- Bracketed exressions
 - Referencing and dereferencing
 - Array variables
 - BRP: includes

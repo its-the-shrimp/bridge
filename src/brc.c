@@ -83,6 +83,7 @@ typedef enum {
     BR_ERR_MAIN_PROC_RET_TYPE_MISMATCH,
     BR_ERR_MAIN_PROC_ARG_COUNT_MISMATCH,
     BR_ERR_COMPARISON_TYPE_MISMATCH,
+    BR_ERR_UNBRACKETED_SET_EXPR,
     N_BR_ERRORS
 } BRErrorCode;
 
@@ -156,6 +157,7 @@ typedef enum {
     EXPR_LOGICAL_AND, // main, binary, evaluatable
     EXPR_LOGICAL_OR, // main, binary, evaluatable
     EXPR_LOGICAL_NOT, // main, unary, evaluatable
+    EXPR_WRAPPER, // main, unary, evaluatable
     N_EXPR_TYPES
 } ExprType;
 
@@ -274,6 +276,7 @@ BRError parseType(BRP* obj, TypeDef* dst)
 // flags for parseExpr desribing how the expression will be used
 #define EXPRTERM_FULL    0x1
 #define EXPRTERM_ARG     0x2
+#define EXPRTERM_BRACKET 0x4
 #define EXPR_EVALUATABLE 0x8
 
 #define VARIADIC -1
@@ -320,9 +323,10 @@ static char expr_arity_table[] = {
     [EXPR_LOGICAL_GE ] = BINARY,
     [EXPR_LOGICAL_AND] = BINARY,
     [EXPR_LOGICAL_OR ] = BINARY,
-    [EXPR_LOGICAL_NOT] = UNARY
+    [EXPR_LOGICAL_NOT] = UNARY,
+    [EXPR_WRAPPER    ] = UNARY
 };
-static_assert(N_EXPR_TYPES == 38, "not all expression types have their arity set");
+static_assert(N_EXPR_TYPES == 39, "not all expression types have their arity set");
 
 static void initExpr(Expr* expr)
 {
@@ -357,7 +361,7 @@ static int getSubexprsCount(Expr* expr)
 bool isExprTerm(Token token, int flags, BRError* errp)
 {
     int64_t symbol_id = getTokenSymbolId(token);
-    if (flags & (EXPRTERM_FULL | EXPRTERM_FULL)) return symbol_id == SYMBOL_SEMICOLON;
+    if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
     if (flags & EXPRTERM_ARG) {
         if (symbol_id == SYMBOL_ARGSPEC_END || symbol_id == SYMBOL_COMMA) return true;
         if (symbol_id == SYMBOL_SEMICOLON) {
@@ -368,6 +372,7 @@ bool isExprTerm(Token token, int flags, BRError* errp)
         }
         return false;
     }
+    if (flags & EXPRTERM_BRACKET) return symbol_id == SYMBOL_ARGSPEC_END;
     return false;
 }
 
@@ -435,12 +440,11 @@ bool typeMatches(TypeDef field, TypeDef entry)
 }
 
 bool isExprEvaluatable(ExprType type) {
-    static_assert(N_EXPR_TYPES == 38, "not all expression types are handled in isExprEvaluatable");
+    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in isExprEvaluatable");
     static bool expr_evaluatability_info[N_EXPR_TYPES] = {
         [EXPR_INVALID   ] = false,
         [EXPR_INVALID + 1 ... N_EXPR_TYPES - 1] = true,
         [EXPR_NAME      ] = false,
-        [EXPR_SET_VAR   ] = false,
         [EXPR_BLOCK     ] = false, // TODO: make blocks evaluate to their "return" value
         [EXPR_TYPE      ] = false,
         [EXPR_REF       ] = false,
@@ -457,7 +461,7 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
     for (int i = 0; i < indent_level; i++) {
         fputc('\t', dst);
     }
-    static_assert(N_EXPR_TYPES == 38, "not all expression types are handled in fprintExpr");
+    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in fprintExpr");
 
     fprintTokenLoc(dst, expr.loc);
     switch (expr.type) {
@@ -646,6 +650,10 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             fputs("LOGICAL NOT:\n", dst);
             fprintExpr(dst, *expr.arg1, indent_level + 1);
             break;
+        case EXPR_WRAPPER:
+            fputs("WRAPPED:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            break;
         case EXPR_INVALID:
         case N_EXPR_TYPES:
         default:
@@ -756,7 +764,7 @@ BRError setExprSetVar(AST* ast, Expr* expr, ExprType new_type)
 static BRError setExprType(AST* ast, Expr* expr, ExprType new_type)
 // changes the type of the expression if the new type is suitable in place of the current expression type
 {
-    static_assert(N_EXPR_TYPES == 38, "not all expression types are handled in setExprType");
+    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in setExprType");
     static ExprTypeSetter override_table[N_EXPR_TYPES][N_EXPR_TYPES] = {
         [EXPR_INVALID   ] = {
             [EXPR_SYSCALL ... N_EXPR_TYPES - 1] = defaultExprTypeSetter,
@@ -829,7 +837,12 @@ static BRError setExprType(AST* ast, Expr* expr, ExprType new_type)
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
             [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
-        }
+        },
+        [EXPR_WRAPPER ] = {
+            [0 ... N_EXPR_TYPES - 1] = NULL,
+            [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+        },
     };
 
     ExprTypeSetter setter = override_table[expr->type][new_type];
@@ -843,7 +856,7 @@ static BRError setExprType(AST* ast, Expr* expr, ExprType new_type)
 
 TypeDef getExprValueType(Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 38, "not all expression types are handled in getExprValueType");
+    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in getExprValueType");
     static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in getExprValueType");
     switch (expr.type) {
         case EXPR_INVALID:
@@ -914,6 +927,7 @@ TypeDef getExprValueType(Expr expr)
         case EXPR_LOGICAL_OR:
         case EXPR_LOGICAL_NOT:
             return BOOL_TYPE;
+        case EXPR_WRAPPER: return getExprValueType(*expr.arg1);
         case N_EXPR_TYPES:
         default:
             eprintf("internal compiler bug in getExprValueType: unknown expression type %d\n", expr.type);
@@ -973,7 +987,7 @@ bool matchType(TypeDef field_type, Expr* expr)
 
 BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, int flags)
 {
-    static_assert(N_EXPR_TYPES == 38, "not all expression types are handled in parseExpr");
+    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in parseExpr");
     TypeDef new_type;
     BRError expr_term_err = {0};
     Token token;
@@ -1242,13 +1256,18 @@ BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, in
                         } case EXPR_GET_VAR:
                         case EXPR_GET_ARG:
                         case EXPR_NAME: {
+                            if (flags & EXPR_EVALUATABLE ? !(flags & EXPRTERM_BRACKET) : false) return (BRError){
+                                .code = BR_ERR_UNBRACKETED_SET_EXPR,
+                                .loc = token
+                            };
+
                             dst->loc = token.loc;
                             BRError err = setExprType(ast, dst, EXPR_SET_VAR);
                             if (err.code) return err;
 
                             dst->arg2 = malloc(sizeof(Expr));
                             Token entry_loc = peekToken(obj);
-                            err = parseExpr(obj, dst->arg2, block, func, ast, EXPRTERM_FULL | EXPR_EVALUATABLE);
+                            err = parseExpr(obj, dst->arg2, block, func, ast, flags | EXPR_EVALUATABLE);
                             if (err.code) return err;
 
                             if (!matchType(*getSubexpr(dst->arg1->arg1, 1)->var_type, dst->arg2)) return (BRError){
@@ -1290,7 +1309,6 @@ BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, in
                         Expr* expr = addSubexpr(dst, (Expr){0});
                         BRError err = parseExpr(obj, expr, dst, func, ast, EXPRTERM_FULL);
                         if (err.code) return err;
-
                         fetchToken(obj);
                     }
                     break;
@@ -1322,54 +1340,63 @@ BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, in
                     break;
                 } case SYMBOL_ARGSPEC_START: {
                     dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_FUNC_CALL);
-                    if (err.code) return err;
 
-                    FuncDecl* def = (FuncDecl*)getSubexpr(dst, 0)->arg1;
-                    token = peekToken(obj);
-                    int arg_id = 0, expected_arg_count = getSubexprsCount(&def->args) - 1;
+                    if (dst->type != EXPR_INVALID) {
+                        BRError err = setExprType(ast, dst, EXPR_FUNC_CALL);
+                        if (err.code) return err;
 
-                    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
-                        ExprNode* arg_decl_iter = getSubexprs(&def->args)->start->next;
-                        while (true) {
-                            token = peekToken(obj);
-                            if (arg_id == expected_arg_count) return (BRError){
-                                .code = BR_ERR_ARG_COUNT_MISMATCH,
-                                .loc = token,
-                                .func = def,
-                                .n_args = -1
-                            };
+                        FuncDecl* def = (FuncDecl*)getSubexpr(dst, 0)->arg1;
+                        token = peekToken(obj);
+                        int arg_id = 0, expected_arg_count = getSubexprsCount(&def->args) - 1;
 
-                            Expr* arg = addSubexpr(dst, (Expr){0});
-                            BRError err = parseExpr(obj, arg, dst->block, func, ast, EXPRTERM_ARG | EXPR_EVALUATABLE);
-                            if (err.code) return err;
-                            if (!matchType(*getSubexpr(&arg_decl_iter->value, 1)->var_type, arg)) return (BRError){
-                                .code = BR_ERR_ARG_TYPE_MISMATCH,
-                                .loc = token,
-                                .entry_type = getExprValueType(*arg),
-                                .func = def,
-                                .arg_decl = &arg_decl_iter->value
-                            };
+                        if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
+                            ExprNode* arg_decl_iter = getSubexprs(&def->args)->start->next;
+                            while (true) {
+                                token = peekToken(obj);
+                                if (arg_id == expected_arg_count) return (BRError){
+                                    .code = BR_ERR_ARG_COUNT_MISMATCH,
+                                    .loc = token,
+                                    .func = def,
+                                    .n_args = -1
+                                };
 
-                            arg_decl_iter = arg_decl_iter->next;
-                            arg_id++;
-                            token = fetchToken(obj);
-                            if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
-                                break;
-                            } else if (token.symbol_id != SYMBOL_COMMA) return (BRError){
-                                .code = BR_ERR_ARG_DEF_EXPECTED,
-                                .loc = token
-                            };
-                        }
+                                Expr* arg = addSubexpr(dst, (Expr){0});
+                                BRError err = parseExpr(obj, arg, dst->block, func, ast, EXPRTERM_ARG | EXPR_EVALUATABLE);
+                                if (err.code) return err;
+                                if (!matchType(*getSubexpr(&arg_decl_iter->value, 1)->var_type, arg)) return (BRError){
+                                    .code = BR_ERR_ARG_TYPE_MISMATCH,
+                                    .loc = token,
+                                    .entry_type = getExprValueType(*arg),
+                                    .func = def,
+                                    .arg_decl = &arg_decl_iter->value
+                                };
 
-                    } else fetchToken(obj);
+                                arg_decl_iter = arg_decl_iter->next;
+                                arg_id++;
+                                token = fetchToken(obj);
+                                if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
+                                    break;
+                                } else if (token.symbol_id != SYMBOL_COMMA) return (BRError){
+                                    .code = BR_ERR_ARG_DEF_EXPECTED,
+                                    .loc = token
+                                };
+                            }
 
-                    if (arg_id < expected_arg_count) return (BRError){
-                        .code = BR_ERR_ARG_COUNT_MISMATCH,
-                        .loc = token,
-                        .func = def,
-                        .n_args = arg_id
-                    };
+                        } else fetchToken(obj);
+
+                        if (arg_id < expected_arg_count) return (BRError){
+                            .code = BR_ERR_ARG_COUNT_MISMATCH,
+                            .loc = token,
+                            .func = def,
+                            .n_args = arg_id
+                        };
+                    } else {
+                        dst->type = EXPR_WRAPPER;
+                        dst->arg1 = calloc(1, sizeof(Expr));
+                        BRError err = parseExpr(obj, dst->arg1, block, func, ast, EXPRTERM_BRACKET | EXPR_EVALUATABLE);
+                        if (err.code) return err;
+                        fetchToken(obj);
+                    }
                     break;
                 } case SYMBOL_EQ:
                 case SYMBOL_NEQ:
@@ -1456,6 +1483,7 @@ void reorderExpr(Expr* expr)
         [EXPR_NEW_ARG    ] = 0,
         [EXPR_GET_ARG    ] = 0,
         [EXPR_CAST       ] = 0,
+        [EXPR_WRAPPER    ] = 0,
         [EXPR_NOT        ] = 1,
         [EXPR_LOGICAL_NOT] = 1,
         [EXPR_MUL        ] = 2,
@@ -1479,7 +1507,7 @@ void reorderExpr(Expr* expr)
         [EXPR_SET_VAR    ] = 12,
         [EXPR_RETURN     ] = 13
     };
-    static_assert(N_EXPR_TYPES == 38, "not all expression types are handled in reorderExpr");
+    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in reorderExpr");
 
     int expr_order = expr_order_table[expr->type];
     switch (expr_arity_table[expr->type]) {
@@ -1590,6 +1618,33 @@ void lowerExpr(Expr* expr)
                 if (expr->arg1) lowerExpr(expr->arg1);
                 return;
         }
+    }
+}
+
+void removeExprWrappers(Expr* expr)
+{
+    if (expr->type == EXPR_WRAPPER) {
+        Expr new_expr = *expr->arg1;
+        free(expr->arg1);
+        *expr = new_expr;
+    }
+
+    switch (expr_arity_table[expr->type]) {
+        case VARIADIC:
+            chain_foreach_from(Expr, subexpr, *getSubexprs(expr), 1, 
+                removeExprWrappers(&_subexpr->value);
+            );
+            return;
+        case NULLARY:
+            return;
+        case BINARY:
+            removeExprWrappers(expr->arg2);
+        case UNARY:
+            if (expr->arg1) removeExprWrappers(expr->arg1);
+            return;
+        default:
+            eprintf("internal compiler bug: expression type %d has unknown arity %d\n", expr->type, expr_arity_table[expr->type]);
+            abort();
     }
 }
 
@@ -1708,6 +1763,7 @@ BRError parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
                 };
                 lowerExpr(&new_func->body);
                 reorderExpr(&new_func->body);
+                removeExprWrappers(&new_func->body);
             } else fetchToken(obj);
         } else if (func_name_spec.type == TOKEN_NONE) {
             break;
@@ -1774,7 +1830,7 @@ void compileSrcRef(ASTCompilerCtx* ctx, TokenLoc loc)
 
 regstate_t getArgCacheState(Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 38, "not all expression types are handled in getArgCacheState");
+    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in getArgCacheState");
     regstate_t res = 0;
     switch (expr.type) {
         case EXPR_SYSCALL:
@@ -1809,6 +1865,7 @@ regstate_t getArgCacheState(Expr expr)
         case EXPR_NOT:
         case EXPR_CAST:
         case EXPR_LOGICAL_NOT:
+        case EXPR_WRAPPER:
             res |= getArgCacheState(*expr.arg1);
         default: break;
     }
@@ -2667,9 +2724,10 @@ ExprCompiler expr_compilers[] = {
     [EXPR_LOGICAL_GE ] = &compileExprLogicalGe,
     [EXPR_LOGICAL_AND] = &compileExprLogicalAnd,
     [EXPR_LOGICAL_OR ] = &compileExprLogicalOr,
-    [EXPR_LOGICAL_NOT] = &compileExprLogicalNot
+    [EXPR_LOGICAL_NOT] = &compileExprLogicalNot,
+    [EXPR_WRAPPER    ] = &compileExprInvalid
 };
-static_assert(N_EXPR_TYPES == 38, "not all expression types have corresponding compilers defined");
+static_assert(N_EXPR_TYPES == 39, "not all expression types have corresponding compilers defined");
 
 bool compileAST(AST* src, FILE* dst)
 {
@@ -2880,7 +2938,7 @@ int main(int argc, char* argv[])
     AST ast;
     BRError err = parseSourceCode(&prep, &ast);
     
-    static_assert(N_BR_ERRORS == 31, "not all BRidge errors are handled");
+    static_assert(N_BR_ERRORS == 32, "not all BRidge errors are handled");
     if (err.code) {
         fprintTokenLoc(stderr, err.loc.loc);
         eputs("error: ");
@@ -3054,6 +3112,9 @@ int main(int argc, char* argv[])
                 eputs("` to a value of type `");
                 fprintType(stderr, err.entry_type);
                 eputs("`\n");
+                return 1;
+            case BR_ERR_UNBRACKETED_SET_EXPR:
+                eputs("to use variable assignment as a value, wrap it in brackets\n");
                 return 1;
             case N_BR_ERRORS:
             case BR_ERR_NONE:
