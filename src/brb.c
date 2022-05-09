@@ -2479,6 +2479,11 @@ bool handleOpSetc(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = handleCondition(env, op.cond_arg);
+
+	if (env->flags & BRBX_TRACING) {
+		env->regs_trace[op.dst_reg] = (DataSpec){.type = DS_BOOL};
+	}
+
 	env->op_id++;
 	return false;
 }

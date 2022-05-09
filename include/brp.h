@@ -57,6 +57,7 @@ typedef enum {
 	BRP_ERR_UNCLOSED_STR,
 	BRP_ERR_NO_MEMORY,
 	BRP_ERR_FILE_NOT_FOUND,
+	BRP_ERR_SYMBOL_CONFLICT,
 	N_PARSER_ERRORS
 } BRPError;
 
@@ -68,28 +69,32 @@ typedef struct {
 declArray(InputCtx);
 
 
-typedef struct {
+typedef struct brp {
 	sbuf* keywords;
 	sbuf* symbols;
 	sbuf* hidden_symbols;
 	BRPError error_code;
+	TokenLoc error_loc;
 	union {
-		TokenLoc error_loc;
+		sbuf error_symbol;
 		char* error_filename;
 		int32_t sys_errno;
 	};
+	void (*handler)(struct brp*);
 	InputCtxArray sources;
 	TokenQueue pending;
 	sbuf buffer;
 	TokenLoc last_loc;
 } BRP;
 
+typedef void (*BRPErrorHandler) (BRP*);
+
 #define BRP_KEYWORD(spec) fromcstr(spec)
 #define BRP_SYMBOL(spec) fromcstr(spec)
 #define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
 // hidden symbols are delimiters that are not returned as generated tokens
 
-BRP* initBRP(BRP* obj);
+BRP* initBRP(BRP* obj, BRPErrorHandler handler);
 void delBRP(BRP* obj);
 
 bool _setKeywords(BRP* obj, ...);
@@ -130,13 +135,14 @@ void printBRPError(FILE* fd, BRP* obj);
 #ifdef BRP_IMPLEMENTATION
 #undef BRP_IMPLEMENTATION
 
-BRP* initBRP(BRP* obj)
+BRP* initBRP(BRP* obj, BRPErrorHandler handler)
 {
 	*obj = (BRP){0};
 	obj->sources = InputCtxArray_new(-1);
 	if (!obj->sources.data) return NULL;
 	obj->pending = TokenQueue_new(0);
-	obj->error_loc = (TokenLoc){ .src_name = NULL };
+	obj->error_loc = (TokenLoc){0};
+	obj->handler = handler;
 
 	return obj;
 }
@@ -179,12 +185,25 @@ bool _setSymbols(BRP* obj, ...)
 	obj->symbols = malloc(n_symbols * sizeof(sbuf));
 	obj->hidden_symbols = malloc(n_hidden_symbols * sizeof(sbuf));
 	if (!obj->symbols || !obj->hidden_symbols) return false;
+
+
 	n_hidden_symbols = 0;
 	for (int i = 0; i < n_symbols; i++) {
 		obj->symbols[i] = va_arg(args, sbuf);
 		if (obj->symbols[i].data ? isSymbolSpecHidden(obj->symbols[i]) : true) obj->hidden_symbols[n_hidden_symbols++] = obj->symbols[i];
 	}
 	va_end(args);
+
+	for (int i = 0; i < n_symbols; i++) {
+		for (int i1 = 0; i1 < i; i1++) {
+			if (sbufstartswith(obj->symbols[i], obj->symbols[i1])) {
+				obj->error_code = BRP_ERR_SYMBOL_CONFLICT;
+				obj->error_symbol = obj->symbols[i];
+				if (obj->handler) obj->handler(obj);
+				return false;
+			}
+		}
+	}
 
 	return true;
 }
@@ -203,6 +222,7 @@ bool setInputFrom(BRP *obj, char *name, FILE* fd)
 		}
 	)) {
 		obj->error_code = BRP_ERR_NO_MEMORY;
+		if (obj->handler) obj->handler(obj);
 		return false;
 	}
 
@@ -215,6 +235,7 @@ bool setInput(BRP* obj, char* name)
 	if (!fd) {
 		obj->error_code = BRP_ERR_FILE_NOT_FOUND;
 		obj->sys_errno = errno;
+		if (obj->handler) obj->handler(obj);
 		return false;
 	}
 	return setInputFrom(obj, name, fd);
@@ -267,6 +288,7 @@ Token fetchToken(BRP* obj)
 		if (!sbufeq(delim, DQUOTE)) {
 			obj->error_code = BRP_ERR_UNCLOSED_STR;
 			obj->error_loc = input->cur_loc;
+			if (obj->handler) obj->handler(obj);
 			return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
 		}
 
@@ -412,11 +434,21 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 	switch (obj->error_code) {
 		case BRP_ERR_OK: break;
 		case BRP_ERR_UNCLOSED_STR: 
-			fprintf(fd, "preprocessing error: unclosed string literal ");
+			fprintf(fd, "unclosed string literal ");
+			break;
 		case BRP_ERR_NO_MEMORY: 
-			fprintf(fd, "preprocessing error: memory allocation failure ");
+			fprintf(fd, "memory allocation failure ");
+			break;
 		case BRP_ERR_FILE_NOT_FOUND: 
-			fprintf(fd, "preprocessing error: could not open provided file (reason: %s) ", strerror(obj->sys_errno));
+			fprintf(fd, "could not open provided file (reason: %s) ", strerror(obj->sys_errno));
+			break;
+		case BRP_ERR_SYMBOL_CONFLICT:
+			fprintf(
+				fd,
+				"symbol conflict: symbol `%.*s` will be incorrectly parsed; to solve this, place it before the symbol that has a common start ",
+				unpack(obj->error_symbol)
+			);
+			break;
 		default: fprintf(fd, "unreachable");
 	}
 }
