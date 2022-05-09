@@ -4,7 +4,7 @@
 - ~Basic arithmetic~
 - ~Bitwise operations~
 - ~Type casting~
-- `bool` type and logical operations
+- ~`bool` type and logical operations~
 - Conditions
 - Loops
 - Bracketed exressions
