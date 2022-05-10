@@ -201,7 +201,7 @@ void writeOpSetc(ModuleWriter* writer, Op op)
 const OpWriter op_writers[] = {
 	[OP_NONE] = &writeNoArgOp,
 	[OP_END] = &writeNoArgOp,
-	[OP_MARK] = &writeMarkOp,
+	[OP_MARK] = &writeNoArgOp,
 	[OP_SET] = &writeRegImmOp,
 	[OP_SETR] = &write2RegOp,
 	[OP_SETD] = &writeOpSetd,
@@ -629,7 +629,7 @@ BRBLoadError loadOpSetc(ModuleLoader* loader, Op* dst)
 OpLoader op_loaders[] = {
 	[OP_NONE] = &loadNoArgOp,
 	[OP_END] = &loadNoArgOp,
-	[OP_MARK] = &loadMarkOp,
+	[OP_MARK] = &loadNoArgOp,
 	[OP_SET] = &loadRegImmOp,
 	[OP_SETR] = &load2RegOp,
 	[OP_SETD] = &loadRegNameOp,

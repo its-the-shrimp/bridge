@@ -5,8 +5,8 @@
 - ~Bitwise operations~
 - ~Type casting~
 - ~`bool` type and logical operations~
-- Bracketed exressions
-- Conditions
+- ~Bracketed exressions~
+- ~Conditions~
 - Loops
 - Referencing and dereferencing
 - Array variables

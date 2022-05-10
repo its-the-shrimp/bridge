@@ -21,6 +21,7 @@ typedef enum {
     KW_AND,
     KW_OR,
     KW_NOT,
+    KW_IF,
     N_KWS
 } BRKeyword;
 
@@ -66,7 +67,7 @@ typedef enum {
     BR_ERR_INVALID_VAR_NAME,
     BR_ERR_NO_VALUE_EXPR,
     BR_ERR_UNCLOSED_BLOCK,
-    BR_ERR_INVALID_FUNC_DEF,
+    BR_ERR_INVALID_VAR_DECL,
     BR_ERR_UNKNOWN_VAR,
     BR_ERR_VAR_EXISTS,
     BR_ERR_INVALID_TYPE,
@@ -158,6 +159,7 @@ typedef enum {
     EXPR_LOGICAL_OR, // main, binary, evaluatable
     EXPR_LOGICAL_NOT, // main, unary, evaluatable
     EXPR_WRAPPER, // main, unary, evaluatable
+    EXPR_IF, // main, binary, non-evaluatable
     N_EXPR_TYPES
 } ExprType;
 
@@ -207,69 +209,72 @@ typedef struct {
 typedef struct {
     FuncDeclChain functions;
     Expr globals;
+    BRP* prep;
 } AST;
 
-BRError parseType(BRP* obj, TypeDef* dst)
+void raiseBRError(AST* ast, BRError err);
+
+bool parseType(AST* ast, TypeDef* dst)
 {
     static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in parseType");
     *dst = (TypeDef){0};
     bool fetched = false;
     while (true) {
-        Token token = peekToken(obj);
+        Token token = peekToken(ast->prep);
         if (token.type == TOKEN_KEYWORD) {
             switch (token.keyword_id) {
                 case KW_INT8:
                 case KW_INT16:
                 case KW_INT32:
                 case KW_INT64:
-                    if (dst->kind != KIND_NONE) return (BRError){
+                    if (dst->kind != KIND_NONE) raiseBRError(ast, (BRError){
                         .code = BR_ERR_INVALID_TYPE,
                         .loc = token
-                    };
+                    });
 
-                    fetchToken(obj);
+                    fetchToken(ast->prep);
                     dst->kind = KIND_INT;
                     fetched = true;
                     dst->size = 1 << (token.keyword_id - KW_INT8);
                     break;
                 case KW_VOID:
-                    if (dst->kind != KIND_NONE) return (BRError){
+                    if (dst->kind != KIND_NONE) raiseBRError(ast, (BRError){
                         .code = BR_ERR_INVALID_TYPE,
                         .loc = token
-                    };
+                    });
 
-                    fetchToken(obj);
+                    fetchToken(ast->prep);
                     fetched = true;
                     dst->kind = KIND_VOID;
                     break;
                 case KW_BOOL:
-                    if (dst->kind != KIND_NONE) return (BRError){
+                    if (dst->kind != KIND_NONE) raiseBRError(ast, (BRError){
                         .code = BR_ERR_INVALID_TYPE,
                         .loc = token
-                    };
+                    });
 
-                    fetchToken(obj);
+                    fetchToken(ast->prep);
                     fetched = true;
                     dst->kind = KIND_BOOL;
                     break;
                 default:
-                    return (BRError){ .code = fetched ? 0 : -1 };
+                    return fetched;
             }
         } else if (token.type == TOKEN_SYMBOL) {
             switch (token.symbol_id) {
                 case SYMBOL_STAR:
-                    if (dst->kind == KIND_NONE) return (BRError){ .code = fetched ? 0 : -1 };
+                    if (dst->kind == KIND_NONE) return fetched;
 
-                    fetchToken(obj);
+                    fetchToken(ast->prep);
                     TypeDef* new_base = malloc(sizeof(TypeDef));
                     *new_base = *dst;
                     dst->base = new_base;
                     dst->kind = KIND_PTR;
                     break;
                 default:
-                    return (BRError){ .code = fetched ? 0 : -1 };
+                    return fetched;
             }
-        } else return (BRError){ .code = fetched ? 0 : -1 };
+        } else return fetched;
     }
 }
 
@@ -324,9 +329,10 @@ static char expr_arity_table[] = {
     [EXPR_LOGICAL_AND] = BINARY,
     [EXPR_LOGICAL_OR ] = BINARY,
     [EXPR_LOGICAL_NOT] = UNARY,
-    [EXPR_WRAPPER    ] = UNARY
+    [EXPR_WRAPPER    ] = UNARY,
+    [EXPR_IF         ] = BINARY
 };
-static_assert(N_EXPR_TYPES == 39, "not all expression types have their arity set");
+static_assert(N_EXPR_TYPES == 40, "not all expression types have their arity set");
 
 static void initExpr(Expr* expr)
 {
@@ -358,18 +364,18 @@ static int getSubexprsCount(Expr* expr)
 }
 
 
-bool isExprTerm(Token token, int flags, BRError* errp)
+bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
 {
+    static_assert(N_EXPR_TYPES == 40, "not all expression types are handled in isExprTerm");
     int64_t symbol_id = getTokenSymbolId(token);
+    if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF) && symbol_id == SYMBOL_BLOCK_END) return true; 
     if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
     if (flags & EXPRTERM_ARG) {
         if (symbol_id == SYMBOL_ARGSPEC_END || symbol_id == SYMBOL_COMMA) return true;
-        if (symbol_id == SYMBOL_SEMICOLON) {
-            *errp = (BRError){
-                .code = BR_ERR_ARG_DEF_EXPECTED,
-                .loc = token
-            };
-        }
+        if (symbol_id == SYMBOL_SEMICOLON) raiseBRError(ast, (BRError){
+            .code = BR_ERR_ARG_DEF_EXPECTED,
+            .loc = token
+        });
         return false;
     }
     if (flags & EXPRTERM_BRACKET) return symbol_id == SYMBOL_ARGSPEC_END;
@@ -440,7 +446,7 @@ bool typeMatches(TypeDef field, TypeDef entry)
 }
 
 bool isExprEvaluatable(ExprType type) {
-    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in isExprEvaluatable");
+    static_assert(N_EXPR_TYPES == 40, "not all expression types are handled in isExprEvaluatable");
     static bool expr_evaluatability_info[N_EXPR_TYPES] = {
         [EXPR_INVALID   ] = false,
         [EXPR_INVALID + 1 ... N_EXPR_TYPES - 1] = true,
@@ -450,7 +456,8 @@ bool isExprEvaluatable(ExprType type) {
         [EXPR_REF       ] = false,
         [EXPR_FUNC_REF  ] = false,
         [EXPR_NEW_ARG   ] = false,
-        [EXPR_RETURN    ] = false
+        [EXPR_RETURN    ] = false,
+        [EXPR_IF        ] = false
     };
     assert(inRange(type, 0, N_EXPR_TYPES));
     return expr_evaluatability_info[type];
@@ -461,7 +468,7 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
     for (int i = 0; i < indent_level; i++) {
         fputc('\t', dst);
     }
-    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in fprintExpr");
+    static_assert(N_EXPR_TYPES == 40, "not all expression types are handled in fprintExpr");
 
     fprintTokenLoc(dst, expr.loc);
     switch (expr.type) {
@@ -654,6 +661,11 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             fputs("WRAPPED:\n", dst);
             fprintExpr(dst, *expr.arg1, indent_level + 1);
             break;
+        case EXPR_IF:
+            fputs("IF:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
         case EXPR_INVALID:
         case N_EXPR_TYPES:
         default:
@@ -685,35 +697,32 @@ FuncDecl* getFuncDecl(AST* ast, char* name)
     return NULL;
 }
 
-typedef BRError (*ExprTypeSetter) (AST*, Expr*, ExprType);
+typedef void (*ExprTypeSetter) (AST*, Expr*, ExprType);
 
-BRError defaultExprTypeSetter(AST* ast, Expr* expr, ExprType new_type)
+void defaultExprTypeSetter(AST* ast, Expr* expr, ExprType new_type)
 {
     expr->type = new_type;
-    return (BRError){0};
 }
 
-BRError setExprNameToExprGetVar(AST* ast, Expr* expr, ExprType new_type)
+void setExprNameToExprGetVar(AST* ast, Expr* expr, ExprType new_type)
 {
     Expr* decl = getVarDecl(expr->block, expr->name);
-    if (!decl) return (BRError){
+    if (!decl) raiseBRError(ast, (BRError){
         .code = BR_ERR_UNKNOWN_VAR,
         .loc = (Token){ .loc = expr->loc, .type = TOKEN_WORD, .word = expr->name }
-    };
+    });
 
     expr->type = decl->type == EXPR_NEW_ARG ? EXPR_GET_ARG : EXPR_GET_VAR;
     expr->arg1 = decl;
-
-    return (BRError){0};
 }
 
-BRError setExprNameToExprFuncCall(AST* ast, Expr* expr, ExprType new_type)
+void setExprNameToExprFuncCall(AST* ast, Expr* expr, ExprType new_type)
 {
     FuncDecl* decl = getFuncDecl(ast, expr->name);
-    if (!decl) return (BRError){
+    if (!decl) raiseBRError(ast, (BRError){
         .code = BR_ERR_UNKNOWN_FUNC,
         .loc = (Token){ .loc = expr->loc, .type = TOKEN_WORD, .word = expr->name }
-    };
+    });
 
     expr->type = new_type;
     initExpr(expr);
@@ -723,31 +732,20 @@ BRError setExprNameToExprFuncCall(AST* ast, Expr* expr, ExprType new_type)
         .loc = expr->loc,
         .arg1 = (Expr*)decl
     });
-    
-    return (BRError){0};
 }
 
-BRError setBinaryExprType(AST* ast, Expr* expr, ExprType new_type)
+void setBinaryExprType(AST* ast, Expr* expr, ExprType new_type)
 {
-    if (expr->type == EXPR_NAME) {
-        BRError err = setExprNameToExprGetVar(ast, expr, EXPR_GET_VAR);
-        if (err.code) return err;
-    }
+    if (expr->type == EXPR_NAME) setExprNameToExprGetVar(ast, expr, EXPR_GET_VAR);
     Expr* arg1 = malloc(sizeof(Expr));
     *arg1 = *expr;
     expr->type = new_type;
     expr->arg1 = arg1;
-
-    return (BRError){0};
 }
 
-BRError setExprSetVar(AST* ast, Expr* expr, ExprType new_type)
+void setExprSetVar(AST* ast, Expr* expr, ExprType new_type)
 {
-    if (expr->type == EXPR_NAME) {
-        BRError err = setExprNameToExprGetVar(ast, expr, new_type);
-        if (err.code) return err;
-    }
-
+    if (expr->type == EXPR_NAME) setExprNameToExprGetVar(ast, expr, new_type);
     Expr* ref = expr->arg1;
     expr->arg1 = malloc(sizeof(Expr));
     *expr->arg1 = (Expr){
@@ -757,14 +755,12 @@ BRError setExprSetVar(AST* ast, Expr* expr, ExprType new_type)
         .loc = expr->loc
     };
     expr->type = expr->type == EXPR_GET_ARG ? EXPR_SET_ARG : EXPR_SET_VAR;
-    
-    return (BRError){0};
 }
 
-static BRError setExprType(AST* ast, Expr* expr, ExprType new_type)
+void setExprType(AST* ast, Expr* expr, ExprType new_type)
 // changes the type of the expression if the new type is suitable in place of the current expression type
 {
-    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in setExprType");
+    static_assert(N_EXPR_TYPES == 40, "not all expression types are handled in setExprType");
     static ExprTypeSetter override_table[N_EXPR_TYPES][N_EXPR_TYPES] = {
         [EXPR_INVALID   ] = {
             [EXPR_SYSCALL ... N_EXPR_TYPES - 1] = defaultExprTypeSetter,
@@ -772,7 +768,7 @@ static BRError setExprType(AST* ast, Expr* expr, ExprType new_type)
             [EXPR_ADD ... EXPR_SHR] = NULL,
             [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = NULL
         },
-        [EXPR_SYSCALL   ] = { 
+        [EXPR_SYSCALL   ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
             [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
@@ -843,20 +839,21 @@ static BRError setExprType(AST* ast, Expr* expr, ExprType new_type)
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
             [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
         },
+        [EXPR_IF      ] = { [0 ... N_EXPR_TYPES - 1] = NULL }
     };
 
     ExprTypeSetter setter = override_table[expr->type][new_type];
-    if (!setter) return (BRError){
+    if (!setter) raiseBRError(ast, (BRError){
         .code = BR_ERR_INVALID_EXPR,
         .loc = (Token){ .loc = expr->loc }
-    };
+    });
 
-    return setter(ast, expr, new_type);
+    setter(ast, expr, new_type);
 }
 
 TypeDef getExprValueType(Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in getExprValueType");
+    static_assert(N_EXPR_TYPES == 40, "not all expression types are handled in getExprValueType");
     static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in getExprValueType");
     switch (expr.type) {
         case EXPR_INVALID:
@@ -868,6 +865,7 @@ TypeDef getExprValueType(Expr expr)
         case EXPR_FUNC_REF:
         case EXPR_BLOCK:
         case EXPR_RETURN:
+        case EXPR_IF:
             return (TypeDef){0};
         case EXPR_BUILTIN:
         case EXPR_SYSCALL:
@@ -935,6 +933,195 @@ TypeDef getExprValueType(Expr expr)
     }
 }
 
+void raiseBRError(AST* ast, BRError err)
+{
+    static_assert(N_BR_ERRORS == 32, "not all BRidge errors are handled");
+    if (err.code) {
+        fprintTokenLoc(stderr, err.loc.loc);
+        eputs("error: ");
+        switch (err.code) {
+            case BR_ERR_INVALID_GLOBAL_STMT:
+                eputs("expected a global statement specifier, instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_FUNC_NAME_EXPECTED:
+                eputs("expected a word as function name specifier, instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_ARG_DEF_START_EXPECTED:
+                eputs("expected ");
+                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_START }, ast->prep);
+                eputs(", instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_ARG_DEF_EXPECTED:
+                eputs("expected ");
+                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_COMMA }, ast->prep);
+                eputs(" or ");
+                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_END }, ast->prep);
+                eputs(", instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_ARG_NAME_EXPECTED:
+                eputs("expected word as a name of the function argument, instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_INVALID_SYSCALL_NAME:
+                eputs("expected word as the syscall name specifier, instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_INVALID_VAR_DECL:
+                eputs("variable declarations cannot be a body of a function declaration or an `if` statement\n");
+                exit(1);
+            case BR_ERR_BUILTIN_NAME_EXPECTED:
+                eputs("expected a word as the name of the built-in value, instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_INVALID_BUILTIN_NAME:
+                eprintf("unknown built-in value `%s`\n", err.loc.word);
+                exit(1);
+            case BR_ERR_INVALID_EXPR:
+                eputs("invalid expression\n");
+                exit(1);
+            case BR_ERR_TOO_MANY_SYSCALL_ARGS:
+                eprintf("expected at most 6 arguments for a syscall, instead got %d\n", err.n_args);
+                exit(1);
+            case BR_ERR_INVALID_VAR_NAME:
+                eputs("expected a word as the variable name, instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_NO_VALUE_EXPR:
+                eputs("expected a value\n");
+                exit(1);
+            case BR_ERR_UNCLOSED_BLOCK:
+                eputs("expected ");
+                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_BLOCK_END }, ast->prep);
+                eputs(", instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_UNKNOWN_VAR:
+                eprintf("unknown variable name `%s`\n", err.loc.word);
+                exit(1);
+            case BR_ERR_VAR_EXISTS:
+                eprintf("variable `%s` is aliready declared\n", err.loc.word);
+                exit(1);
+            case BR_ERR_INVALID_TYPE:
+                eputs("invalid type specifier\n");
+                exit(1);
+            case BR_ERR_VAR_TYPE_MISMATCH: {
+                char* var_name = getSubexpr(err.var_decl, 0)->name;
+                eprintf("variable `%s` expects a value of type `", var_name);
+                fprintType(stderr, *getSubexpr(err.var_decl, 1)->var_type);
+                eputs("`, instead got a value of type `");
+                fprintType(stderr, err.entry_type);
+                eputs("`\n");
+                fprintTokenLoc(stderr, err.var_decl->loc);
+                eprintf("note: variable `%s` is declared here\n", var_name);
+                exit(1);
+            } case BR_ERR_VOID_VAR_DECL:
+                eputs("cannot declare a variable of type `");
+                fprintType(stderr, VOID_TYPE);
+                eputs("`\n");
+                exit(1);
+            case BR_ERR_UNKNOWN_FUNC:
+                eprintf("unknown function name `%s`\n", err.loc.word);
+                exit(1);
+            case BR_ERR_TOO_MANY_FUNC_ARGS:
+                eprintf("expected at most 6 arguments to a function, instead got %d", err.n_args);
+                exit(1);
+            case BR_ERR_RETURN_TYPE_MISMATCH:
+                eprintf("function `%s` is declared to return a value of type `", err.func->name);
+                fprintType(stderr, err.func->return_type);
+                eputs("`, instead attempted to return value of type `");
+                fprintType(stderr, err.entry_type);
+                eputs("`\n");
+                fprintTokenLoc(stderr, err.func->loc);
+                eprintf("note: function `%s` is declared here\n", err.func->name);
+                exit(1);
+            case BR_ERR_ARG_COUNT_MISMATCH:
+                if (err.n_args >= 0) {
+                    eprintf(
+                        "function `%s` expects exactly %d argument(s), instead got %d\n",
+                        err.func->name, getSubexprsCount(&err.func->args) - 1, err.n_args
+                    );
+                } else {
+                    eprintf(
+                        "function `%s` expects exactly %d argument(s), instead got more\n",
+                        err.func->name, getSubexprsCount(&err.func->args) - 1
+                    );
+                }
+                fprintTokenLoc(stderr, err.func->loc);
+                eprintf("note: function `%s` is declared here\n", err.func->name);
+                exit(1);
+            case BR_ERR_ARG_TYPE_MISMATCH:
+                if (err.func) {
+                    eprintf("argument `%s` of function `%s` expects a value of type `", getSubexpr(err.arg_decl, 0)->name, err.func->name);
+                    fprintType(stderr, *getSubexpr(err.arg_decl, 1)->var_type);
+                } else {
+                    eputs("a syscall argument expects a value of type `");
+                    fprintType(stderr, BUILTIN_VAL_TYPE);
+                }
+                eputs("`, instead got value of type `");
+                fprintType(stderr, err.entry_type);
+                eputs("`\n");
+                fprintTokenLoc(stderr, err.func->loc);
+                eprintf("note: function `%s` is declared here\n", err.func->name);
+                exit(1);
+            case BR_ERR_CAST_TYPE_EXPECTED:
+                eputs("expected ");
+                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_COMMA }, ast->prep);
+                eputs(", instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_ARG_DEF_END_EXPECTED:
+                eputs("expected ");
+                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_END }, ast->prep);
+                eputs(", instead got ");
+                fprintTokenStr(stderr, err.loc, ast->prep);
+                eputc('\n');
+                exit(1);
+            case BR_ERR_VOID_TYPE_CAST:
+                eputs("cannot cast a value to type `");
+                fprintType(stderr, VOID_TYPE);
+                eputs("`\n");
+                exit(1);
+            case BR_ERR_MAIN_PROC_RET_TYPE_MISMATCH:
+                eputs("the `main` procedure must return nothing, instead the return type of `");
+                fprintType(stderr, err.entry_type);
+                eputs("` is declared\n");
+                exit(1);
+            case BR_ERR_MAIN_PROC_ARG_COUNT_MISMATCH:
+                eprintf("the `main` procedure must accept exactly 0 arguments, instead %d arguments were declared\n", err.n_args);
+                exit(1);
+            case BR_ERR_COMPARISON_TYPE_MISMATCH:
+                eputs("cannot compare a value of type `");
+                fprintType(stderr, getExprValueType(*err.left_expr));
+                eputs("` to a value of type `");
+                fprintType(stderr, err.entry_type);
+                eputs("`\n");
+                exit(1);
+            case BR_ERR_UNBRACKETED_SET_EXPR:
+                eputs("to use variable assignment as a value, wrap it in brackets\n");
+                exit(1);
+            case N_BR_ERRORS:
+            case BR_ERR_NONE:
+            default:
+                eprintf("undefined error code %d\n", err.code);
+                exit(1);
+        }
+    }
+}
+
 int getVarIndex(Expr expr)
 {
     int res = -1;
@@ -945,7 +1132,7 @@ int getVarIndex(Expr expr)
     return res;
 }
 
-void printAST(AST* ast, BRP* obj)
+void printAST(AST* ast)
 {
     chain_foreach(FuncDecl, func, ast->functions, 
         printTokenLoc(func.loc);
@@ -985,483 +1172,556 @@ bool matchType(TypeDef field_type, Expr* expr)
     return false;
 }
 
-BRError parseExpr(BRP* obj, Expr* dst, Expr* block, FuncDecl* func, AST* ast, int flags)
+void parseExpr(AST* ast, Expr* dst, Expr* block, FuncDecl* func, int flags);
+
+void parseVarDecl(AST* ast, Token token, TypeDef var_type, Expr* dst, Expr* block, FuncDecl* func, int flags)
 {
-    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in parseExpr");
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_NEW_VAR);
+
+    if (var_type.kind == KIND_VOID) raiseBRError(ast, (BRError){
+        .code = BR_ERR_VOID_VAR_DECL,
+        .loc = token
+    });
+    initExpr(dst);
+
+    token = fetchToken(ast->prep);
+    if (token.type != TOKEN_WORD) raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_VAR_NAME,
+        .loc = token
+    });
+    if (getVarDecl(block, token.word)) raiseBRError(ast, (BRError){
+        .code = BR_ERR_VAR_EXISTS,
+        .loc = token
+    });
+    addSubexpr(dst, (Expr){
+        .type = EXPR_NAME,
+        .str_literal = token.word,
+        .block = block,
+        .loc = dst->loc
+    });
+
+    TypeDef* new_var_type = malloc(sizeof(TypeDef));
+    *new_var_type = var_type;
+    addSubexpr(dst, (Expr){
+        .type = EXPR_TYPE,
+        .var_type = new_var_type,
+        .block = block,
+        .loc = dst->loc
+    });
+    addSubexpr(dst, (Expr){
+        .type = EXPR_REF,
+        .arg1 = getSubexpr(block, 0)->arg1,
+        .block = block,
+        .loc = dst->loc
+    });
+    getSubexpr(block, 0)->arg1 = dst;
+
+}
+
+void parseIntLiteral(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_INT);
+    dst->int_literal = token.value;
+}
+
+void parseStrLiteral(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_STRING);
+    dst->str_literal = token.word;
+}
+
+typedef void (*KwParser) (AST*, Token, Expr*, Expr*, FuncDecl*, int);
+
+void parseKwSys(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_SYSCALL);
+
+    initExpr(dst);
+    token = fetchToken(ast->prep);
+    if (token.type != TOKEN_WORD) raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_SYSCALL_NAME,
+        .loc = token
+    });
+    bool name_vaildated = false;
+    for (int i = 0; i < N_SYS_OPS; i++) {
+        if (sbufeq(syscallNames[i], fromstr(token.word))) {
+            name_vaildated = true;
+            break;
+        }
+    }
+    if (!name_vaildated) raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_SYSCALL_NAME,
+        .loc = token
+    });
+    addSubexpr(dst, (Expr){
+        .type = EXPR_NAME,
+        .name = token.word,
+        .block = block,
+        .loc = dst->loc
+    });
+
+    token = fetchToken(ast->prep);
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(ast, (BRError){
+        .code = BR_ERR_ARG_DEF_START_EXPECTED,
+        .loc = token
+    });
+
+    token = peekToken(ast->prep);
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
+        while (true) {
+            token = peekToken(ast->prep);
+            Expr* arg = addSubexpr(dst, (Expr){0});
+            parseExpr(ast, arg, dst->block, func, EXPRTERM_ARG | EXPR_EVALUATABLE);
+
+            token = fetchToken(ast->prep);
+            if (token.symbol_id == SYMBOL_ARGSPEC_END) {
+                break;
+            } else if (token.symbol_id != SYMBOL_COMMA) raiseBRError(ast, (BRError){
+                .code = BR_ERR_ARG_DEF_EXPECTED,
+                .loc = token
+            });
+        }
+    } else fetchToken(ast->prep);
+    if (getSubexprsCount(dst) > 7) raiseBRError(ast, (BRError){
+// syscalls cannot accept more than 6 arguments; 7 is 6 maximum arguments + the first expression, which holds the name of the syscall
+        .code = BR_ERR_TOO_MANY_SYSCALL_ARGS,
+        .loc = token,
+        .n_args = getSubexprsCount(dst) - 1
+    });
+}
+
+void parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_BUILTIN);
+
+    token = fetchToken(ast->prep);
+    if (token.type != TOKEN_WORD) raiseBRError(ast, (BRError){
+        .code = BR_ERR_BUILTIN_NAME_EXPECTED,
+        .loc = token
+    });
+    bool name_vaildated = false;
+    for (int i = 0; i < N_BUILTINS; i++) {
+        if (sbufeq(fromstr(builtins[i].name), fromstr(token.word))) {
+            name_vaildated = true;
+            break;
+        }
+    }
+    if (!name_vaildated) raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_BUILTIN_NAME,
+        .loc = token
+    });
+    dst->str_literal = token.word;
+}
+
+void parseKwReturn(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_RETURN);
+
+    dst->arg1 = calloc(1, sizeof(Expr));
+    parseExpr(ast, dst->arg1, block, func, EXPRTERM_FULL | EXPR_EVALUATABLE);
+
+    if (!matchType(func->return_type, dst->arg1)) raiseBRError(ast, (BRError){
+        .code = BR_ERR_RETURN_TYPE_MISMATCH,
+        .loc = token,
+        .func = func,
+        .entry_type = getExprValueType(*dst->arg1)
+    });
+}
+
+void parseKwCast(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_CAST);
+    
+    token = fetchToken(ast->prep);
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(ast, (BRError){
+        .code = BR_ERR_ARG_DEF_START_EXPECTED,
+        .loc = token
+    });
+
+    dst->arg1 = calloc(1, sizeof(Expr));
+    parseExpr(ast, dst->arg1, block, func, EXPRTERM_ARG | EXPR_EVALUATABLE);
+    token = fetchToken(ast->prep);
+    if (getTokenSymbolId(token) != SYMBOL_COMMA) raiseBRError(ast, (BRError){
+        .code = BR_ERR_CAST_TYPE_EXPECTED,
+        .loc = token
+    });
+
+    token = peekToken(ast->prep);
+    dst->var_type = malloc(sizeof(TypeDef));
+    if (!parseType(ast, dst->var_type)) raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_TYPE,
+        .loc = token
+    });
+    if (dst->var_type->kind == KIND_VOID) raiseBRError(ast, (BRError){
+        .code = BR_ERR_VOID_TYPE_CAST,
+        .loc = token
+    });
+    token = fetchToken(ast->prep);
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) raiseBRError(ast, (BRError){
+        .code = BR_ERR_ARG_DEF_END_EXPECTED,
+        .loc = token
+    });
+}
+
+void parseKwAndOr(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_LOGICAL_AND + token.keyword_id - KW_AND);
+
+    dst->arg2 = calloc(1, sizeof(Expr));
+    token = peekToken(ast->prep);
+    parseExpr(ast, dst->arg2, block, func, flags | EXPR_EVALUATABLE);
+
+    if (!matchType(getExprValueType(*dst->arg1), dst->arg2)) raiseBRError(ast, (BRError){
+        .code = BR_ERR_COMPARISON_TYPE_MISMATCH,
+        .loc = token,
+        .left_expr = dst->arg1,
+        .entry_type = getExprValueType(*dst->arg2)
+    });
+}
+
+void parseKwNot(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_LOGICAL_NOT);
+
+    dst->arg1 = calloc(1, sizeof(Expr));
+    parseExpr(ast, dst->arg1, block, func, flags | EXPR_EVALUATABLE);
+}
+
+void parseKwIf(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_IF);
+
+    token = fetchToken(ast->prep);
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(ast, (BRError){
+        .code = BR_ERR_ARG_DEF_START_EXPECTED,
+        .loc = token
+    });
+
+    dst->arg1 = calloc(1, sizeof(Expr));
+    parseExpr(ast, dst->arg1, block, func, EXPRTERM_BRACKET | EXPR_EVALUATABLE);
+    fetchToken(ast->prep);
+
+    if (!typeMatches(BOOL_TYPE, getExprValueType(*dst->arg1))) {
+        Expr* new_subexpr = dst->arg1;
+        dst->arg1 = malloc(sizeof(Expr));
+        *dst->arg1 = (Expr){
+            .type = EXPR_CAST,
+            .loc = token.loc,
+            .arg1 = new_subexpr,
+            .var_type = malloc(sizeof(TypeDef))
+        };
+        *dst->arg1->var_type = BOOL_TYPE;
+    }
+
+    dst->arg2 = calloc(1, sizeof(Expr));
+    token = peekToken(ast->prep);
+    parseExpr(ast, dst->arg2, block, func, EXPRTERM_FULL);
+    if (dst->arg2->type == EXPR_NEW_VAR) raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_VAR_DECL,
+        .loc = token
+    });
+}
+
+void parseInvalidKw(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_EXPR,
+        .loc = token
+    });
+}
+
+typedef void (*SymbolParser) (AST*, Token, Expr*, Expr*, FuncDecl*, int);
+
+void parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    switch (dst->type) {
+        case EXPR_NEW_VAR: {
+            Expr* var_initializer = addSubexpr(dst, (Expr){0});
+            token = peekToken(ast->prep);
+            parseExpr(ast, var_initializer, block, func, EXPRTERM_FULL | EXPR_EVALUATABLE);
+
+            if (!matchType(*getSubexpr(dst, 1)->var_type, var_initializer)) raiseBRError(ast, (BRError){
+                .code = BR_ERR_VAR_TYPE_MISMATCH,
+                .loc = token,
+                .var_decl = dst,
+                .entry_type = getExprValueType(*var_initializer)
+            });
+            break;
+        } case EXPR_GET_VAR:
+        case EXPR_GET_ARG:
+        case EXPR_NAME: {
+            if (flags & EXPR_EVALUATABLE && !(flags & EXPRTERM_BRACKET)) raiseBRError(ast, (BRError){
+                .code = BR_ERR_UNBRACKETED_SET_EXPR,
+                .loc = token
+            });
+
+            dst->loc = token.loc;
+            setExprType(ast, dst, EXPR_SET_VAR);
+
+            dst->arg2 = malloc(sizeof(Expr));
+            Token entry_loc = peekToken(ast->prep);
+            parseExpr(ast, dst->arg2, block, func, flags | EXPR_EVALUATABLE);
+
+            if (!matchType(*getSubexpr(dst->arg1->arg1, 1)->var_type, dst->arg2)) raiseBRError(ast, (BRError){
+                .code = BR_ERR_VAR_TYPE_MISMATCH,
+                .loc = entry_loc,
+                .var_decl = dst->arg1->arg1,
+                .entry_type = getExprValueType(*dst->arg2)
+            });
+            break;
+        } default: raiseBRError(ast, (BRError){
+            .code = BR_ERR_INVALID_EXPR,
+            .loc = token
+        });
+    }
+}
+
+void parseSymbolBlockStart(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_BLOCK);
+
+    initExpr(dst);
+    addSubexpr(dst, (Expr){
+        .type = EXPR_REF,
+        .block = dst,
+        .loc = dst->loc
+    });
+
+    while (true) {
+        token = peekToken(ast->prep);
+        if (token.type == TOKEN_NONE) raiseBRError(ast, (BRError){
+            .code = BR_ERR_UNCLOSED_BLOCK,
+            .loc = token
+        });
+        if (getTokenSymbolId(token) == SYMBOL_BLOCK_END) break;
+
+        Expr* expr = addSubexpr(dst, (Expr){0});
+        parseExpr(ast, expr, dst, func, EXPRTERM_FULL);
+        fetchToken(ast->prep);
+    }
+}
+
+void parseBinaryExprSymbol(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_ADD + token.symbol_id - SYMBOL_PLUS);
+
+    dst->arg2 = calloc(1, sizeof(Expr));
+    parseExpr(ast, dst->arg2, block, func, flags | EXPR_EVALUATABLE);
+}
+
+void parseSymbolTilde(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_NOT);
+
+    dst->arg1 = calloc(1, sizeof(Expr));
+    parseExpr(ast, dst->arg1, block, func, flags | EXPR_EVALUATABLE);
+}
+
+void parseSymbolArgspecStart(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    if (dst->type != EXPR_INVALID) {
+        setExprType(ast, dst, EXPR_FUNC_CALL);
+
+        FuncDecl* def = (FuncDecl*)getSubexpr(dst, 0)->arg1;
+        token = peekToken(ast->prep);
+        int arg_id = 0, expected_arg_count = getSubexprsCount(&def->args) - 1;
+
+        if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
+            ExprNode* arg_decl_iter = getSubexprs(&def->args)->start->next;
+            while (true) {
+                token = peekToken(ast->prep);
+                if (arg_id == expected_arg_count) raiseBRError(ast, (BRError){
+                    .code = BR_ERR_ARG_COUNT_MISMATCH,
+                    .loc = token,
+                    .func = def,
+                    .n_args = -1
+                });
+
+                Expr* arg = addSubexpr(dst, (Expr){0});
+                parseExpr(ast, arg, dst->block, func, EXPRTERM_ARG | EXPR_EVALUATABLE);
+                if (!matchType(*getSubexpr(&arg_decl_iter->value, 1)->var_type, arg)) raiseBRError(ast, (BRError){
+                    .code = BR_ERR_ARG_TYPE_MISMATCH,
+                    .loc = token,
+                    .entry_type = getExprValueType(*arg),
+                    .func = def,
+                    .arg_decl = &arg_decl_iter->value
+                });
+
+                arg_decl_iter = arg_decl_iter->next;
+                arg_id++;
+                token = fetchToken(ast->prep);
+                if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
+                    break;
+                } else if (token.symbol_id != SYMBOL_COMMA) raiseBRError(ast, (BRError){
+                    .code = BR_ERR_ARG_DEF_EXPECTED,
+                    .loc = token
+                });
+            }
+
+        } else fetchToken(ast->prep);
+
+        if (arg_id < expected_arg_count) raiseBRError(ast, (BRError){
+            .code = BR_ERR_ARG_COUNT_MISMATCH,
+            .loc = token,
+            .func = def,
+            .n_args = arg_id
+        });
+    } else {
+        dst->type = EXPR_WRAPPER;
+        dst->arg1 = calloc(1, sizeof(Expr));
+        printf("parsing a bracketed expression\n");
+        parseExpr(ast, dst->arg1, block, func, EXPRTERM_BRACKET | EXPR_EVALUATABLE);
+        printf("parsed a bracketed expression\n");
+        fetchToken(ast->prep);
+    }
+}
+
+void parseComparisonOperatorSymbol(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    static ExprType symbol_to_expr[N_SYMBOLS] = {
+        [SYMBOL_EQ] = EXPR_LOGICAL_EQ,
+        [SYMBOL_NEQ] = EXPR_LOGICAL_NEQ,
+        [SYMBOL_LT] = EXPR_LOGICAL_LT,
+        [SYMBOL_GT] = EXPR_LOGICAL_GT,
+        [SYMBOL_LE] = EXPR_LOGICAL_LE,
+        [SYMBOL_GE] = EXPR_LOGICAL_GE
+    };
+
+    dst->loc = token.loc;
+    setExprType(ast, dst, symbol_to_expr[token.symbol_id]);
+
+    dst->arg2 = calloc(1, sizeof(Expr));
+    token = peekToken(ast->prep);
+    parseExpr(ast, dst->arg2, block, func, flags | EXPR_EVALUATABLE);
+
+    if (!matchType(getExprValueType(*dst->arg1), dst->arg2)) raiseBRError(ast, (BRError){
+        .code = BR_ERR_COMPARISON_TYPE_MISMATCH,
+        .loc = token,
+        .left_expr = dst->arg1,
+        .entry_type = getExprValueType(*dst->arg2)
+    });
+}
+
+void parseInvalidSymbol(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_EXPR,
+        .loc = token
+    });
+}
+
+void parseWord(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    setExprType(ast, dst, EXPR_NAME);
+    dst->name = token.word;
+}
+
+void parseEmptyToken(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_EXPR,
+        .loc = token
+    });
+}
+
+void parseExpr(AST* ast, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    static_assert(N_EXPR_TYPES == 40, "not all expression types are handled in parseExpr");
     TypeDef new_type;
-    BRError expr_term_err = {0};
     Token token;
 
     dst->block = block;
-    while (!BRPempty(obj)) {
-        token = peekToken(obj);
-        if (isExprTerm(token, flags, &expr_term_err)) {
-            break;
-        } else if (expr_term_err.code) return expr_term_err;
+    while (true) {
+        token = peekToken(ast->prep);
+        if (isExprTerm(ast, token, dst, flags)) break;
 
-        BRError type_err = parseType(obj, &new_type);
-        if ((int)type_err.code > 0) return type_err;
-        if (type_err.code == 0) {
-            dst->loc = token.loc;
-            BRError err = setExprType(ast, dst, EXPR_NEW_VAR);
-            if (err.code) return err;
-
-            if (new_type.kind == KIND_VOID) return (BRError){
-                .code = BR_ERR_VOID_VAR_DECL,
-                .loc = token
-            };
-            initExpr(dst);
-
-            token = fetchToken(obj);
-            if (token.type != TOKEN_WORD) return (BRError){
-                .code = BR_ERR_INVALID_VAR_NAME,
-                .loc = token
-            };
-            if (getVarDecl(block, token.word)) return (BRError){
-                .code = BR_ERR_VAR_EXISTS,
-                .loc = token
-            };
-            addSubexpr(dst, (Expr){
-                .type = EXPR_NAME,
-                .str_literal = token.word,
-                .block = block,
-                .loc = dst->loc
-            });
-
-            TypeDef* new_var_type = malloc(sizeof(TypeDef));
-            *new_var_type = new_type;
-            addSubexpr(dst, (Expr){
-                .type = EXPR_TYPE,
-                .var_type = new_var_type,
-                .block = block,
-                .loc = dst->loc
-            });
-            addSubexpr(dst, (Expr){
-                .type = EXPR_REF,
-                .arg1 = getSubexpr(block, 0)->arg1,
-                .block = block,
-                .loc = dst->loc
-            });
-            getSubexpr(block, 0)->arg1 = dst;
-        } else if (token.type == TOKEN_INT) {
-            dst->loc = token.loc;
-            BRError err = setExprType(ast, dst, EXPR_INT);
-            if (err.code) return err;
-
-            fetchToken(obj);
-            dst->int_literal = token.value;
+        if (parseType(ast, &new_type)) {
+            parseVarDecl(ast, token, new_type, dst, block, func, flags);
+            continue;
+        }
+        
+        fetchToken(ast->prep);
+        if (token.type == TOKEN_INT) {
+            parseIntLiteral(ast, token, dst, block, func, flags);
         } else if (token.type == TOKEN_STRING) {
-            dst->loc = token.loc;
-            BRError err = setExprType(ast, dst, EXPR_STRING);
-            if (err.code) return err;
-
-            fetchToken(obj);
-            dst->str_literal = token.word;
+            parseStrLiteral(ast, token, dst, block, func, flags);
         } else if (token.type == TOKEN_KEYWORD) {
-            switch (token.keyword_id) {
-                case KW_SYS: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_SYSCALL);
-                    if (err.code) return err;
-                    fetchToken(obj);
-
-                    initExpr(dst);
-                    token = fetchToken(obj);
-                    if (token.type != TOKEN_WORD) return (BRError){
-                        .code = BR_ERR_INVALID_SYSCALL_NAME,
-                        .loc = token
-                    };
-                    bool name_vaildated = false;
-                    for (int i = 0; i < N_SYS_OPS; i++) {
-                        if (sbufeq(syscallNames[i], fromstr(token.word))) {
-                            name_vaildated = true;
-                            break;
-                        }
-                    }
-                    if (!name_vaildated) return (BRError){
-                        .code = BR_ERR_INVALID_SYSCALL_NAME,
-                        .loc = token
-                    };
-                    addSubexpr(dst, (Expr){
-                        .type = EXPR_NAME,
-                        .name = token.word,
-                        .block = block,
-                        .loc = dst->loc
-                    });
-
-                    token = fetchToken(obj);
-                    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) return (BRError){
-                        .code = BR_ERR_ARG_DEF_START_EXPECTED,
-                        .loc = token
-                    };
-
-                    token = peekToken(obj);
-                    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
-                        while (true) {
-                            token = peekToken(obj);
-                            Expr* arg = addSubexpr(dst, (Expr){0});
-                            BRError err = parseExpr(obj, arg, dst->block, func, ast, EXPRTERM_ARG | EXPR_EVALUATABLE);
-                            if (err.code) return err;
-
-                            token = fetchToken(obj);
-                            if (token.symbol_id == SYMBOL_ARGSPEC_END) {
-                                break;
-                            } else if (token.symbol_id != SYMBOL_COMMA) return (BRError){
-                                .code = BR_ERR_ARG_DEF_EXPECTED,
-                                .loc = token
-                            };
-                        }
-                    } else fetchToken(obj);
-                    if (getSubexprsCount(dst) > 7) return (BRError){
-// syscalls cannot accept more than 6 arguments; 7 is 6 maximum arguments + the first expression, which holds the name of the syscall
-                        .code = BR_ERR_TOO_MANY_SYSCALL_ARGS,
-                        .loc = token,
-                        .n_args = getSubexprsCount(dst) - 1
-                    };
-                    break;
-                } case KW_BUILTIN: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_BUILTIN);
-                    if (err.code) return err;
-                    fetchToken(obj);
-
-                    token = fetchToken(obj);
-                    if (token.type != TOKEN_WORD) return (BRError){
-                        .code = BR_ERR_BUILTIN_NAME_EXPECTED,
-                        .loc = token
-                    };
-                    bool name_vaildated = false;
-                    for (int i = 0; i < N_BUILTINS; i++) {
-                        if (sbufeq(fromstr(builtins[i].name), fromstr(token.word))) {
-                            name_vaildated = true;
-                            break;
-                        }
-                    }
-                    if (!name_vaildated) return (BRError){
-                        .code = BR_ERR_INVALID_BUILTIN_NAME,
-                        .loc = token
-                    };
-                    dst->str_literal = token.word;
-                    break;
-                } case KW_RETURN: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_RETURN);
-                    if (err.code) return err;
-                    fetchToken(obj);
-
-                    dst->arg1 = calloc(1, sizeof(Expr));
-                    err = parseExpr(obj, dst->arg1, block, func, ast, EXPRTERM_FULL | EXPR_EVALUATABLE);
-                    if (err.code) return err;
-
-                    if (!matchType(func->return_type, dst->arg1)) return (BRError){
-                        .code = BR_ERR_RETURN_TYPE_MISMATCH,
-                        .loc = token,
-                        .func = func,
-                        .entry_type = getExprValueType(*dst->arg1)
-                    };
-                    break;
-                } case KW_CAST: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_CAST);
-                    if (err.code) return err;
-                    fetchToken(obj);
-                    
-                    token = fetchToken(obj);
-                    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) return (BRError){
-                        .code = BR_ERR_ARG_DEF_START_EXPECTED,
-                        .loc = token
-                    };
-
-                    dst->arg1 = calloc(1, sizeof(Expr));
-                    err = parseExpr(obj, dst->arg1, block, func, ast, EXPRTERM_ARG | EXPR_EVALUATABLE);
-                    if (err.code) return err;
-                    token = fetchToken(obj);
-                    if (getTokenSymbolId(token) != SYMBOL_COMMA) return (BRError){
-                        .code = BR_ERR_CAST_TYPE_EXPECTED,
-                        .loc = token
-                    };
-
-                    token = peekToken(obj);
-                    dst->var_type = malloc(sizeof(TypeDef));
-                    err = parseType(obj, dst->var_type);
-                    if (err.code == -1) return (BRError){
-                        .code = BR_ERR_INVALID_TYPE,
-                        .loc = token
-                    };
-                    if (err.code) return err;
-                    if (dst->var_type->kind == KIND_VOID) return (BRError){
-                        .code = BR_ERR_VOID_TYPE_CAST,
-                        .loc = token
-                    };
-                    token = fetchToken(obj);
-                    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) return (BRError){
-                        .code = BR_ERR_ARG_DEF_END_EXPECTED,
-                        .loc = token
-                    };
-                    break;
-                } case KW_AND:
-                case KW_OR: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_LOGICAL_AND + token.keyword_id - KW_AND);
-                    if (err.code) return err;
-                    fetchToken(obj);
-
-                    dst->arg2 = calloc(1, sizeof(Expr));
-                    token = peekToken(obj);
-                    err = parseExpr(obj, dst->arg2, block, func, ast, flags | EXPR_EVALUATABLE);
-                    if (err.code) return err;
-
-                    if (!matchType(getExprValueType(*dst->arg1), dst->arg2)) return (BRError){
-                        .code = BR_ERR_COMPARISON_TYPE_MISMATCH,
-                        .loc = token,
-                        .left_expr = dst->arg1,
-                        .entry_type = getExprValueType(*dst->arg2)
-                    };
-                    break;
-                } case KW_NOT: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_LOGICAL_NOT);
-                    if (err.code) return err;
-                    fetchToken(obj);
-
-                    dst->arg1 = calloc(1, sizeof(Expr));
-                    err = parseExpr(obj, dst->arg1, block, func, ast, flags | EXPR_EVALUATABLE);
-                    if (err.code) return err;
-
-                    break;
-                } default: return (BRError){
-                    .code = BR_ERR_INVALID_EXPR,
-                    .loc = token
-                };
-            }
-        } else if (token.type == TOKEN_SYMBOL) {
-            fetchToken(obj);
-            switch (token.symbol_id) {
-                case SYMBOL_ASSIGNMENT: {
-                    switch (dst->type) {
-                        case EXPR_NEW_VAR: {
-                            Expr* var_initializer = addSubexpr(dst, (Expr){0});
-
-                            token = peekToken(obj);
-                            BRError err = parseExpr(obj, var_initializer, block, func, ast, EXPRTERM_FULL | EXPR_EVALUATABLE);
-                            if (err.code) return err;
-
-                            if (!matchType(*getSubexpr(dst, 1)->var_type, var_initializer)) return (BRError){
-                                .code = BR_ERR_VAR_TYPE_MISMATCH,
-                                .loc = token,
-                                .var_decl = dst,
-                                .entry_type = getExprValueType(*var_initializer)
-                            };
-                            break;
-                        } case EXPR_GET_VAR:
-                        case EXPR_GET_ARG:
-                        case EXPR_NAME: {
-                            if (flags & EXPR_EVALUATABLE ? !(flags & EXPRTERM_BRACKET) : false) return (BRError){
-                                .code = BR_ERR_UNBRACKETED_SET_EXPR,
-                                .loc = token
-                            };
-
-                            dst->loc = token.loc;
-                            BRError err = setExprType(ast, dst, EXPR_SET_VAR);
-                            if (err.code) return err;
-
-                            dst->arg2 = malloc(sizeof(Expr));
-                            Token entry_loc = peekToken(obj);
-                            err = parseExpr(obj, dst->arg2, block, func, ast, flags | EXPR_EVALUATABLE);
-                            if (err.code) return err;
-
-                            if (!matchType(*getSubexpr(dst->arg1->arg1, 1)->var_type, dst->arg2)) return (BRError){
-                                .code = BR_ERR_VAR_TYPE_MISMATCH,
-                                .loc = entry_loc,
-                                .var_decl = dst->arg1->arg1,
-                                .entry_type = getExprValueType(*dst->arg2)
-                            };
-                            break;
-                        } default: return (BRError){
-                            .code = BR_ERR_INVALID_EXPR,
-                            .loc = token
-                        };
-                    }
-                    break;
-                } case SYMBOL_BLOCK_START: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_BLOCK);
-                    if (err.code) return err;
-
-                    initExpr(dst);
-                    addSubexpr(dst, (Expr){
-                        .type = EXPR_REF,
-                        .block = dst,
-                        .loc = dst->loc
-                    });
-
-                    while (true) {
-                        token = peekToken(obj);
-                        if (token.type == TOKEN_NONE) return (BRError){
-                            .code = BR_ERR_UNCLOSED_BLOCK,
-                            .loc = token
-                        };
-                        if (getTokenSymbolId(token) == SYMBOL_BLOCK_END) {
-                            fetchToken(obj);
-                            return (BRError){0};
-                        }
-
-                        Expr* expr = addSubexpr(dst, (Expr){0});
-                        BRError err = parseExpr(obj, expr, dst, func, ast, EXPRTERM_FULL);
-                        if (err.code) return err;
-                        fetchToken(obj);
-                    }
-                    break;
-                } case SYMBOL_MINUS:
-                case SYMBOL_PLUS:
-                case SYMBOL_STAR:
-                case SYMBOL_DIV:
-                case SYMBOL_AMPERSAND:
-                case SYMBOL_PIPE:
-                case SYMBOL_CARET:
-                case SYMBOL_LSHIFT:
-                case SYMBOL_RSHIFT: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_ADD + token.symbol_id - SYMBOL_PLUS);
-                    if (err.code) return err;
-
-                    dst->arg2 = calloc(1, sizeof(Expr));
-                    err = parseExpr(obj, dst->arg2, block, func, ast, flags | EXPR_EVALUATABLE);
-                    if (err.code) return err;
-                    break;
-                } case SYMBOL_TILDE: {
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, EXPR_NOT);
-                    if (err.code) return err;
-
-                    dst->arg1 = calloc(1, sizeof(Expr));
-                    err = parseExpr(obj, dst->arg1, block, func, ast, flags | EXPR_EVALUATABLE);
-                    if (err.code) return err;
-                    break;
-                } case SYMBOL_ARGSPEC_START: {
-                    dst->loc = token.loc;
-
-                    if (dst->type != EXPR_INVALID) {
-                        BRError err = setExprType(ast, dst, EXPR_FUNC_CALL);
-                        if (err.code) return err;
-
-                        FuncDecl* def = (FuncDecl*)getSubexpr(dst, 0)->arg1;
-                        token = peekToken(obj);
-                        int arg_id = 0, expected_arg_count = getSubexprsCount(&def->args) - 1;
-
-                        if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
-                            ExprNode* arg_decl_iter = getSubexprs(&def->args)->start->next;
-                            while (true) {
-                                token = peekToken(obj);
-                                if (arg_id == expected_arg_count) return (BRError){
-                                    .code = BR_ERR_ARG_COUNT_MISMATCH,
-                                    .loc = token,
-                                    .func = def,
-                                    .n_args = -1
-                                };
-
-                                Expr* arg = addSubexpr(dst, (Expr){0});
-                                BRError err = parseExpr(obj, arg, dst->block, func, ast, EXPRTERM_ARG | EXPR_EVALUATABLE);
-                                if (err.code) return err;
-                                if (!matchType(*getSubexpr(&arg_decl_iter->value, 1)->var_type, arg)) return (BRError){
-                                    .code = BR_ERR_ARG_TYPE_MISMATCH,
-                                    .loc = token,
-                                    .entry_type = getExprValueType(*arg),
-                                    .func = def,
-                                    .arg_decl = &arg_decl_iter->value
-                                };
-
-                                arg_decl_iter = arg_decl_iter->next;
-                                arg_id++;
-                                token = fetchToken(obj);
-                                if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
-                                    break;
-                                } else if (token.symbol_id != SYMBOL_COMMA) return (BRError){
-                                    .code = BR_ERR_ARG_DEF_EXPECTED,
-                                    .loc = token
-                                };
-                            }
-
-                        } else fetchToken(obj);
-
-                        if (arg_id < expected_arg_count) return (BRError){
-                            .code = BR_ERR_ARG_COUNT_MISMATCH,
-                            .loc = token,
-                            .func = def,
-                            .n_args = arg_id
-                        };
-                    } else {
-                        dst->type = EXPR_WRAPPER;
-                        dst->arg1 = calloc(1, sizeof(Expr));
-                        BRError err = parseExpr(obj, dst->arg1, block, func, ast, EXPRTERM_BRACKET | EXPR_EVALUATABLE);
-                        if (err.code) return err;
-                        fetchToken(obj);
-                    }
-                    break;
-                } case SYMBOL_EQ:
-                case SYMBOL_NEQ:
-                case SYMBOL_LT:
-                case SYMBOL_GT:
-                case SYMBOL_LE: 
-                case SYMBOL_GE: {
-                    static ExprType symbol_to_expr[N_SYMBOLS] = {
-                        [SYMBOL_EQ] = EXPR_LOGICAL_EQ,
-                        [SYMBOL_NEQ] = EXPR_LOGICAL_NEQ,
-                        [SYMBOL_LT] = EXPR_LOGICAL_LT,
-                        [SYMBOL_GT] = EXPR_LOGICAL_GT,
-                        [SYMBOL_LE] = EXPR_LOGICAL_LE,
-                        [SYMBOL_GE] = EXPR_LOGICAL_GE
-                    };
-
-                    dst->loc = token.loc;
-                    BRError err = setExprType(ast, dst, symbol_to_expr[token.symbol_id]);
-                    if (err.code) return err;
-
-                    dst->arg2 = calloc(1, sizeof(Expr));
-                    token = peekToken(obj);
-                    err = parseExpr(obj, dst->arg2, block, func, ast, flags | EXPR_EVALUATABLE);
-                    if (err.code) return err;
-
-                    if (!matchType(getExprValueType(*dst->arg1), dst->arg2)) return (BRError){
-                        .code = BR_ERR_COMPARISON_TYPE_MISMATCH,
-                        .loc = token,
-                        .left_expr = dst->arg1,
-                        .entry_type = getExprValueType(*dst->arg2)
-                    };
-                    break;
-                } default: return (BRError){
-                    .code = BR_ERR_INVALID_EXPR,
-                    .loc = token
-                };
-            }
-        } else if (token.type == TOKEN_WORD) {
-            dst->loc = token.loc;
-            BRError err = setExprType(ast, dst, EXPR_NAME);
-            if (err.code) return err;
-            dst->name = token.word;
-            fetchToken(obj);
-        } else if (token.type == TOKEN_NONE) {
-            return (BRError){
-                .code = BR_ERR_INVALID_EXPR,
-                .loc = token
+            static KwParser kw_parsers[] = {
+                [KW_VOID] = &parseInvalidKw,
+                [KW_INT8] = &parseInvalidKw,
+                [KW_INT16] = &parseInvalidKw,
+                [KW_INT32] = &parseInvalidKw,
+                [KW_INT64] = &parseInvalidKw,
+                [KW_SYS] = &parseKwSys,
+                [KW_BUILTIN] = &parseKwBuiltin,
+                [KW_RETURN] = &parseKwReturn,
+                [KW_CAST] = &parseKwCast,
+                [KW_BOOL] = &parseInvalidKw,
+                [KW_AND] = &parseKwAndOr,
+                [KW_OR] = &parseKwAndOr,
+                [KW_NOT] = &parseKwNot,
+                [KW_IF] = &parseKwIf
             };
+            static_assert(sizeof(kw_parsers) / sizeof(kw_parsers[0]) == N_KWS, "not all keywords are handled in parseExpr");
+            kw_parsers[token.keyword_id](ast, token, dst, block, func, flags);
+        } else if (token.type == TOKEN_SYMBOL) {
+            static SymbolParser symbol_parsers[] = {
+                [SYMBOL_ARGSPEC_START] = &parseSymbolArgspecStart,
+                [SYMBOL_ARGSPEC_END] = &parseInvalidSymbol,
+                [SYMBOL_COMMA] = &parseInvalidSymbol,
+                [SYMBOL_BLOCK_START] = &parseSymbolBlockStart,
+                [SYMBOL_BLOCK_END] = &parseInvalidSymbol,
+                [SYMBOL_SEMICOLON] = &parseInvalidSymbol,
+                [SYMBOL_EQ] = &parseComparisonOperatorSymbol,
+                [SYMBOL_NEQ] = &parseComparisonOperatorSymbol,
+                [SYMBOL_LE] = &parseComparisonOperatorSymbol,
+                [SYMBOL_GE] = &parseComparisonOperatorSymbol,
+                [SYMBOL_ASSIGNMENT] = &parseSymbolAssignment,
+                [SYMBOL_PLUS] = &parseBinaryExprSymbol,
+                [SYMBOL_MINUS] = &parseBinaryExprSymbol,
+                [SYMBOL_STAR] = &parseInvalidSymbol,
+                [SYMBOL_DIV] = &parseBinaryExprSymbol,
+                [SYMBOL_AMPERSAND] = &parseBinaryExprSymbol,
+                [SYMBOL_PIPE] = &parseBinaryExprSymbol,
+                [SYMBOL_CARET] = &parseBinaryExprSymbol,
+                [SYMBOL_LSHIFT] = &parseBinaryExprSymbol,
+                [SYMBOL_RSHIFT] = &parseBinaryExprSymbol,
+                [SYMBOL_TILDE] = &parseSymbolTilde,
+                [SYMBOL_LT] = &parseComparisonOperatorSymbol,
+                [SYMBOL_GT] = &parseComparisonOperatorSymbol
+            };
+            static_assert(sizeof(symbol_parsers) / sizeof(symbol_parsers[0]) == N_SYMBOLS, "not all symbols are handled in parseExpr");
+            symbol_parsers[token.symbol_id](ast, token, dst, block, func, flags);
+        } else if (token.type == TOKEN_WORD) {
+            parseWord(ast, token, dst, block, func, flags);
+        } else if (token.type == TOKEN_NONE) {
+            parseEmptyToken(ast, token, dst, block, func, flags);
         } else {
-            eprintf("internal compiler bug: invalid token type %hhd\n", token.type);
+            eprintf("internal compiler bug: invalid token type %hhd in parseExpr\n", token.type);
             abort();
         }
     }
 
-    if (dst->type == EXPR_NAME) {
-        BRError err = setExprType(ast, dst, EXPR_GET_VAR);
-        if (err.code) return err;
-    }
-    if (!isExprEvaluatable(dst->type) && flags & EXPR_EVALUATABLE) {
-        return (BRError){
-            .code = BR_ERR_NO_VALUE_EXPR,
-            .loc = token
-        };
-    }
-    return (BRError){0};
+    if (dst->type == EXPR_NAME) setExprType(ast, dst, EXPR_GET_VAR);
+    if (!isExprEvaluatable(dst->type) && flags & EXPR_EVALUATABLE) raiseBRError(ast, (BRError){
+        .code = BR_ERR_NO_VALUE_EXPR,
+        .loc = token
+    });
 }
 
 void reorderExpr(Expr* expr)
@@ -1484,6 +1744,7 @@ void reorderExpr(Expr* expr)
         [EXPR_GET_ARG    ] = 0,
         [EXPR_CAST       ] = 0,
         [EXPR_WRAPPER    ] = 0,
+        [EXPR_IF         ] = 0,
         [EXPR_NOT        ] = 1,
         [EXPR_LOGICAL_NOT] = 1,
         [EXPR_MUL        ] = 2,
@@ -1507,7 +1768,7 @@ void reorderExpr(Expr* expr)
         [EXPR_SET_VAR    ] = 12,
         [EXPR_RETURN     ] = 13
     };
-    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in reorderExpr");
+    static_assert(N_EXPR_TYPES == 40, "not all expression types are handled in reorderExpr");
 
     int expr_order = expr_order_table[expr->type];
     switch (expr_arity_table[expr->type]) {
@@ -1648,9 +1909,10 @@ void removeExprWrappers(Expr* expr)
     }
 }
 
-BRError parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
+void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
 {
     Token token;
+    dst->prep = obj;
     dst->functions = FuncDeclChain_new(0);
     dst->globals.type = EXPR_BLOCK;
     dst->globals.block = NULL;
@@ -1659,9 +1921,7 @@ BRError parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
 
     while (true) {
         TypeDef type;
-        BRError type_err = parseType(obj, &type);
-        if ((int)type_err.code > 0) return type_err;
-        if (type_err.code == -1) type = VOID_TYPE;
+        if (!parseType(dst, &type)) type = VOID_TYPE;
 // fetching function name
         Token func_name_spec = fetchToken(obj);
         if (func_name_spec.type == TOKEN_WORD) {
@@ -1687,20 +1947,18 @@ BRError parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
                 .loc = new_func->args.loc
             });
     // fetching function prototype specification
-            if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) return (BRError){
+            if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(dst, (BRError){
                 .code = BR_ERR_ARG_DEF_START_EXPECTED,
                 .loc = token
-            };
+            });
             while (true) {
                 Token type_spec = peekToken(obj);
-                BRError err = parseType(obj, &type);
-                if ((int)err.code > 0) return err;
-                if (err.code == 0) {
+                if (parseType(dst, &type)) {
                     token = fetchToken(obj);
-                    if (token.type != TOKEN_WORD) return (BRError){
+                    if (token.type != TOKEN_WORD) raiseBRError(dst, (BRError){
                         .code = BR_ERR_ARG_NAME_EXPECTED,
                         .loc = token
-                    };
+                    });
 
                     Expr* new_arg = addSubexpr(&new_func->args, (Expr){
                         .type = EXPR_NEW_ARG,
@@ -1732,48 +1990,46 @@ BRError parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
                     token = fetchToken(obj);
                     if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
                         break;
-                    } else if (getTokenSymbolId(token) != SYMBOL_COMMA) return (BRError){
+                    } else if (getTokenSymbolId(token) != SYMBOL_COMMA) raiseBRError(dst, (BRError){
                         .code = BR_ERR_ARG_DEF_EXPECTED,
                         .loc = token
-                    };
+                    });
                 }
             }
 
             if (streq(func_name_spec.word, "main")) {
-                if (new_func->return_type.kind != KIND_VOID) return (BRError){
+                if (new_func->return_type.kind != KIND_VOID) raiseBRError(dst, (BRError){
                     .code = BR_ERR_MAIN_PROC_RET_TYPE_MISMATCH,
                     .loc = func_name_spec,
                     .entry_type = new_func->return_type
-                };
+                });
                 int main_proc_n_args = getSubexprsCount(&new_func->args) - 1;
-                if (main_proc_n_args != 0) return (BRError){
+                if (main_proc_n_args != 0) raiseBRError(dst, (BRError){
                     .code = BR_ERR_MAIN_PROC_ARG_COUNT_MISMATCH,
                     .loc = token,
                     .n_args = main_proc_n_args
-                };
+                });
             }
     // parsing the function body
             token = peekToken(obj);
             if (getTokenSymbolId(token) != SYMBOL_SEMICOLON) {
-                BRError err = parseExpr(obj, &new_func->body, &new_func->args, new_func, dst, EXPRTERM_FULL);
-                if (err.code) return err;
-                if (new_func->body.type == EXPR_NEW_VAR) return (BRError){
-                    .code = BR_ERR_INVALID_FUNC_DEF,
+                parseExpr(dst, &new_func->body, &new_func->args, new_func, EXPRTERM_FULL);
+                if (new_func->body.type == EXPR_NEW_VAR) raiseBRError(dst, (BRError){
+                    .code = BR_ERR_INVALID_VAR_DECL,
                     .loc = token
-                };
+                });
+                fetchToken(obj);
                 lowerExpr(&new_func->body);
                 reorderExpr(&new_func->body);
                 removeExprWrappers(&new_func->body);
             } else fetchToken(obj);
         } else if (func_name_spec.type == TOKEN_NONE) {
             break;
-        } else return (BRError){
+        } else raiseBRError(dst, (BRError){
             .code = BR_ERR_INVALID_GLOBAL_STMT,
             .loc = func_name_spec
-        };
+        });
     }
-
-    return (BRError){0};
 }
 
 typedef uint8_t regstate_t;
@@ -1810,6 +2066,31 @@ void compileRegUncaching(ASTCompilerCtx* ctx, regstate_t state, int cache_id)
     }
 }
 
+void getRegister(ASTCompilerCtx* ctx, regstate_t* reg_state, int excluded, int* reg_id, int* cache_id)
+{
+    if (~(*reg_state) == 0) {
+        *reg_id = (excluded + 1) % N_USER_REGS;
+        *reg_state &= ~(1 << *reg_id);
+        *cache_id = compileRegCaching(ctx, 1 << *reg_id);
+    } else {
+        *cache_id = -1;
+        for (int i = 0; i < 8; i++) {
+            if ((*reg_state & (1 << i)) == 0) {
+                *reg_id = i;
+                break;
+            }
+        }
+    }
+}
+
+void freeRegister(ASTCompilerCtx* ctx, regstate_t* reg_state, int reg_id, int cache_id)
+{
+    if (cache_id >= 0) {
+        *reg_state |= 1 << reg_id;
+        compileRegUncaching(ctx, 1 << reg_id, cache_id);
+    }
+}
+
 void compileSrcRef(ASTCompilerCtx* ctx, TokenLoc loc)
 {
     sbuf path_s = fromstr(loc.src_name);
@@ -1830,7 +2111,7 @@ void compileSrcRef(ASTCompilerCtx* ctx, TokenLoc loc)
 
 regstate_t getArgCacheState(Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 39, "not all expression types are handled in getArgCacheState");
+    static_assert(N_EXPR_TYPES == 40, "not all expression types are handled in getArgCacheState");
     regstate_t res = 0;
     switch (expr.type) {
         case EXPR_SYSCALL:
@@ -1859,6 +2140,7 @@ regstate_t getArgCacheState(Expr expr)
         case EXPR_LOGICAL_GE:
         case EXPR_LOGICAL_AND:
         case EXPR_LOGICAL_OR:
+        case EXPR_IF:
             res |= getArgCacheState(*expr.arg1);
             res |= getArgCacheState(*expr.arg2);
             break;
@@ -2037,27 +2319,14 @@ bool compileExprAdd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tadd r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
+        
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\taddr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\taddr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\taddr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2080,27 +2349,14 @@ bool compileExprSub(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tsub r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tsubr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tsubr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tsubr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2117,27 +2373,14 @@ bool compileExprMul(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tmul r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tmulr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tmulr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tmulr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2151,27 +2394,14 @@ bool compileExprDiv(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tdivs r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tdivsr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tdivsr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tdivsr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2188,27 +2418,14 @@ bool compileExprAnd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tand r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tandr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tandr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tandr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2225,27 +2442,14 @@ bool compileExprOr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tor r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\torr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\torr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\torr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2262,27 +2466,14 @@ bool compileExprXor(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\txor r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\txorr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\txorr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\txorr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2296,27 +2487,14 @@ bool compileExprShl(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tshl r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tshlr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tshlr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tshlr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2330,27 +2508,14 @@ bool compileExprShr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tshrs r%d r%d %lld\n", dst_reg, dst_reg, expr.arg2->int_literal);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tshrsr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tshrsr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tshrsr r%d r%d r%d\n", dst_reg, dst_reg, arg2_dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2376,27 +2541,14 @@ bool compileExprLogicalEq(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, 
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tcmp r%d %lld\n\tsetc r%d equ\n", dst_reg, expr.arg2->int_literal, dst_reg);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d equ\n", dst_reg, arg2_dst_reg, dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d equ\n", dst_reg, arg2_dst_reg, dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d equ\n", dst_reg, arg2_dst_reg, dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2413,27 +2565,14 @@ bool compileExprLogicalNeq(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tcmp r%d %lld\n\tsetc r%d neq\n", dst_reg, expr.arg2->int_literal, dst_reg);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2450,27 +2589,14 @@ bool compileExprLogicalLt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, 
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tcmp r%d %lld\n\tsetc r%d lts\n", dst_reg, expr.arg2->int_literal, dst_reg);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d lts\n", dst_reg, arg2_dst_reg, dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d lts\n", dst_reg, arg2_dst_reg, dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d lts\n", dst_reg, arg2_dst_reg, dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2487,27 +2613,14 @@ bool compileExprLogicalGt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, 
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tcmp r%d %lld\n\tsetc r%d gts\n", dst_reg, expr.arg2->int_literal, dst_reg);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d gts\n", dst_reg, arg2_dst_reg, dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d gts\n", dst_reg, arg2_dst_reg, dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d gts\n", dst_reg, arg2_dst_reg, dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2524,27 +2637,14 @@ bool compileExprLogicalLe(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, 
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tcmp r%d %lld\n\tsetc r%d les\n", dst_reg, expr.arg2->int_literal, dst_reg);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d les\n", dst_reg, arg2_dst_reg, dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d les\n", dst_reg, arg2_dst_reg, dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d les\n", dst_reg, arg2_dst_reg, dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2561,27 +2661,14 @@ bool compileExprLogicalGe(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, 
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tcmp r%d %lld\n\tsetc r%d ges\n", dst_reg, expr.arg2->int_literal, dst_reg);
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d ges\n", dst_reg, arg2_dst_reg, dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d ges\n", dst_reg, arg2_dst_reg, dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tcmpr r%d r%d\n\tsetc r%d ges\n", dst_reg, arg2_dst_reg, dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2606,27 +2693,14 @@ bool compileExprLogicalAnd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
             fprintf(ctx->dst, "\tset r%d 0\n", dst_reg);
         }
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmp r%d 0\n\tcmp:neq r%d 0\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmp r%d 0\n\tcmp:neq r%d 0\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tcmp r%d 0\n\tcmp:neq r%d 0\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2651,27 +2725,14 @@ bool compileExprLogicalOr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, 
             fprintf(ctx->dst, "\tcmp r%d 0\n\tsetc r%d neq\n", dst_reg, dst_reg);
         }
     } else {
-        int arg2_dst_reg = -1;
-        for (int i = 0; i < 8; i++) {
-            if (reg_state & (1 << i) && i != dst_reg) {
-                arg2_dst_reg = i;
-                break;
-            }
-        }
+        int arg2_dst_reg, cache_id;
+        getRegister(ctx, &reg_state, dst_reg, &arg2_dst_reg, &cache_id);
 
-        if (arg2_dst_reg >= 0) {
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmp r%d 0\n\tcmp:equ r%d 0\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
-        } else {
-            arg2_dst_reg = (dst_reg + 1) % 8;
-            reg_state &= ~(1 << arg2_dst_reg);
-            int cache_id = compileRegCaching(ctx, 1 << arg2_dst_reg);
-            if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
-            fprintf(ctx->dst, "\tcmp r%d 0\n\tcmp:equ r%d 0\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
-            compileRegUncaching(ctx, 1 << arg2_dst_reg, cache_id);
-        }
+        if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state | dst_reg, arg2_dst_reg)) return false;
+        fprintf(ctx->dst, "\tcmp r%d 0\n\tcmp:equ r%d 0\n\tsetc r%d neq\n", dst_reg, arg2_dst_reg, dst_reg);
+
+        freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
     }
 
     return true;
@@ -2683,6 +2744,20 @@ bool compileExprLogicalNot(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
 
     if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
     fprintf(ctx->dst, "\tcmp r%d 0\n\t setc r%d equ", dst_reg, dst_reg);
+    return true;
+}
+
+static int block_counter = 0;
+
+bool compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+{
+    compileSrcRef(ctx, expr.loc);
+
+    if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
+    fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:equ .if_%d_end\n", dst_reg, block_counter);
+    if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg)) return false;
+    fprintf(ctx->dst, "\tmark .if_%d_end\n", block_counter++);
+
     return true;
 }
 
@@ -2725,9 +2800,10 @@ ExprCompiler expr_compilers[] = {
     [EXPR_LOGICAL_AND] = &compileExprLogicalAnd,
     [EXPR_LOGICAL_OR ] = &compileExprLogicalOr,
     [EXPR_LOGICAL_NOT] = &compileExprLogicalNot,
-    [EXPR_WRAPPER    ] = &compileExprInvalid
+    [EXPR_WRAPPER    ] = &compileExprInvalid,
+    [EXPR_IF         ] = &compileExprIf
 };
-static_assert(N_EXPR_TYPES == 39, "not all expression types have corresponding compilers defined");
+static_assert(N_EXPR_TYPES == 40, "not all expression types have corresponding compilers defined");
 
 bool compileAST(AST* src, FILE* dst)
 {
@@ -2913,7 +2989,7 @@ int main(int argc, char* argv[])
         BRP_HIDDEN_SYMBOL(" "),
         BRP_HIDDEN_SYMBOL("\t")
     );
-    static_assert(N_KWS == 13, "not all keywords are handled");
+    static_assert(N_KWS == 14, "not all keywords are handled");
     setKeywords(
         &prep,
         BRP_KEYWORD("void"),
@@ -2928,204 +3004,16 @@ int main(int argc, char* argv[])
         BRP_KEYWORD("bool"),
         BRP_KEYWORD("and"),
         BRP_KEYWORD("or"),
-        BRP_KEYWORD("not")
+        BRP_KEYWORD("not"),
+        BRP_KEYWORD("if")
     );
-	if (!setInput(&prep, input_path)) {
-		printBRPError(stderr, &prep);
-		return 1;
-	}
+	setInput(&prep, input_path);
 
     AST ast;
-    BRError err = parseSourceCode(&prep, &ast);
-    
-    static_assert(N_BR_ERRORS == 32, "not all BRidge errors are handled");
-    if (err.code) {
-        fprintTokenLoc(stderr, err.loc.loc);
-        eputs("error: ");
-        switch (err.code) {
-            case BR_ERR_INVALID_GLOBAL_STMT:
-                eputs("expected a global statement specifier, instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_FUNC_NAME_EXPECTED:
-                eputs("expected a word as function name specifier, instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_ARG_DEF_START_EXPECTED:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_START }, &prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_ARG_DEF_EXPECTED:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_COMMA }, &prep);
-                eputs(" or ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_END }, &prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_ARG_NAME_EXPECTED:
-                eputs("expected word as a name of the function argument, instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_INVALID_SYSCALL_NAME:
-                eputs("expected word as the syscall name specifier, instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_INVALID_FUNC_DEF:
-                eputs("invalid funtion definition\n");
-                return 1;
-            case BR_ERR_BUILTIN_NAME_EXPECTED:
-                eputs("expected a word as the name of the built-in value, instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_INVALID_BUILTIN_NAME:
-                eprintf("unknown built-in value `%s`\n", err.loc.word);
-                return 1;
-            case BR_ERR_INVALID_EXPR:
-                eputs("invalid expression\n");
-                return 1;
-            case BR_ERR_TOO_MANY_SYSCALL_ARGS:
-                eprintf("expected at most 6 arguments for a syscall, instead got %d\n", err.n_args);
-                return 1;
-            case BR_ERR_INVALID_VAR_NAME:
-                eputs("expected a word as the variable name, instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_NO_VALUE_EXPR:
-                eputs("expected a value\n");
-                return 1;
-            case BR_ERR_UNCLOSED_BLOCK:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_BLOCK_END }, &prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_UNKNOWN_VAR:
-                eprintf("unknown variable name `%s`\n", err.loc.word);
-                return 1;
-            case BR_ERR_VAR_EXISTS:
-                eprintf("variable `%s` is aliready declared\n", err.loc.word);
-                return 1;
-            case BR_ERR_INVALID_TYPE:
-                eputs("invalid type specifier\n");
-                return 1;
-            case BR_ERR_VAR_TYPE_MISMATCH: {
-                char* var_name = getSubexpr(err.var_decl, 0)->name;
-                eprintf("variable `%s` expects a value of type `", var_name);
-                fprintType(stderr, *getSubexpr(err.var_decl, 1)->var_type);
-                eputs("`, instead got a value of type `");
-                fprintType(stderr, err.entry_type);
-                eputs("`\n");
-                fprintTokenLoc(stderr, err.var_decl->loc);
-                eprintf("note: variable `%s` is declared here\n", var_name);
-                return 1;
-            } case BR_ERR_VOID_VAR_DECL:
-                eputs("cannot declare a variable of type `");
-                fprintType(stderr, VOID_TYPE);
-                eputs("`\n");
-                return 1;
-            case BR_ERR_UNKNOWN_FUNC:
-                eprintf("unknown function name `%s`\n", err.loc.word);
-                return 1;
-            case BR_ERR_TOO_MANY_FUNC_ARGS:
-                eprintf("expected at most 6 arguments to a function, instead got %d", err.n_args);
-                return 1;
-            case BR_ERR_RETURN_TYPE_MISMATCH:
-                eprintf("function `%s` is declared to return a value of type `", err.func->name);
-                fprintType(stderr, err.func->return_type);
-                eputs("`, instead attempted to return value of type `");
-                fprintType(stderr, err.entry_type);
-                eputs("`\n");
-                fprintTokenLoc(stderr, err.func->loc);
-                eprintf("note: function `%s` is declared here\n", err.func->name);
-                return 1;
-            case BR_ERR_ARG_COUNT_MISMATCH:
-                if (err.n_args >= 0) {
-                    eprintf(
-                        "function `%s` expects exactly %d argument(s), instead got %d\n",
-                        err.func->name, getSubexprsCount(&err.func->args) - 1, err.n_args
-                    );
-                } else {
-                    eprintf(
-                        "function `%s` expects exactly %d argument(s), instead got more\n",
-                        err.func->name, getSubexprsCount(&err.func->args) - 1
-                    );
-                }
-                fprintTokenLoc(stderr, err.func->loc);
-                eprintf("note: function `%s` is declared here\n", err.func->name);
-                return 1;
-            case BR_ERR_ARG_TYPE_MISMATCH:
-                if (err.func) {
-                    eprintf("argument `%s` of function `%s` expects a value of type `", getSubexpr(err.arg_decl, 0)->name, err.func->name);
-                    fprintType(stderr, *getSubexpr(err.arg_decl, 1)->var_type);
-                } else {
-                    eputs("a syscall argument expects a value of type `");
-                    fprintType(stderr, BUILTIN_VAL_TYPE);
-                }
-                eputs("`, instead got value of type `");
-                fprintType(stderr, err.entry_type);
-                eputs("`\n");
-                fprintTokenLoc(stderr, err.func->loc);
-                eprintf("note: function `%s` is declared here\n", err.func->name);
-                return 1;
-            case BR_ERR_CAST_TYPE_EXPECTED:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_COMMA }, &prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_ARG_DEF_END_EXPECTED:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_END }, &prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, &prep);
-                eputc('\n');
-                return 1;
-            case BR_ERR_VOID_TYPE_CAST:
-                eputs("cannot cast a value to type `");
-                fprintType(stderr, VOID_TYPE);
-                eputs("`\n");
-                return 1;
-            case BR_ERR_MAIN_PROC_RET_TYPE_MISMATCH:
-                eputs("the `main` procedure must return nothing, instead the return type of `");
-                fprintType(stderr, err.entry_type);
-                eputs("` is declared\n");
-                return 1;
-            case BR_ERR_MAIN_PROC_ARG_COUNT_MISMATCH:
-                eprintf("the `main` procedure must accept exactly 0 arguments, instead %d arguments were declared\n", err.n_args);
-                return 1;
-            case BR_ERR_COMPARISON_TYPE_MISMATCH:
-                eputs("cannot compare a value of type `");
-                fprintType(stderr, getExprValueType(*err.left_expr));
-                eputs("` to a value of type `");
-                fprintType(stderr, err.entry_type);
-                eputs("`\n");
-                return 1;
-            case BR_ERR_UNBRACKETED_SET_EXPR:
-                eputs("to use variable assignment as a value, wrap it in brackets\n");
-                return 1;
-            case N_BR_ERRORS:
-            case BR_ERR_NONE:
-            default:
-                eprintf("undefined error code %d\n", err.code);
-                return 1;
-        }
-    }
+    parseSourceCode(&prep, &ast);
 
     if (print_ast) {
-        printAST(&ast, &prep);
+        printAST(&ast);
         return 0;
     }
 
