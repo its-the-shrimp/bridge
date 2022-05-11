@@ -105,6 +105,7 @@ bool setInputFrom(BRP *obj, char *name, FILE* fd);
 bool setInput(BRP* obj, char* name);
 Token fetchToken(BRP* obj);
 Token peekToken(BRP* obj);
+bool unfetchToken(BRP* obj, Token token);
 
 int fprintTokenLoc(FILE* fd, TokenLoc loc);
 int fprintTokenStr(FILE* fd, Token token, BRP* obj);
@@ -372,6 +373,11 @@ Token peekToken(BRP* obj)
 		}
 	}
 	return res;
+}
+
+bool unfetchToken(BRP* obj, Token token)
+{
+	return TokenQueue_unfetch(&obj->pending, token);
 }
 
 int fprintTokenLoc(FILE* fd, TokenLoc loc)

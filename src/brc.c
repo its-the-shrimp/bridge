@@ -22,6 +22,7 @@ typedef enum {
     KW_OR,
     KW_NOT,
     KW_IF,
+    KW_ELSE,
     N_KWS
 } BRKeyword;
 
@@ -175,6 +176,7 @@ typedef struct expr {
         char* name; // for EXPR_NAME
         char* str_literal; // for EXPR_STRING
     };
+    struct expr* arg3; // for ternary expressions
     struct expr* block;
     TokenLoc loc;
     ExprType type;
@@ -332,7 +334,7 @@ static char expr_arity_table[] = {
     [EXPR_LOGICAL_OR ] = BINARY,
     [EXPR_LOGICAL_NOT] = UNARY,
     [EXPR_WRAPPER    ] = UNARY,
-    [EXPR_IF         ] = BINARY,
+    [EXPR_IF         ] = TERNARY,
     [EXPR_VOID       ] = NULLARY
 };
 static_assert(N_EXPR_TYPES == 41, "not all expression types have their arity set");
@@ -668,6 +670,7 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             fputs("IF:\n", dst);
             fprintExpr(dst, *expr.arg1, indent_level + 1);
             fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(dst, *expr.arg3, indent_level + 1);
             break;
         case EXPR_VOID:
             fputs("VOID\n", dst);
@@ -1438,6 +1441,27 @@ void parseKwIf(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, in
         .code = BR_ERR_INVALID_VAR_DECL,
         .loc = token
     });
+
+    Token stmt_term = fetchToken(ast->prep);
+    token = peekToken(ast->prep);
+    dst->arg3 = calloc(1, sizeof(Expr));
+    if (getTokenKeywordId(token) != KW_ELSE) {
+        *dst->arg3 = (Expr){
+            .type = EXPR_VOID,
+            .block = block,
+            .loc = stmt_term.loc
+        };
+        unfetchToken(ast->prep, stmt_term);
+        return;
+    }
+    fetchToken(ast->prep);
+    
+    token = peekToken(ast->prep);
+    parseExpr(ast, dst->arg3, block, func, EXPRTERM_FULL);
+    if (dst->arg3->type == EXPR_NEW_VAR) raiseBRError(ast, (BRError){
+        .code = BR_ERR_INVALID_VAR_DECL,
+        .loc = token
+    });
 }
 
 void parseInvalidKw(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
@@ -1683,7 +1707,8 @@ void parseExpr(AST* ast, Expr* dst, Expr* block, FuncDecl* func, int flags)
                 [KW_AND] = &parseKwAndOr,
                 [KW_OR] = &parseKwAndOr,
                 [KW_NOT] = &parseKwNot,
-                [KW_IF] = &parseKwIf
+                [KW_IF] = &parseKwIf,
+                [KW_ELSE] = &parseInvalidKw
             };
             static_assert(sizeof(kw_parsers) / sizeof(kw_parsers[0]) == N_KWS, "not all keywords are handled in parseExpr");
             kw_parsers[token.keyword_id](ast, token, dst, block, func, flags);
@@ -1819,7 +1844,13 @@ void reorderExpr(Expr* expr)
                 reorderExpr(expr->arg1);
                 reorderExpr(expr->arg2);
             }
+            return;
         }
+        case TERNARY:
+            reorderExpr(expr->arg1);
+            reorderExpr(expr->arg2);
+            reorderExpr(expr->arg3);
+            return;
     }
 }
 
@@ -1883,6 +1914,8 @@ void lowerExpr(Expr* expr)
                 return;
             case NULLARY:
                 return;
+            case TERNARY:
+                lowerExpr(expr->arg3);
             case BINARY:
                 lowerExpr(expr->arg2);
             case UNARY:
@@ -1908,6 +1941,8 @@ void removeExprWrappers(Expr* expr)
             return;
         case NULLARY:
             return;
+        case TERNARY:
+            removeExprWrappers(expr->arg3);
         case BINARY:
             removeExprWrappers(expr->arg2);
         case UNARY:
@@ -2775,50 +2810,58 @@ static int block_counter = 0;
 bool compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
     compileSrcRef(ctx, expr.loc);
+    int block_id = block_counter++;
 
     switch (expr.arg1->type) {
         case EXPR_LOGICAL_EQ:
             if (!_compileExprLogicalEq(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:neq .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:neq .else%d\n", block_id);
             break;
         case EXPR_LOGICAL_NEQ:
             if (!_compileExprLogicalNeq(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:equ .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:equ .else%d\n", block_id);
             break;
         case EXPR_LOGICAL_LT:
             if (!_compileExprLogicalLt(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:ges .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:ges .else%d\n", block_id);
             break;
         case EXPR_LOGICAL_GT:
             if (!_compileExprLogicalGt(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:les .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:les .else%d\n", block_id);
             break;
         case EXPR_LOGICAL_LE:
             if (!_compileExprLogicalLe(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:gts .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:gts .else%d\n", block_id);
             break;
         case EXPR_LOGICAL_GE:
             if (!_compileExprLogicalGe(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:lts .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:lts .else%d\n", block_id);
             break;
         case EXPR_LOGICAL_AND:
             if (!_compileExprLogicalAnd(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:equ .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:equ .else%d\n", block_id);
             break;
         case EXPR_LOGICAL_OR:
             if (!_compileExprLogicalOr(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:equ .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:equ .else%d\n", block_id);
             break;
         case EXPR_LOGICAL_NOT:
             if (!_compileExprLogicalNot(ctx, *expr.arg1, reg_state, dst_reg)) return false;
-            fprintf(ctx->dst, "\tgoto:neq .if_%d_end\n", block_counter);
+            fprintf(ctx->dst, "\tgoto:neq .else%d\n", block_id);
             break;
         default:
             printf("internal compiler bug: invalid expression type %d in compileExprIf\n", expr.arg1->type);
             abort();
     }
-    if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg)) return false;
-    fprintf(ctx->dst, "\tmark .if_%d_end\n", block_counter++);
+    if (expr.arg3->type != EXPR_VOID) {
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tgoto .end%d\n\tmark .else%d\n", block_id, block_id);
+        if (!expr_compilers[expr.arg3->type](ctx, *expr.arg3, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tmark .end%d\n", block_id);
+    } else {
+        if (!expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg)) return false;
+        fprintf(ctx->dst, "\tmark .else%d\n", block_id);
+    }
 
     return true;
 }
@@ -3058,7 +3101,7 @@ int main(int argc, char* argv[])
         BRP_HIDDEN_SYMBOL(" "),
         BRP_HIDDEN_SYMBOL("\t")
     );
-    static_assert(N_KWS == 14, "not all keywords are handled");
+    static_assert(N_KWS == 15, "not all keywords are handled");
     setKeywords(
         &prep,
         BRP_KEYWORD("void"),
@@ -3074,7 +3117,8 @@ int main(int argc, char* argv[])
         BRP_KEYWORD("and"),
         BRP_KEYWORD("or"),
         BRP_KEYWORD("not"),
-        BRP_KEYWORD("if")
+        BRP_KEYWORD("if"),
+        BRP_KEYWORD("else")
     );
 	setInput(&prep, input_path);
 

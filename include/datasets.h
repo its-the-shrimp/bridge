@@ -301,6 +301,7 @@
 	bool t##Queue_add(t##Queue* queue, t obj); \
 	bool t##Queue_fetch(t##Queue* queue, t* dst); \
 	bool t##Queue_peek(t##Queue* queue, t* dst); \
+	bool t##Queue_unfetch(t##Queue* queue, t item); \
 	bool t##Queue_delete(t##Queue* queue) \
 
 #define defQueue(t) \
@@ -343,6 +344,15 @@
 			if (write(queue->input_end, &temp, sizeof(t)) <= 0) return false; \
 		} \
 		return true; \
+	} \
+	bool t##Queue_unfetch(t##Queue* queue, t item) { \
+		if (write(queue->input_end, &item, sizeof(t)) <= 0) return false; \
+		queue->length++; \
+		for (int i = 0; i < queue->length - 1; i++) { \
+			if (read(queue->output_end, &item, sizeof(t)) < 0) return false; \
+			if (write(queue->input_end, &item, sizeof(t)) <= 0) return false; \
+		} \
+		return false; \
 	} \
 	bool t##Queue_delete(t##Queue* queue) { \
 		if (close(queue->input_end) < 0) return false; \

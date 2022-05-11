@@ -281,7 +281,6 @@ sbuf sbufunesc(sbuf src)
 	for (int i = 0; src.length > 0; i++) {
 		if (*src.data == '\\') {
 			sbufshift(src, 1);
-			if (i == src.length) { break; }
 			switch (*src.data) {
 				case '0':  res.data[i] = '\0'; sbufshift(src, 1); break;
 				case 'n':  res.data[i] = '\n'; sbufshift(src, 1); break;
