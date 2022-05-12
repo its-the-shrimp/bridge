@@ -7,7 +7,7 @@
 - ~`bool` type and logical operations~
 - ~Bracketed exressions~
 - ~Conditions~
-- Loops
+- ~Loops~
 - Referencing and dereferencing
 - Array variables
 - BRP: includes

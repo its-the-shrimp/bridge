@@ -24,6 +24,7 @@ typedef enum {
     KW_IF,
     KW_ELSE,
     KW_WHILE,
+    KW_FOR,
     N_KWS
 } BRKeyword;
 
@@ -1158,6 +1159,36 @@ void raiseBRError(AST* ast, BRError err)
     }
 }
 
+void raiseUnexpectedTokenError(AST* ast, Token actual, int n_tokens, Token expected[])
+{
+    fprintTokenLoc(stderr, actual.loc);
+    eprintf("error: expected");
+    for (int n = 0; n < n_tokens; n++) {
+        fprintTokenStr(stderr, expected[n], ast->prep);
+        if (n == n_tokens - 2) {
+            eputs(" or ");
+        } else eputs(", ");
+    }
+    eputs("instead got ");
+    fprintTokenStr(stderr, actual, ast->prep);
+    eputc('\n');
+    exit(1);
+}
+
+void raiseForLoopTermExpectedError(AST* ast, Token actual)
+{
+    fprintTokenLoc(stderr, actual.loc);
+    eputs("error: expected a `for` loop terminating expression\n");
+    exit(1);
+}
+
+void raiseForLoopIncrExpectedError(AST* ast, Token actual)
+{
+    fprintTokenLoc(stderr, actual.loc);
+    eputs("error: expected a `for` loop incrementing expression\n");
+    exit(1);
+}
+
 int getVarIndex(Expr expr)
 {
     int res = -1;
@@ -1531,6 +1562,52 @@ void parseKwWhile(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func,
     }
 }
 
+void parseKwFor(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
+{
+    setExprType(ast, dst, EXPR_BLOCK);
+    dst->loc = token.loc;
+
+    token = fetchToken(ast->prep);
+    static Token expected[] = {
+        (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_START }
+    };
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, 1, expected);
+// fetching the initializer
+    initExpr(dst);
+    addSubexpr(dst, (Expr){ .type = EXPR_REF, .loc = token.loc, .block = dst });
+    parseExpr(ast, addSubexpr(dst, (Expr){0}), dst, func, EXPRTERM_FULL | EXPRTYPE_VOIDABLE);
+    fetchToken(ast->prep);
+// fetching the terminator
+    token = peekToken(ast->prep);
+    if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) raiseForLoopTermExpectedError(ast, token);
+    Expr* loop = addSubexpr(dst, (Expr){
+        .type = EXPR_WHILE,
+        .loc = token.loc,
+        .block = dst,
+        .arg1 = malloc(sizeof(Expr)),
+        .arg2 = malloc(sizeof(Expr))
+    });
+    parseExpr(ast, loop->arg1, dst, func, EXPRTERM_FULL | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
+    fetchToken(ast->prep);
+// fetching the incrementer
+    token = peekToken(ast->prep);
+    if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) raiseForLoopIncrExpectedError(ast, token);
+    *loop->arg2 = (Expr){
+        .type = EXPR_BLOCK,
+        .loc = token.loc,
+        .block = dst
+    };
+    initExpr(loop->arg2);
+    addSubexpr(loop->arg2, (Expr){ .type = EXPR_REF, .loc = token.loc, .block = loop->arg2 });
+    Expr* iter = calloc(1, sizeof(Expr));
+    parseExpr(ast, iter, loop->arg2, func, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE);
+    fetchToken(ast->prep);
+// fetching the body
+    parseExpr(ast, addSubexpr(loop->arg2, (Expr){0}), loop->arg2, func, EXPRTERM_FULL);
+    addSubexpr(loop->arg2, *iter);
+    free(iter);
+}
+
 void parseInvalidKw(AST* ast, Token token, Expr* dst, Expr* block, FuncDecl* func, int flags)
 {
     raiseBRError(ast, (BRError){
@@ -1774,7 +1851,8 @@ void parseExpr(AST* ast, Expr* dst, Expr* block, FuncDecl* func, int flags)
                 [KW_NOT] = &parseKwNot,
                 [KW_IF] = &parseKwIf,
                 [KW_ELSE] = &parseInvalidKw,
-                [KW_WHILE] = &parseKwWhile
+                [KW_WHILE] = &parseKwWhile,
+                [KW_FOR] = &parseKwFor
             };
             static_assert(sizeof(kw_parsers) / sizeof(kw_parsers[0]) == N_KWS, "not all keywords are handled in parseExpr");
             kw_parsers[token.keyword_id](ast, token, dst, block, func, flags);
@@ -3322,7 +3400,7 @@ int main(int argc, char* argv[])
         BRP_HIDDEN_SYMBOL(" "),
         BRP_HIDDEN_SYMBOL("\t")
     );
-    static_assert(N_KWS == 16, "not all keywords are handled");
+    static_assert(N_KWS == 17, "not all keywords are handled");
     setKeywords(
         &prep,
         BRP_KEYWORD("void"),
@@ -3340,7 +3418,8 @@ int main(int argc, char* argv[])
         BRP_KEYWORD("not"),
         BRP_KEYWORD("if"),
         BRP_KEYWORD("else"),
-        BRP_KEYWORD("while")
+        BRP_KEYWORD("while"),
+        BRP_KEYWORD("for")
     );
 	setInput(&prep, input_path);
 

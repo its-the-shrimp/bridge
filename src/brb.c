@@ -2759,7 +2759,7 @@ bool handleOpLdvs(ExecEnv* env, Module* module)
 
 	env->registers[op.dst_reg] = 0;
 	memcpy(env->registers + op.dst_reg, env->stack_head + op.symbol_id, op.var_size);
-	if (env->registers[op.dst_reg] & (1 << (op.var_size * 8 - 1))) {
+	if (op.var_size < 8 ? env->registers[op.dst_reg] & (1 << (op.var_size * 8 - 1)) : false) {
 		env->registers[op.dst_reg] |= ~((1ULL << (op.var_size * 8)) - 1);
 	}
 	env->op_id++;
@@ -2776,7 +2776,7 @@ bool handleOpSx32(ExecEnv* env, Module* module)
 
 	*(int64_t*)(env->registers + op.dst_reg) = *(int32_t*)(env->registers + op.src_reg);
 	env->op_id++;
-	return true;
+	return false;
 }
 
 bool handleOpSx16(ExecEnv* env, Module* module)
@@ -2789,7 +2789,7 @@ bool handleOpSx16(ExecEnv* env, Module* module)
 
 	*(int64_t*)(env->registers + op.dst_reg) = *(int16_t*)(env->registers + op.src_reg);
 	env->op_id++;
-	return true;
+	return false;
 }
 
 bool handleOpSx8(ExecEnv* env, Module* module)
@@ -2802,7 +2802,7 @@ bool handleOpSx8(ExecEnv* env, Module* module)
 
 	*(int64_t*)(env->registers + op.dst_reg) = *(int8_t*)(env->registers + op.src_reg);
 	env->op_id++;
-	return true;
+	return false;
 }
 
 ExecHandler op_handlers[] = {
