@@ -68,6 +68,15 @@ typedef enum {
 	KW_ATF,
 	KW_ATL,
 	KW_SETC,
+	KW_DELNV,
+	KW_LD64S,
+	KW_LD32S,
+	KW_LD16S,
+	KW_LD8S,
+	KW_LDVS,
+	KW_SX32,
+	KW_SX16,
+	KW_SX8,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -95,7 +104,7 @@ typedef enum {
 	KW_LOAD,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 57, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 66, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 typedef struct {
@@ -113,7 +122,7 @@ char* getVBRBTokenTypeName(TokenType type)
 }
 
 void printVBRBError(FILE* dst, VBRBError err) {
-	static_assert(N_VBRB_ERRORS == 27, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 28, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
 		if (err.code != VBRB_ERR_PREPROCESSOR_FAILURE) fprintTokenLoc(stderr, err.loc.loc);
 		fprintf(dst, "error: ");
@@ -241,6 +250,9 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				break;
 			case VBRB_ERR_NO_VAR:
 				fprintf(dst, "cannot use `popv` operation; the stack is empty\n");
+				break;
+			case VBRB_ERR_DELNV_TOO_FEW_VARS:
+				fprintf(dst, "cannot use `delnv` operation; the amount of variables on the stack is less than %d\n", err.var_count);
 				break;
 		}
 	}
@@ -838,6 +850,30 @@ VBRBError compileOpSetc(CompilerCtx* ctx, Module* dst)
 	return (VBRBError){ .prep = ctx->prep };
 }
 
+VBRBError compileOpDelnv(CompilerCtx* ctx, Module* dst)
+{
+	Op* op = arrayhead(dst->execblock);
+
+	uint64_t n_vars;
+	Token token = fetchToken(ctx->prep);
+	VBRBError err = getIntArg(ctx, token, &n_vars, op->type, 0);
+	if (err.code) return err;
+
+	if (n_vars > ctx->vars.length) return (VBRBError){
+		.code = VBRB_ERR_DELNV_TOO_FEW_VARS,
+		.prep = ctx->prep,
+		.loc = token,
+		.var_count = n_vars
+	};
+
+	op->symbol_id = 0;
+	for (int64_t i = ctx->vars.length - 1; i >= (int64_t)(ctx->vars.length - n_vars); i--) {
+		op->symbol_id += ctx->vars.data[i].size;
+	}
+
+	return (VBRBError){ .prep = ctx->prep };
+}
+
 OpCompiler op_compilers[] = {
 	[OP_NONE] = &compileNoArgOp,
 	[OP_END] = &compileNoArgOp,
@@ -895,7 +931,16 @@ OpCompiler op_compilers[] = {
 	[OP_PUSHV] = &compileOpPushv,
 	[OP_ATF] = &compileOpAtf,
 	[OP_ATL] = &compileOpAtl,
-	[OP_SETC] = &compileOpSetc
+	[OP_SETC] = &compileOpSetc,
+	[OP_DELNV] = &compileOpDelnv,
+	[OP_LD64S] = &compile2RegOp,
+	[OP_LD32S] = &compile2RegOp,
+	[OP_LD16S] = &compile2RegOp,
+	[OP_LD8S] = &compile2RegOp,
+	[OP_LDVS] = &compileOpLdv,
+	[OP_SX32] = &compile2RegOp,
+	[OP_SX16] = &compile2RegOp,
+	[OP_SX8] = &compile2RegOp
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 

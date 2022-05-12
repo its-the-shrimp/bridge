@@ -61,6 +61,15 @@ typedef enum {
 	OP_ATF, // uses Op::mark_name
 	OP_ATL, // uses Op::symbol_id
 	OP_SETC, // uses Op::cond_arg and Op::dst_reg
+	OP_DELNV, // uses Op::symbol_id
+	OP_LD64S, // uses Op::dst_reg and Op::src_reg
+	OP_LD32S, // uses Op::dst_reg and Op::src_reg
+	OP_LD16S, // uses Op::dst_reg and Op::src_reg
+	OP_LD8S, // uses Op::dst_reg and Op::src_reg
+	OP_LDVS, // uses Op::src_reg, Op::symbol_id and Op::var_size
+	OP_SX32, // uses Op::dst_reg and Op::src_reg
+	OP_SX16, // uses Op::dst_reg and Op::src_reg
+	OP_SX8, // uses Op::dst_reg and Op::src_reg
 	N_OPS
 } OpType;
 
@@ -121,7 +130,16 @@ typedef enum {
 	BRP_KEYWORD("pushv"), \
 	BRP_KEYWORD("@f"), \
 	BRP_KEYWORD("@l"), \
-	BRP_KEYWORD("setc") \
+	BRP_KEYWORD("setc"), \
+	BRP_KEYWORD("delnv"), \
+	BRP_KEYWORD("ld64s"), \
+	BRP_KEYWORD("ld32s"), \
+	BRP_KEYWORD("ld16s"), \
+	BRP_KEYWORD("ld8s"), \
+	BRP_KEYWORD("ldvs"), \
+	BRP_KEYWORD("sx32"), \
+	BRP_KEYWORD("sx16"), \
+	BRP_KEYWORD("sx8") \
 
 static sbuf opNames[] = { _opNames };
 
@@ -241,6 +259,8 @@ static ConditionCode opposite_conditions[N_CONDS] = {
 	BRP_KEYWORD("les"), \
 	BRP_KEYWORD("ges") \
 
+static sbuf conditionNames[N_CONDS] = { _conditionNames };
+
 typedef struct {
 	int8_t type;
 	int8_t dst_reg;
@@ -340,6 +360,7 @@ typedef enum {
 	VBRB_ERR_MODULE_NOT_LOADED,
 	VBRB_ERR_PREPROCESSOR_FAILURE,
 	VBRB_ERR_NO_VAR,
+	VBRB_ERR_DELNV_TOO_FEW_VARS,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 

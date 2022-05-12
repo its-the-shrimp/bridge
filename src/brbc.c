@@ -30,7 +30,9 @@ char* conditionNames_arm64[] = {
 static int cond_counter = 0;
 void compileCondition(FILE* dst, uint8_t cond_id, uint8_t n_ops)
 {
-	if (!cond_id) return;
+	if (cond_id == COND_NON) return;
+	printf("condition code on transpliation: %hhu\n", cond_id);
+	assert(cond_id < N_CONDS);
 	fprintf(dst, "\tb%s . + %d\n", oppositeConditionName(cond_id), (n_ops + 1) * 4);
 }
 
@@ -47,19 +49,34 @@ void endConditionalOp(FILE* dst, int cond_ctx)
 	fprintf(dst, ".co_%d:\n", cond_ctx);
 }
 
-void compileNativeImmSet(FILE* dst, int8_t reg_id, uint64_t value)
+void compileNativeImmSet(FILE* dst, int8_t reg_id, int64_t value)
 {
+	bool inverted = false;
+	if ((inverted = value < 0)) value = ~value;
 	int block_size = value > 1 ? ceil(log((double)value - 1) / log(65536.0)) : 1;
 	switch (block_size) {
 		case 4:
 			fprintf(dst, "\tmovk x%hhd, %llu, lsl 48\n", reg_id, (value >> 48) & 0xFFFF);
-		case 3:
-			fprintf(dst, "\tmovk x%hhd, %llu, lsl 32\n", reg_id, (value >> 32) & 0xFFFFF);
-		case 2:
+			fprintf(dst, "\tmovk x%hhd, %llu, lsl 32\n", reg_id, (value >> 32) & 0xFFFF);
 			fprintf(dst, "\tmovk x%hhd, %llu, lsl 16\n", reg_id, (value >> 16) & 0xFFFF);
+			fprintf(dst, "\tmovk x%hhd, %llu\n", reg_id, value & 0xFFFF);
+			break;
+		case 3:
+		 	fprintf(dst, "\tmov x%hhd, 0\n", reg_id);
+			fprintf(dst, "\tmovk x%hhd, %llu, lsl 32\n", reg_id, (value >> 32) & 0xFFFF);
+			fprintf(dst, "\tmovk x%hhd, %llu, lsl 16\n", reg_id, (value >> 16) & 0xFFFF);
+			fprintf(dst, "\tmovk x%hhd, %llu\n", reg_id, value & 0xFFFF);
+			break;
+		case 2:
+		 	fprintf(dst, "\tmov x%hhd, 0\n", reg_id);
+			fprintf(dst, "\tmovk x%hhd, %llu, lsl 16\n", reg_id, (value >> 16) & 0xFFFF);
+			fprintf(dst, "\tmovk x%hhd, %llu\n", reg_id, value & 0xFFFF);
+			break;
 		case 1:
 			fprintf(dst, "\tmov x%hhd, %llu\n", reg_id, value & 0xFFFF);
 	}
+
+	if (inverted) fprintf(dst, "\tmvn x%hhd, x%hhd\n", reg_id);
 }
 
 typedef struct comp_ctx {
@@ -71,7 +88,12 @@ typedef struct comp_ctx {
 
 uint64_t getNativeStackOffset(CompCtx* ctx, uint64_t offset)
 {
-	return ARM64_STACK_ALIGNMENT - ctx->cur_frame_size % ARM64_STACK_ALIGNMENT + offset;
+	return (ARM64_STACK_ALIGNMENT - ctx->cur_frame_size % ARM64_STACK_ALIGNMENT) % ARM64_STACK_ALIGNMENT + offset;
+}
+
+uint64_t getNativeStackSize(int size)
+{
+	return size ? (uint64_t)ceil((double)size / (double)ARM64_STACK_ALIGNMENT) * 16 : 16;
 }
 
 typedef void (*OpNativeCompiler) (Module*, int, CompCtx*);
@@ -161,6 +183,7 @@ void compileNopNative(Module* module, int index, CompCtx* ctx)
 
 void compileOpEndNative(Module* module, int index, CompCtx* ctx)
 {
+	if (index == module->execblock.length - 1) return;
 	compileCondition(ctx->dst, module->execblock.data[index].cond_id, 3);
 	fprintf(
 		ctx->dst,
@@ -172,7 +195,7 @@ void compileOpEndNative(Module* module, int index, CompCtx* ctx)
 
 void compileOpMarkNative(Module* module, int index, CompCtx* ctx)
 {
-	fprintf(ctx->dst, "%s:\n", module->execblock.data[index].mark_name);
+	fprintf(ctx->dst, ".m%d:\n", index);
 }
 
 void compileOpSetNative(Module* module, int index, CompCtx* ctx)
@@ -260,7 +283,7 @@ void compileOpSubNative(Module* module, int index, CompCtx* ctx)
 		compileCondition(ctx->dst, op.cond_id, 1);
 		fprintf(
 			ctx->dst, 
-			"\tsub x%hhd, x%hhd, %llu",
+			"\tsub x%hhd, x%hhd, %llu\n",
 			op.dst_reg,
 			op.src_reg,
 			op.value
@@ -294,12 +317,7 @@ void compileOpSyscallNative(Module* module, int index, CompCtx* ctx)
 void compileOpGotoNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
-	fprintf(
-		ctx->dst,
-		"\tb%s %s\n",
-		conditionNames_arm64[op.cond_id],
-		module->execblock.data[op.symbol_id].mark_name
-	);
+	fprintf(ctx->dst, "\tb%s .m%lld\n", conditionNames_arm64[op.cond_id], index + op.op_offset);
 }
 
 void compileOpCmpNative(Module* module, int index, CompCtx* ctx)
@@ -538,7 +556,7 @@ void compileOpCallNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tbl %s\n", op.mark_name);
+	fprintf(ctx->dst, "\tbl %s\n", module->execblock.data[op.symbol_id].mark_name);
 }
 
 void compileOpRetNative(Module* module, int index, CompCtx* ctx)
@@ -556,8 +574,14 @@ void compileOpRetNative(Module* module, int index, CompCtx* ctx)
 void compileOpEndprocNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
-	fprintf(ctx->dst, "\tret\n");
 	ctx->cur_frame_size = 0;
+	if (module->execblock.data[index ? index - 1 : 0].type == OP_RET) return;
+	fprintf(
+		ctx->dst,
+		"\tmov sp, fp\n"
+		"\tldp fp, lr, [sp], 16\n"
+		"\tret\n"
+	);
 }
 
 void compileOpLd64Native(Module* module, int index, CompCtx* ctx)
@@ -578,7 +602,7 @@ void compileOpLd32Native(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrsw x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
+	fprintf(ctx->dst, "\tldrw x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
 }
 
 void compileOpStr32Native(Module* module, int index, CompCtx* ctx)
@@ -592,7 +616,7 @@ void compileOpLd16Native(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrsh x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
+	fprintf(ctx->dst, "\tldrh x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
 }
 
 void compileOpStr16Native(Module* module, int index, CompCtx* ctx)
@@ -606,7 +630,7 @@ void compileOpLd8Native(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrsb x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
+	fprintf(ctx->dst, "\tldrb x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
 }
 
 void compileOpStr8Native(Module* module, int index, CompCtx* ctx)
@@ -620,7 +644,7 @@ void compileOpVarNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 
-	if (ceilf(ctx->cur_frame_size / ARM64_STACK_ALIGNMENT) < ceilf((ctx->cur_frame_size + op.var_size) / ARM64_STACK_ALIGNMENT)) {
+	if (getNativeStackSize(ctx->cur_frame_size) < getNativeStackSize(ctx->cur_frame_size + op.var_size) || !ctx->cur_frame_size) {
 		fprintf(ctx->dst, "\tsub sp, sp, 16\n");
 	}
 	ctx->cur_frame_size += op.var_size;
@@ -717,13 +741,13 @@ void compileOpLdvNative(Module* module, int index, CompCtx* ctx)
 		compileCondition(ctx->dst, op.cond_id, 1);
 		switch (op.var_size) {
 			case 1:
-				fprintf(ctx->dst, "\tldrsb w%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
+				fprintf(ctx->dst, "\tldrb x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
 				break;
 			case 2:
-				fprintf(ctx->dst, "\tldrsh w%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
+				fprintf(ctx->dst, "\tldrh x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
 				break;
 			case 4:
-				fprintf(ctx->dst, "\tldrsw w%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
+				fprintf(ctx->dst, "\tldrw x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
 				break;
 			case 8:
 				fprintf(ctx->dst, "\tldr x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
@@ -737,13 +761,13 @@ void compileOpLdvNative(Module* module, int index, CompCtx* ctx)
 		compileNativeImmSet(ctx->dst, 8, stack_offset);
 		switch (op.var_size) {
 			case 1:
-				fprintf(ctx->dst, "\tldrsb x%hhd, [sp, x8]\n", op.dst_reg);
+				fprintf(ctx->dst, "\tldrb x%hhd, [sp, x8]\n", op.dst_reg);
 				break;
 			case 2:
-				fprintf(ctx->dst, "\tldrsh x%hhd, [sp, x8]\n", op.dst_reg);
+				fprintf(ctx->dst, "\tldrh x%hhd, [sp, x8]\n", op.dst_reg);
 				break;
 			case 4:
-				fprintf(ctx->dst, "\tldrsw x%hhd, [sp, x8]\n", op.dst_reg);
+				fprintf(ctx->dst, "\tldrw x%hhd, [sp, x8]\n", op.dst_reg);
 				break;
 			case 8:
 				fprintf(ctx->dst, "\tldr x%hhd, [sp, x8]\n", op.dst_reg);
@@ -835,7 +859,7 @@ void compileOpPushvNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 
-	if (ceilf(ctx->cur_frame_size / ARM64_STACK_ALIGNMENT) < ceilf((ctx->cur_frame_size + op.var_size) / ARM64_STACK_ALIGNMENT)) {
+	if (getNativeStackSize(ctx->cur_frame_size) < getNativeStackSize(ctx->cur_frame_size + op.var_size) || !ctx->cur_frame_size) {
 		fprintf(ctx->dst, "\tsub sp, sp, 16\n");
 	}
 	ctx->cur_frame_size += op.var_size;
@@ -876,7 +900,121 @@ void compileOpAtlNative(Module* module, int index, CompCtx* ctx)
 void compileOpSetcNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
+	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tcset x%hhd, %s\n", op.dst_reg, conditionNames_arm64[op.cond_arg]);
+}
+
+void compileOpDelnvNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	
+	uint64_t aligned_offset = getNativeStackOffset(ctx, op.symbol_id);
+	aligned_offset = (uint64_t)floor((double)aligned_offset / 16.0) * 16;
+	if (aligned_offset) {
+		if (aligned_offset <= UINT16_MAX) {
+			compileCondition(ctx->dst, op.cond_id, 1);
+			fprintf(ctx->dst, "\tadd sp, sp, %llu\n", aligned_offset);
+		} else {
+			int cond_id = startConditionalOp(ctx->dst, op.cond_id);
+			compileNativeImmSet(ctx->dst, 8, aligned_offset);
+			fprintf(ctx->dst, "\tadd sp, sp, x8\n");
+			endConditionalOp(ctx->dst, cond_id);
+		}
+	}
+	ctx->cur_frame_size -= op.symbol_id;
+}
+
+void compileOpLd64SNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	compileCondition(ctx->dst, op.cond_id, 1);
+	fprintf(ctx->dst, "\tldr x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
+}
+
+void compileOpLd32SNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	compileCondition(ctx->dst, op.cond_id, 1);
+	fprintf(ctx->dst, "\tldrsw x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
+}
+
+void compileOpLd16SNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	compileCondition(ctx->dst, op.cond_id, 1);
+	fprintf(ctx->dst, "\tldrsh x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
+}
+
+void compileOpLd8SNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	compileCondition(ctx->dst, op.cond_id, 1);
+	fprintf(ctx->dst, "\tldrsb x%hhd, [x%hhd]\n", op.dst_reg, op.src_reg);
+}
+
+void compileOpLdvsNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	uint64_t stack_offset = getNativeStackOffset(ctx, op.symbol_id);
+	if (stack_offset < 4096) {
+		compileCondition(ctx->dst, op.cond_id, 1);
+		switch (op.var_size) {
+			case 1:
+				fprintf(ctx->dst, "\tldrsb x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
+				break;
+			case 2:
+				fprintf(ctx->dst, "\tldrsh x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
+				break;
+			case 4:
+				fprintf(ctx->dst, "\tldrsw x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
+				break;
+			case 8:
+				fprintf(ctx->dst, "\tldr x%hhd, [sp, %lld]\n", op.dst_reg, stack_offset);
+				break;
+			default:
+				eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hhd\n", op.var_size);
+				abort();
+		}
+	} else {
+		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
+		compileNativeImmSet(ctx->dst, 8, stack_offset);
+		switch (op.var_size) {
+			case 1:
+				fprintf(ctx->dst, "\tldrsb x%hhd, [sp, x8]\n", op.dst_reg);
+				break;
+			case 2:
+				fprintf(ctx->dst, "\tldrsh x%hhd, [sp, x8]\n", op.dst_reg);
+				break;
+			case 4:
+				fprintf(ctx->dst, "\tldrsw x%hhd, [sp, x8]\n", op.dst_reg);
+				break;
+			case 8:
+				fprintf(ctx->dst, "\tldr x%hhd, [sp, x8]\n", op.dst_reg);
+				break;
+			default:
+				eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hhd\n", op.var_size);
+				abort();
+		}
+		endConditionalOp(ctx->dst, cond_ctx);
+	}
+}
+
+void compileOpSx32Native(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	fprintf(ctx->dst, "\tsxtw x%hhd, w%hhd\n", op.dst_reg, op.src_reg);
+}
+
+void compileOpSx16Native(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	fprintf(ctx->dst, "\tsxth x%hhd, w%hhd\n", op.dst_reg, op.src_reg);
+}
+
+void compileOpSx8Native(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	fprintf(ctx->dst, "\tsxtb x%hhd, w%hhd\n", op.dst_reg, op.src_reg);
 }
 
 OpNativeCompiler native_op_compilers[] = {
@@ -936,7 +1074,16 @@ OpNativeCompiler native_op_compilers[] = {
 	[OP_PUSHV] = &compileOpPushvNative,
 	[OP_ATF] = &compileOpAtfNative,
 	[OP_ATL] = &compileOpAtlNative,
-	[OP_SETC] = &compileOpSetcNative
+	[OP_SETC] = &compileOpSetcNative,
+	[OP_DELNV] = &compileOpDelnvNative,
+	[OP_LD64S] = &compileOpLd64SNative,
+	[OP_LD32S] = &compileOpLd32SNative,
+	[OP_LD16S] = &compileOpLd16SNative,
+	[OP_LD8S] = &compileOpLd8SNative,
+	[OP_LDVS] = &compileOpLdvsNative,
+	[OP_SX32] = &compileOpSx32Native,
+	[OP_SX16] = &compileOpSx16Native,
+	[OP_SX8] = &compileOpSx8Native
 };
 static_assert(
 	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),
@@ -972,8 +1119,20 @@ void compileByteCode(Module* src, FILE* dst)
 			".global "DEFAULT_ENTRY_NAME"\n"
 			DEFAULT_ENTRY_NAME":\n"
 			"\tmov x28, x0\n"
-			"\tmov x27, x1\n%s",
-			"\tb main\n"
+			"\tmov x27, x1\n"
+			"\tmov x0, 0\n"
+			"\tmov x1, 0\n"
+			"\tmov x2, 0\n"
+			"\tmov x3, 0\n"
+			"\tmov x4, 0\n"
+			"\tmov x5, 0\n"
+			"\tmov x6, 0\n"
+			"\tmov x7, 0\n"
+			"\tmov x8, 0\n"
+			"\tbl main\n"
+			"\tmov x0, 0\n"
+			"\tmov x16, 1\n"
+			"\tsvc 0\n"
 		);
 	}
 	for (int i = 0; i < src->execblock.length; i++) {
@@ -1138,8 +1297,8 @@ int main(int argc, char* argv[])
 	} else if (proc_res.exitcode) {
 		eprintf("error: native assembler exited with code %hhu\n", proc_res.exitcode);
 		sbuf err_output = filecontent(proc_res.err);
-		eprintf("assembler output:\n\t\""sbuf_format"\"\n", unpack(err_output));
-		unlink(asm_output_path);
+		eprintf("assembler output: \"\n"sbuf_format"\"\n", unpack(err_output));
+		// unlink(asm_output_path);
 		return 1;
 	}
 

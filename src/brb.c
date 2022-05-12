@@ -187,7 +187,7 @@ void writeOpPushv(ModuleWriter* writer, Op op)
 	fputc(op.src_reg, writer->dst);
 }
 
-void writeOpAtl(ModuleWriter* writer, Op op)
+void writeSymbolIdOp(ModuleWriter* writer, Op op)
 {
 	writeInt(writer->dst, op.symbol_id);
 }
@@ -254,8 +254,17 @@ const OpWriter op_writers[] = {
 	[OP_POPV] = &writeOpPopv,
 	[OP_PUSHV] = &writeOpPushv,
 	[OP_ATF] = &writeMarkOp,
-	[OP_ATL] = &writeOpAtl,
-	[OP_SETC] = &writeOpSetc
+	[OP_ATL] = &writeSymbolIdOp,
+	[OP_SETC] = &writeOpSetc,
+	[OP_DELNV] = &writeSymbolIdOp,
+	[OP_LD64S] = &write2RegOp,
+	[OP_LD32S] = &write2RegOp,
+	[OP_LD16S] = &write2RegOp,
+	[OP_LD8S] = &write2RegOp,
+	[OP_LDVS] = &writeOpLdv,
+	[OP_SX32] = &write2RegOp,
+	[OP_SX16] = &write2RegOp,
+	[OP_SX8] = &write2RegOp
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
 
@@ -607,7 +616,7 @@ BRBLoadError loadOpPushv(ModuleLoader* loader, Op* dst)
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadOpAtl(ModuleLoader* loader, Op* dst)
+BRBLoadError loadSymbolIdOp(ModuleLoader* loader, Op* dst)
 {
 	long status = 0;
 	dst->symbol_id = loadInt(loader->src, &status);
@@ -682,8 +691,17 @@ OpLoader op_loaders[] = {
 	[OP_POPV] = &loadOpPopv,
 	[OP_PUSHV] = &loadOpPushv,
 	[OP_ATF] = &loadMarkOp,
-	[OP_ATL] = &loadOpAtl,
-	[OP_SETC] = &loadOpSetc
+	[OP_ATL] = &loadSymbolIdOp,
+	[OP_SETC] = &loadOpSetc,
+	[OP_DELNV] = &loadSymbolIdOp,
+	[OP_LD64S] = &load2RegOp,
+	[OP_LD32S] = &load2RegOp,
+	[OP_LD16S] = &load2RegOp,
+	[OP_LD8S] = &load2RegOp,
+	[OP_LDVS] = &loadOpLdv,
+	[OP_SX32] = &load2RegOp,
+	[OP_SX16] = &load2RegOp,
+	[OP_SX8] = &load2RegOp
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
@@ -922,7 +940,115 @@ BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags)
 	resolveModule(dst, flags & BRB_EXECUTABLE);
 	return (BRBLoadError){0};
 }
+/*
+typedef void (*OpPrinter) (Op);
 
+void printNoArgOp(Op op, FILE* dst)
+{
+	fputc('\n', dst);
+}
+
+void printRegImmOp(Op op, FILE* dst)
+{
+	fprintf(dst, "r%hhd %lld\n", op.dst_reg, op.value);
+}
+
+void print2RegOp(Op op, FILE* dst)
+{
+	fprintf(dst, "r%hhd r%hhd\n", op.dst_reg, op.src_reg);
+}
+
+static OpPrinter op_printers[] = {
+	[OP_NONE] = &printNoArgOp,
+	[OP_END] = &printNoArgOp,
+	[OP_MARK] = &printNoArgOp,
+	[OP_SET] = &printRegImmOp,
+	[OP_SETR] = &print2RegOp,
+	OP_SETD, // uses Op::dst_reg and Op::symbol_id
+	OP_SETB, // uses Op::dst_reg and Op::symbol_id
+	OP_SETM, // uses Op::dst_reg and Op::symbol_id
+	OP_ADD, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_ADDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SUB, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_SUBR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SYS, // uses Op::syscall_id
+	OP_GOTO, // uses Op::op_offset
+	OP_CMP, // uses Op::src_reg and Op::value
+	OP_CMPR, // uses Op::src_reg and Op::src2_reg
+	OP_AND, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_ANDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_OR, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_ORR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_NOT, // uses Op::dst_reg and Op::src_reg
+	OP_XOR, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_XORR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SHL, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_SHLR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SHR, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_SHRR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_SHRS, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_SHRSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_PROC, // uses Op::mark_name
+	OP_CALL, // uses Op::symbol_id
+	OP_RET,
+	OP_ENDPROC,
+	OP_LD64, // uses Op::dst_reg and Op::src_reg
+	OP_STR64, // uses Op::dst_reg and Op::src_reg
+	OP_LD32, // uses Op::dst_reg and Op::src_reg
+	OP_STR32, // uses Op::dst_reg and Op::src_reg
+	OP_LD16, // uses Op::dst_reg and Op::src_reg
+	OP_STR16, // uses Op::dst_reg and Op::src_reg
+	OP_LD8, // uses Op::dst_reg and Op::src_reg
+	OP_STR8, // uses Op::dst_reg and Op::src_reg
+	OP_VAR, // uses Op::var_size
+	OP_SETV, // uses Op::dst_reg and Op::symbol_id
+	OP_MUL, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_MULR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_DIV, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_DIVR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
+	OP_DIVS, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_DIVSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
+	OP_EXTPROC, // uses Op::mark_name
+	OP_LDV, // uses Op::src_reg, Op::symbol_id and Op::var_size
+	OP_STRV, // uses Op::dst_reg, Op::symbol_id and Op::var_size
+	OP_POPV, // uses Op::dst_reg, Op::var_size
+	OP_PUSHV, // uses Op::src_reg and Op::var_size
+	OP_ATF, // uses Op::mark_name
+	OP_ATL, // uses Op::symbol_id
+	OP_SETC, // uses Op::cond_arg and Op::dst_reg
+	OP_DELNV,
+}
+
+void printModule(Module* module, FILE* dst)
+{
+	if (module->datablocks.length) {
+		fputs("data {\n", dst);
+		array_foreach(DataBlock, block, module->datablocks, 
+			fprintf(dst, "\t%s \"", block.name);
+			fputsbufesc(dst, block.spec, BYTEFMT_HEX);
+			fputs("\"\n", dst);
+		);
+		fputs("}\n", dst);
+	}
+
+	if (module->memblocks.length) {
+		fputs("memory {\n", dst);
+		array_foreach(MemBlock, block, module->memblocks, 
+			fprintf(dst, "\t%s %lld\n", block.name, block.size);
+		);
+		fputs("}\n", dst);
+	}
+
+	if (module->execblock.length) {
+		fputs("exec {\n", dst);
+		array_foreach(Op, op, module->execblock, 
+			fprintf(dst, "\t%s", opNames[op.type]);
+			if (op.cond_id) fprintf(dst, ":%s ", conditionNames[op.cond_id].data);
+			else fputc(' ', dst);
+		);
+	}
+}
+*/
 ExecEnv initExecEnv(Module* module, int8_t flags, char** args)
 {
 	ExecEnv res = {
@@ -2488,6 +2614,197 @@ bool handleOpSetc(ExecEnv* env, Module* module)
 	return false;
 }
 
+bool handleOpDelnv(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+	if (env->flags & BRBX_TRACING) {
+		if (env->stack_head + op.symbol_id > env->stack_brk + module->stack_size) {
+			env->exitcode = EC_STACK_UNDERFLOW;
+			env->err_pop_size = op.symbol_id;
+			return true;
+		}
+		uint64_t offset = op.symbol_id;
+		DataSpecArray* stack = &(arrayhead(env->vars)->vars);
+		while (offset > 0) { offset -= dataSpecSize(stack->data[stack->length - 1]); stack->length--; }
+	}
+// somehow, if in this function there is an odd amount of `printf` function calls, the function results in a segfault, WTF
+// DO NOT TOUCH THIS FUNCTION
+	env->stack_head += op.symbol_id;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLd64S(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
+		if (!ref.type) {
+			return true;
+		} else if (ref.type == BUF_VAR) {
+			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
+			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
+				if (!env->exitcode) {
+					env->exitcode = EC_UNDEFINED_STACK_LOAD;
+					env->err_ptr = (void*)env->registers[op.src_reg];
+				}
+				return true;
+			}
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		}
+	}
+
+	*(int64_t*)(env->registers + op.dst_reg) = *(int64_t*)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLd32S(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
+		if (!ref.type) {
+			return true;
+		} else if (ref.type == BUF_VAR) {
+			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
+			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
+				if (!env->exitcode) {
+					env->exitcode = EC_UNDEFINED_STACK_LOAD;
+					env->err_ptr = (void*)env->registers[op.src_reg];
+				}
+				return true;
+			}
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		}
+	}
+
+	*(int64_t*)(env->registers + op.dst_reg) = *(int32_t*)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLd16S(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
+		if (!ref.type) {
+			return true;
+		} else if (ref.type == BUF_VAR) {
+			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
+			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
+				if (!env->exitcode) {
+					env->exitcode = EC_UNDEFINED_STACK_LOAD;
+					env->err_ptr = (void*)env->registers[op.src_reg];
+				}
+				return true;
+			}
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		}
+	}
+
+	*(int64_t*)(env->registers + op.dst_reg) = *(int16_t*)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLd8S(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
+		if (!ref.type) {
+			return true;
+		} else if (ref.type == BUF_VAR) {
+			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
+			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
+				if (!env->exitcode) {
+					env->exitcode = EC_UNDEFINED_STACK_LOAD;
+					env->err_ptr = (void*)env->registers[op.src_reg];
+				}
+				return true;
+			}
+		} else {
+			env->regs_trace[op.dst_reg].type = DS_INT64;
+		}
+	}
+
+	*(int64_t*)(env->registers + op.dst_reg) = *(int8_t*)env->registers[op.src_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpLdvs(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		env->regs_trace[op.dst_reg] = getStackSpec(env, env->stack_head + op.symbol_id, op.var_size);
+		if (env->regs_trace[op.dst_reg].type == DS_VOID) {
+			if (!env->exitcode) {
+				env->exitcode = EC_UNDEFINED_STACK_LOAD;
+				env->err_ptr = env->stack_head + op.symbol_id;
+			}
+			return true;
+		}
+	}
+
+	env->registers[op.dst_reg] = 0;
+	memcpy(env->registers + op.dst_reg, env->stack_head + op.symbol_id, op.var_size);
+	if (env->registers[op.dst_reg] & (1 << (op.var_size * 8 - 1))) {
+		env->registers[op.dst_reg] |= ~((1ULL << (op.var_size * 8)) - 1);
+	}
+	env->op_id++;
+	return false;
+}
+
+bool handleOpSx32(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		env->regs_trace[op.dst_reg].type = DS_INT64;
+	}
+
+	*(int64_t*)(env->registers + op.dst_reg) = *(int32_t*)(env->registers + op.src_reg);
+	env->op_id++;
+	return true;
+}
+
+bool handleOpSx16(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		env->regs_trace[op.dst_reg].type = DS_INT64;
+	}
+
+	*(int64_t*)(env->registers + op.dst_reg) = *(int16_t*)(env->registers + op.src_reg);
+	env->op_id++;
+	return true;
+}
+
+bool handleOpSx8(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+
+	if (env->flags & BRBX_TRACING) {
+		env->regs_trace[op.dst_reg].type = DS_INT64;
+	}
+
+	*(int64_t*)(env->registers + op.dst_reg) = *(int8_t*)(env->registers + op.src_reg);
+	env->op_id++;
+	return true;
+}
+
 ExecHandler op_handlers[] = {
 	[OP_NONE] = &handleNop,
 	[OP_END] = &handleOpEnd,
@@ -2545,7 +2862,16 @@ ExecHandler op_handlers[] = {
 	[OP_PUSHV] = &handleOpPushv,
 	[OP_ATF] = &handleOpAtf,
 	[OP_ATL] = &handleOpAtl,
-	[OP_SETC] = &handleOpSetc
+	[OP_SETC] = &handleOpSetc,
+	[OP_DELNV] = &handleOpDelnv,
+	[OP_LD64S] = &handleOpLd64S,
+	[OP_LD32S] = &handleOpLd32S,
+	[OP_LD16S] = &handleOpLd16S,
+	[OP_LD8S] = &handleOpLd8S,
+	[OP_LDVS] = &handleOpLdvs,
+	[OP_SX32] = &handleOpSx32,
+	[OP_SX16] = &handleOpSx16,
+	[OP_SX8] = &handleOpSx8
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 

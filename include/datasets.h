@@ -161,6 +161,7 @@
 	t* t##Array_resize(t##Array* array, int n) { \
 		t* res = realloc(array->data, (array->length + n) * sizeof(t)); \
 		if (!res) return NULL; \
+		memset(res + array->length, 0, n * sizeof(t)); \
 		array->length += n; \
 		array->data = res; \
 		return array->data + array->length - n; \
