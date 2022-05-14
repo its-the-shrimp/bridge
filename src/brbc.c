@@ -76,7 +76,7 @@ void compileNativeImmSet(FILE* dst, int8_t reg_id, int64_t value)
 			fprintf(dst, "\tmov x%hhd, %llu\n", reg_id, value & 0xFFFF);
 	}
 
-	if (inverted) fprintf(dst, "\tmvn x%hhd, x%hhd\n", reg_id);
+	if (inverted) fprintf(dst, "\tmvn x%hhd, x%hhd\n", reg_id, reg_id);
 }
 
 typedef struct comp_ctx {
@@ -661,15 +661,11 @@ void compileOpSetvNative(Module* module, int index, CompCtx* ctx)
 void compileOpMulNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
-	if ((uint64_t)op.value < 4096) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tmul x%hhd, x%hhd, %llu", op.dst_reg, op.src_reg, op.value);
-	} else {
-		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-		compileNativeImmSet(ctx->dst, 8, op.value);
-		fprintf(ctx->dst, "\tmul x%hhd, x%hhd, x8\n", op.dst_reg, op.src_reg);
-		endConditionalOp(ctx->dst, cond_ctx);
-	}
+
+	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
+	compileNativeImmSet(ctx->dst, 8, op.value);
+	fprintf(ctx->dst, "\tmul x%hhd, x%hhd, x8\n", op.dst_reg, op.src_reg);
+	endConditionalOp(ctx->dst, cond_ctx);
 }
 
 void compileOpMulrNative(Module* module, int index, CompCtx* ctx)
@@ -684,7 +680,7 @@ void compileOpDivNative(Module* module, int index, CompCtx* ctx)
 	Op op = module->execblock.data[index];
 	if ((uint64_t)op.value < 4096) {
 		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tudiv x%hhd, x%hhd, %llu", op.dst_reg, op.src_reg, op.value);
+		fprintf(ctx->dst, "\tudiv x%hhd, x%hhd, %llu\n", op.dst_reg, op.src_reg, op.value);
 	} else {
 		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
 		compileNativeImmSet(ctx->dst, 8, op.value);
@@ -705,7 +701,7 @@ void compileOpDivsNative(Module* module, int index, CompCtx* ctx)
 	Op op = module->execblock.data[index];
 	if ((uint64_t)op.value < 4096) {
 		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tsdiv x%hhd, x%hhd, %llu", op.dst_reg, op.src_reg, op.value);
+		fprintf(ctx->dst, "\tsdiv x%hhd, x%hhd, %llu\n", op.dst_reg, op.src_reg, op.value);
 	} else {
 		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
 		compileNativeImmSet(ctx->dst, 8, op.value);

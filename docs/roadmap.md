@@ -9,6 +9,7 @@
 - ~Conditions~
 - ~Loops~
 - Referencing and dereferencing
+- Complex assignment expressions (`+=`, `&=`, etc.)
 - Array variables
 - BRP: includes
 - BRP: macros

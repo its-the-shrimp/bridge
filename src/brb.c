@@ -2666,11 +2666,11 @@ bool handleOpLd32S(ExecEnv* env, Module* module)
 	Op op = module->execblock.data[env->op_id];
 
 	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
+		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 4);
 		if (!ref.type) {
 			return true;
 		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
+			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 4);
 			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
 				if (!env->exitcode) {
 					env->exitcode = EC_UNDEFINED_STACK_LOAD;
@@ -2693,11 +2693,11 @@ bool handleOpLd16S(ExecEnv* env, Module* module)
 	Op op = module->execblock.data[env->op_id];
 
 	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
+		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 2);
 		if (!ref.type) {
 			return true;
 		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
+			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 2);
 			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
 				if (!env->exitcode) {
 					env->exitcode = EC_UNDEFINED_STACK_LOAD;
@@ -2720,11 +2720,11 @@ bool handleOpLd8S(ExecEnv* env, Module* module)
 	Op op = module->execblock.data[env->op_id];
 
 	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
+		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 1);
 		if (!ref.type) {
 			return true;
 		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
+			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 1);
 			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
 				if (!env->exitcode) {
 					env->exitcode = EC_UNDEFINED_STACK_LOAD;
