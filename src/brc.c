@@ -39,6 +39,11 @@ typedef enum {
     SYMBOL_SUB_ASSIGN,
     SYMBOL_MUL_ASSIGN,
     SYMBOL_DIV_ASSIGN,
+    SYMBOL_AND_ASSIGN,
+    SYMBOL_XOR_ASSIGN,
+    SYMBOL_OR_ASSIGN,
+    SYMBOL_SHL_ASSIGN,
+    SYMBOL_SHR_ASSIGN,
     SYMBOL_EQ,
     SYMBOL_NEQ,
     SYMBOL_LE,
@@ -139,6 +144,11 @@ typedef enum {
     EXPR_SUB_ASSIGN, // main, binary, evaluatable
     EXPR_MUL_ASSIGN, // main, binary, evaluatable
     EXPR_DIV_ASSIGN, // main, binary, evaluatable
+    EXPR_AND_ASSIGN, // main, binary, evaluatable
+    EXPR_XOR_ASSIGN, // main, binary, evaluatable
+    EXPR_OR_ASSIGN, // main, binary, evaluatable
+    EXPR_SHL_ASSIGN, // main, binary, evaluatable
+    EXPR_SHR_ASSIGN, // main, binary, evaluatable
     EXPR_GET_VAR, // main, unary, evaluatable
     EXPR_BLOCK, // main, composite, non-evaluatable
     EXPR_TYPE, // auxillary
@@ -337,6 +347,14 @@ static char expr_arity_table[] = {
     [EXPR_OR         ] = BINARY,
     [EXPR_ASSIGN     ] = BINARY,
     [EXPR_ADD_ASSIGN ] = BINARY,
+    [EXPR_SUB_ASSIGN ] = BINARY,
+    [EXPR_MUL_ASSIGN ] = BINARY,
+    [EXPR_DIV_ASSIGN ] = BINARY,
+    [EXPR_AND_ASSIGN ] = BINARY,
+    [EXPR_XOR_ASSIGN ] = BINARY,
+    [EXPR_OR_ASSIGN  ] = BINARY,
+    [EXPR_SHR_ASSIGN ] = BINARY,
+    [EXPR_SHL_ASSIGN ] = BINARY,
     [EXPR_CAST       ] = UNARY,
     [EXPR_LOGICAL_EQ ] = BINARY,
     [EXPR_LOGICAL_NEQ] = BINARY,
@@ -397,13 +415,18 @@ static char expr_order_table[] = {
     [EXPR_LOGICAL_AND] = 10,
     [EXPR_LOGICAL_OR ] = 11,
     [EXPR_ASSIGN     ] = 12,
-    [EXPR_MUL_ASSIGN ] = 13,
-    [EXPR_DIV_ASSIGN ] = 13,
-    [EXPR_ADD_ASSIGN ] = 14,
-    [EXPR_SUB_ASSIGN ] = 14,
-    [EXPR_RETURN     ] = 15
+    [EXPR_MUL_ASSIGN ] = 12,
+    [EXPR_DIV_ASSIGN ] = 12,
+    [EXPR_ADD_ASSIGN ] = 12,
+    [EXPR_SUB_ASSIGN ] = 12,
+    [EXPR_AND_ASSIGN ] = 12,
+    [EXPR_XOR_ASSIGN ] = 12,
+    [EXPR_OR_ASSIGN  ] = 12,
+    [EXPR_SHL_ASSIGN ] = 12,
+    [EXPR_SHR_ASSIGN ] = 12,
+    [EXPR_RETURN     ] = 13
 };
-static_assert(N_EXPR_TYPES == 46, "not all expression types have their arity and order set");
+static_assert(N_EXPR_TYPES == 51, "not all expression types have their arity and order set");
 
 static void initExpr(Expr* expr)
 {
@@ -437,7 +460,7 @@ static int getSubexprsCount(Expr* expr)
 
 bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
 {
-    static_assert(N_EXPR_TYPES == 46, "not all expression types are handled in isExprTerm");
+    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in isExprTerm");
     int64_t symbol_id = getTokenSymbolId(token);
     if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF || expr->type == EXPR_WHILE) && symbol_id == SYMBOL_BLOCK_END) return true; 
     if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
@@ -517,7 +540,7 @@ bool typeMatches(TypeDef field, TypeDef entry)
 }
 
 bool isExprEvaluatable(ExprType type) {
-    static_assert(N_EXPR_TYPES == 46, "not all expression types are handled in isExprEvaluatable");
+    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in isExprEvaluatable");
     static bool expr_evaluatability_info[N_EXPR_TYPES] = {
         [EXPR_INVALID   ] = false,
         [EXPR_INVALID + 1 ... N_EXPR_TYPES - 1] = true,
@@ -540,7 +563,7 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
     for (int i = 0; i < indent_level; i++) {
         fputc('\t', dst);
     }
-    static_assert(N_EXPR_TYPES == 46, "not all expression types are handled in fprintExpr");
+    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in fprintExpr");
 
     fprintTokenLoc(dst, expr.loc);
     switch (expr.type) {
@@ -587,6 +610,31 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             break;
         case EXPR_DIV_ASSIGN:
             fputs("DIVIDE & ASSIGN:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
+        case EXPR_AND_ASSIGN:
+            fputs("BITWISE AND & ASSIGN:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
+        case EXPR_XOR_ASSIGN:
+            fputs("BITWISE EXCLUSIVE OR & ASSIGN:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
+        case EXPR_OR_ASSIGN:
+            fputs("BITWISE OR & ASSIGN:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
+        case EXPR_SHL_ASSIGN:
+            fputs("SHIFT LEFT & ASSIGN:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
+        case EXPR_SHR_ASSIGN:
+            fputs("SHIFT RIGHT & ASSIGN:\n", dst);
             fprintExpr(dst, *expr.arg1, indent_level + 1);
             fprintExpr(dst, *expr.arg2, indent_level + 1);
             break;
@@ -857,7 +905,7 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type) __r
 bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
 // changes the type of the expression if the new type is suitable in place of the current expression type
 {
-    static_assert(N_EXPR_TYPES == 46, "not all expression types are handled in setExprType");
+    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in setExprType");
     static ExprTypeSetter override_table[N_EXPR_TYPES][N_EXPR_TYPES] = {
         [EXPR_INVALID   ] = {
             [EXPR_SYSCALL ... N_EXPR_TYPES - 1] = defaultExprTypeSetter,
@@ -874,7 +922,7 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_GET_VAR] = setExprNameToExprGetVar,
             [EXPR_ASSIGN] = setExprAssign,
-            [EXPR_ADD_ASSIGN ... EXPR_DIV_ASSIGN] = setExprAssign,
+            [EXPR_ADD_ASSIGN ... EXPR_SHR_ASSIGN] = setExprAssign,
             [EXPR_PROC_CALL] = setExprNameToExprFuncCall,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
             [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
@@ -894,11 +942,11 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
         [EXPR_PROC_REF  ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_NEW_VAR   ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_ASSIGN    ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
-        [EXPR_ADD_ASSIGN ... EXPR_DIV_ASSIGN] = { [0 ... N_EXPR_TYPES - 1] = NULL },
+        [EXPR_ADD_ASSIGN ... EXPR_SHR_ASSIGN] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_GET_VAR   ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ASSIGN] = setExprAssign,
-            [EXPR_ADD_ASSIGN ... EXPR_DIV_ASSIGN] = setExprAssign,
+            [EXPR_ADD_ASSIGN ... EXPR_SHR_ASSIGN] = setExprAssign,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
             [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
         },
@@ -942,7 +990,7 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
         [EXPR_DEREF  ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ASSIGN] = setExprAssign,
-            [EXPR_ADD_ASSIGN ... EXPR_DIV_ASSIGN] = setExprAssign,
+            [EXPR_ADD_ASSIGN ... EXPR_SHR_ASSIGN] = setExprAssign,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
             [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
         }
@@ -961,7 +1009,7 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
 
 TypeDef getExprValueType(AST* ast, Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 46, "not all expression types are handled in getExprValueType");
+    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in getExprValueType");
     static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in getExprValueType");
     switch (expr.type) {
         case EXPR_INVALID:
@@ -988,6 +1036,11 @@ TypeDef getExprValueType(AST* ast, Expr expr)
         case EXPR_SUB_ASSIGN:
         case EXPR_MUL_ASSIGN:
         case EXPR_DIV_ASSIGN:
+        case EXPR_AND_ASSIGN:
+        case EXPR_XOR_ASSIGN:
+        case EXPR_OR_ASSIGN:
+        case EXPR_SHL_ASSIGN:
+        case EXPR_SHR_ASSIGN:
             return getExprValueType(ast, *expr.arg1);
         case EXPR_SUB:
         case EXPR_ADD: {
@@ -1353,6 +1406,13 @@ void raiseNegativeBitShiftError(AST* ast, TokenLoc loc)
 {
     fprintTokenLoc(stderr, loc);
     eputs("error: attempted to bit-shift a value by a negative amount of bits, which is an undefined operation\n");
+    exit(1);
+}
+
+void raiseInvalidComplexAssignmentError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: complex assignment operator cannot be used with a variable declaration\n");
     exit(1);
 }
 
@@ -1811,16 +1871,21 @@ typedef bool (*SymbolParser) (AST*, Token, Expr*, Expr*, FuncDecl*, int);
 
 bool parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
 {
-
     static ExprType symbol_to_expr[N_SYMBOLS] = {
         [SYMBOL_ASSIGNMENT] = EXPR_ASSIGN,
         [SYMBOL_ADD_ASSIGN] = EXPR_ADD_ASSIGN,
         [SYMBOL_SUB_ASSIGN] = EXPR_SUB_ASSIGN,
         [SYMBOL_MUL_ASSIGN] = EXPR_MUL_ASSIGN,
-        [SYMBOL_DIV_ASSIGN] = EXPR_DIV_ASSIGN
+        [SYMBOL_DIV_ASSIGN] = EXPR_DIV_ASSIGN,
+        [SYMBOL_AND_ASSIGN] = EXPR_AND_ASSIGN,
+        [SYMBOL_XOR_ASSIGN] = EXPR_XOR_ASSIGN,
+        [SYMBOL_OR_ASSIGN ] = EXPR_OR_ASSIGN,
+        [SYMBOL_SHL_ASSIGN] = EXPR_SHL_ASSIGN,
+        [SYMBOL_SHR_ASSIGN] = EXPR_SHR_ASSIGN
     };
 
     if (dst->type == EXPR_NEW_VAR) {
+        if (token.symbol_id != SYMBOL_ASSIGNMENT) raiseInvalidComplexAssignmentError(ast, token.loc);
         parseExpr(ast, addSubexpr(dst, (Expr){0}), dst, dst->block, func, EXPRTERM_FULL | EXPRTYPE_EVALUATABLE);
     } else {
         if (flags & EXPRTYPE_EVALUATABLE && !(flags & EXPRTERM_BRACKET) && !(flags & EXPRCTX_DEREF)) raiseBRError(ast, (BRError){
@@ -2040,7 +2105,7 @@ bool parseEmptyToken(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDe
 
 void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* func, int flags)
 {
-    static_assert(N_EXPR_TYPES == 46, "not all expression types are handled in parseExpr");
+    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in parseExpr");
     TypeDef new_type;
     Token token;
 
@@ -2108,7 +2173,12 @@ void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* fu
                 [SYMBOL_ADD_ASSIGN] = &parseSymbolAssignment,
                 [SYMBOL_SUB_ASSIGN] = &parseSymbolAssignment,
                 [SYMBOL_MUL_ASSIGN] = &parseSymbolAssignment,
-                [SYMBOL_DIV_ASSIGN] = &parseSymbolAssignment
+                [SYMBOL_DIV_ASSIGN] = &parseSymbolAssignment,
+                [SYMBOL_AND_ASSIGN] = &parseSymbolAssignment,
+                [SYMBOL_XOR_ASSIGN] = &parseSymbolAssignment,
+                [SYMBOL_OR_ASSIGN ] = &parseSymbolAssignment,
+                [SYMBOL_SHL_ASSIGN] = &parseSymbolAssignment,
+                [SYMBOL_SHR_ASSIGN] = &parseSymbolAssignment
             };
             if (symbol_parsers[token.symbol_id](ast, token, dst, parent_expr, func, flags)) break;
         } else if (token.type == TOKEN_WORD) {
@@ -2176,7 +2246,7 @@ void makeLogicalExpr(Expr* expr)
 
 void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
 {
-    static_assert(N_EXPR_TYPES == 46, "not all expressions have any optimizations defined");
+    static_assert(N_EXPR_TYPES == 51, "not all expressions have any optimizations defined");
     switch (expr->type) {
         case EXPR_SYSCALL:
             for (ExprNode* iter = getSubexprs(expr)->start->next; iter != NULL; iter = iter->next) {
@@ -2188,12 +2258,22 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
         case EXPR_SUB_ASSIGN:
         case EXPR_ADD_ASSIGN:
         case EXPR_MUL_ASSIGN:
-        case EXPR_DIV_ASSIGN: {
+        case EXPR_DIV_ASSIGN:
+        case EXPR_AND_ASSIGN:
+        case EXPR_XOR_ASSIGN:
+        case EXPR_OR_ASSIGN:
+        case EXPR_SHL_ASSIGN:
+        case EXPR_SHR_ASSIGN: {
             static ExprType assigners_to_ops[N_EXPR_TYPES] = {
                 [EXPR_ADD_ASSIGN] = EXPR_ADD,
                 [EXPR_SUB_ASSIGN] = EXPR_SUB,
                 [EXPR_MUL_ASSIGN] = EXPR_MUL,
-                [EXPR_DIV_ASSIGN] = EXPR_DIV
+                [EXPR_DIV_ASSIGN] = EXPR_DIV,
+                [EXPR_AND_ASSIGN] = EXPR_AND,
+                [EXPR_XOR_ASSIGN] = EXPR_XOR,
+                [EXPR_OR_ASSIGN ] = EXPR_OR,
+                [EXPR_SHL_ASSIGN] = EXPR_SHL,
+                [EXPR_SHR_ASSIGN] = EXPR_SHR
             };
             Expr* subexpr = expr->arg2;
             expr->arg2 = malloc(sizeof(Expr));
@@ -2396,6 +2476,14 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
             }
             break;
         case EXPR_NOT:
+            optimizeExpr(ast, expr->arg1, func);
+            if (expr->arg1->type == EXPR_INT) {
+                int64_t int_literal = ~expr->arg1->int_literal;
+                free(expr->arg1);
+                expr->int_literal = int_literal;
+                expr->type = EXPR_INT;
+            }
+            break;
         case EXPR_CAST:
         case EXPR_LOGICAL_NOT:
             optimizeExpr(ast, expr->arg1, func);
@@ -3557,9 +3645,14 @@ ExprCompiler expr_compilers[] = {
     [EXPR_ADD_ASSIGN ] = &compileExprInvalid,
     [EXPR_SUB_ASSIGN ] = &compileExprInvalid,
     [EXPR_MUL_ASSIGN ] = &compileExprInvalid,
-    [EXPR_DIV_ASSIGN ] = &compileExprInvalid
+    [EXPR_DIV_ASSIGN ] = &compileExprInvalid,
+    [EXPR_AND_ASSIGN ] = &compileExprInvalid,
+    [EXPR_XOR_ASSIGN ] = &compileExprInvalid,
+    [EXPR_OR_ASSIGN  ] = &compileExprInvalid,
+    [EXPR_SHL_ASSIGN ] = &compileExprInvalid,
+    [EXPR_SHR_ASSIGN ] = &compileExprInvalid
 };
-static_assert(N_EXPR_TYPES == 46, "not all expression types have corresponding compilers defined");
+static_assert(N_EXPR_TYPES == 51, "not all expression types have corresponding compilers defined");
 
 bool compileAST(AST* src, FILE* dst)
 {
@@ -3714,7 +3807,7 @@ int main(int argc, char* argv[])
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
         return 1;
     }
-    static_assert(N_SYMBOLS == 27, "not all symbols are handled");
+    static_assert(N_SYMBOLS == 32, "not all symbols are handled");
     setSymbols(
         &prep,
         BRP_SYMBOL("("),
@@ -3727,6 +3820,11 @@ int main(int argc, char* argv[])
         BRP_SYMBOL("-="),
         BRP_SYMBOL("*="),
         BRP_SYMBOL("/="),
+        BRP_SYMBOL("&="),
+        BRP_SYMBOL("^="),
+        BRP_SYMBOL("|="),
+        BRP_SYMBOL("<<="),
+        BRP_SYMBOL(">>="),
         BRP_SYMBOL("=="),
         BRP_SYMBOL("!="),
         BRP_SYMBOL("<="),
