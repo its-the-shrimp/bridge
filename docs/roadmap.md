@@ -8,7 +8,7 @@
 - ~Bracketed exressions~
 - ~Conditions~
 - ~Loops~
-- Referencing and dereferencing
+- ~Referencing and dereferencing~
 - Complex assignment expressions (`+=`, `&=`, etc.)
 - Array variables
 - BRP: includes

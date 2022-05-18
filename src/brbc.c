@@ -250,7 +250,7 @@ void compileOpAddNative(Module* module, int index, CompCtx* ctx)
 		compileCondition(ctx->dst, op.cond_id, 1);
 		fprintf(
 			ctx->dst,
-			"\tadd x%hhd, x%hhd, %llu",
+			"\tadd x%hhd, x%hhd, %llu\n",
 			op.dst_reg,
 			op.src_reg,
 			op.value
@@ -335,7 +335,7 @@ void compileOpCmpNative(Module* module, int index, CompCtx* ctx)
 		} else {
 			int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
 			fprintf(
-				ctx->dst, 
+				ctx->dst,
 				"\tccmp x%hhd, x8, %s\n", 
 				op.src_reg,
 				conditionNames_arm64[op.cond_id]
