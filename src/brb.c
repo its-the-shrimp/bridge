@@ -1301,7 +1301,7 @@ DataSpec getStackSpec(ExecEnv* env, void* ptr, int size)
 	array_rev_foreach(DataSpec, spec, arrayhead(env->vars)->vars,
 		int spec_size = dataSpecSize(spec);
 		if (inRange(ptr, cur_stack_pos, cur_stack_pos + spec_size)) {
-			if (ptr == cur_stack_pos && size <= spec_size) { return spec; }
+			if (ptr == cur_stack_pos && size <= spec_size) return spec;
 			env->exitcode = EC_ACCESS_FAILURE;
 			env->err_ptr = ptr;
 			env->err_access_length = size;
@@ -2759,8 +2759,8 @@ bool handleOpLdvs(ExecEnv* env, Module* module)
 
 	env->registers[op.dst_reg] = 0;
 	memcpy(env->registers + op.dst_reg, env->stack_head + op.symbol_id, op.var_size);
-	if (op.var_size < 8 ? env->registers[op.dst_reg] & (1 << (op.var_size * 8 - 1)) : false) {
-		env->registers[op.dst_reg] |= ~((1ULL << (op.var_size * 8)) - 1);
+	if (op.var_size < 8 ? env->registers[op.dst_reg] & (1LL << (op.var_size * 8 - 1)) : false) {
+		env->registers[op.dst_reg] |= ~byteMask(op.var_size);
 	}
 	env->op_id++;
 	return false;
@@ -2879,8 +2879,8 @@ void printRuntimeError(FILE* fd, ExecEnv* env, Module* module)
 {
 	if (env->exitcode < 0) {
 		if (env->src_path) {
-			fprintf(fd, "%s:%d:\n", env->src_path, env->src_line);
-		} else fprintf(fd, "%04x:\n", env->op_id);
+			fprintf(fd, "%s:%d [0x%04x]:\n", env->src_path, env->src_line, env->op_id);
+		} else fprintf(fd, "0x%04x:\n", env->op_id);
 
 		switch (env->exitcode) {
 			case EC_NO_STACKFRAME:

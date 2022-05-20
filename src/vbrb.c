@@ -870,6 +870,7 @@ VBRBError compileOpDelnv(CompilerCtx* ctx, Module* dst)
 	for (int64_t i = ctx->vars.length - 1; i >= (int64_t)(ctx->vars.length - n_vars); i--) {
 		op->symbol_id += ctx->vars.data[i].size;
 	}
+	ctx->vars.length -= n_vars;
 
 	return (VBRBError){ .prep = ctx->prep };
 }

@@ -65,43 +65,6 @@ typedef enum {
 } BRSymbol;
 
 typedef enum {
-    BR_ERR_NONE,
-    BR_ERR_INVALID_GLOBAL_STMT,
-    BR_ERR_PROC_NAME_EXPECTED,
-    BR_ERR_ARG_DEF_START_EXPECTED,
-    BR_ERR_ARG_DEF_EXPECTED,
-    BR_ERR_ARG_NAME_EXPECTED,
-    BR_ERR_INVALID_SYSCALL_NAME,
-    BR_ERR_BUILTIN_NAME_EXPECTED,
-    BR_ERR_INVALID_BUILTIN_NAME,
-    BR_ERR_INVALID_EXPR,
-    BR_ERR_TOO_MANY_SYSCALL_ARGS,
-    BR_ERR_INVALID_VAR_NAME,
-    BR_ERR_NO_VALUE_EXPR,
-    BR_ERR_UNCLOSED_BLOCK,
-    BR_ERR_INVALID_VAR_DECL,
-    BR_ERR_UNKNOWN_VAR,
-    BR_ERR_VAR_EXISTS,
-    BR_ERR_INVALID_TYPE,
-    BR_ERR_VAR_TYPE_MISMATCH,
-    BR_ERR_VOID_VAR_DECL,
-    BR_ERR_UNKNOWN_PROC,
-    BR_ERR_TOO_MANY_PROC_ARGS, // TODO: lift the 6 function arguments limitation
-    BR_ERR_RETURN_TYPE_MISMATCH,
-    BR_ERR_ARG_COUNT_MISMATCH,
-    BR_ERR_ARG_TYPE_MISMATCH,
-    BR_ERR_CAST_TYPE_EXPECTED,
-    BR_ERR_ARG_DEF_END_EXPECTED,
-    BR_ERR_VOID_TYPE_CAST,
-    BR_ERR_MAIN_PROC_RET_TYPE_MISMATCH,
-    BR_ERR_MAIN_PROC_ARG_COUNT_MISMATCH,
-    BR_ERR_COMPARISON_TYPE_MISMATCH,
-    BR_ERR_UNBRACKETED_SET_EXPR,
-    N_BR_ERRORS
-} BRErrorCode;
-
-
-typedef enum {
     KIND_NONE,
     KIND_INT,
     KIND_PTR,
@@ -216,91 +179,10 @@ declChain(FuncDecl);
 defChain(FuncDecl);
 
 typedef struct {
-    BRErrorCode code;
-    Token loc;
-    union {
-        int n_args; // for BR_ERR_TOO_MANY_SYSCALL_ARGS and BR_ERR_TOO_MANY_PROC_ARGS
-        Expr* arg_decl; // for BR_ERR_ARG_TYPE_MISMATCH
-        Expr* left_expr; // for BR_ERR_COMPARISON_TYPE_MISMATCH
-    };
-    union {
-        FuncDecl* func; // for errors related to function calls
-        Expr* var_decl; // for errors related to variable accesses
-    };
-    TypeDef entry_type; // for type-related errors
-} BRError;
-
-typedef struct {
     FuncDeclChain functions;
     Expr globals;
     BRP* prep;
 } AST;
-
-void raiseBRError(AST* ast, BRError err);
-
-bool parseType(AST* ast, TypeDef* dst)
-{
-    static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in parseType");
-    *dst = (TypeDef){0};
-    bool fetched = false;
-    while (true) {
-        Token token = peekToken(ast->prep);
-        if (token.type == TOKEN_KEYWORD) {
-            switch (token.keyword_id) {
-                case KW_INT8:
-                case KW_INT16:
-                case KW_INT32:
-                case KW_INT64:
-                    if (dst->kind != KIND_NONE) raiseBRError(ast, (BRError){
-                        .code = BR_ERR_INVALID_TYPE,
-                        .loc = token
-                    });
-
-                    fetchToken(ast->prep);
-                    dst->kind = KIND_INT;
-                    fetched = true;
-                    dst->size = 1 << (token.keyword_id - KW_INT8);
-                    break;
-                case KW_VOID:
-                    if (dst->kind != KIND_NONE) raiseBRError(ast, (BRError){
-                        .code = BR_ERR_INVALID_TYPE,
-                        .loc = token
-                    });
-
-                    fetchToken(ast->prep);
-                    fetched = true;
-                    dst->kind = KIND_VOID;
-                    break;
-                case KW_BOOL:
-                    if (dst->kind != KIND_NONE) raiseBRError(ast, (BRError){
-                        .code = BR_ERR_INVALID_TYPE,
-                        .loc = token
-                    });
-
-                    fetchToken(ast->prep);
-                    fetched = true;
-                    dst->kind = KIND_BOOL;
-                    break;
-                default:
-                    return fetched;
-            }
-        } else if (token.type == TOKEN_SYMBOL) {
-            switch (token.symbol_id) {
-                case SYMBOL_STAR:
-                    if (dst->kind == KIND_NONE) return fetched;
-
-                    fetchToken(ast->prep);
-                    TypeDef* new_base = malloc(sizeof(TypeDef));
-                    *new_base = *dst;
-                    dst->base = new_base;
-                    dst->kind = KIND_PTR;
-                    break;
-                default:
-                    return fetched;
-            }
-        } else return fetched;
-    }
-}
 
 // flags for parseExpr desribing how the expression will be used
 #define EXPRTERM_FULL        0x1
@@ -309,10 +191,8 @@ bool parseType(AST* ast, TypeDef* dst)
 #define EXPRTYPE_EVALUATABLE 0x8
 #define EXPRTYPE_VOIDABLE    0x10
 #define EXPRTYPE_LOGICAL     0x20
-#define EXPRCTX_DEREF        0x40
 #define EXPRTERM             (EXPRTERM_FULL | EXPRTERM_ARG | EXPRTERM_BRACKET)
 #define EXPRTYPE             (EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE | EXPRTYPE_LOGICAL)
-#define EXPRCTX              (EXPRCTX_DEREF)
 
 #define VARIADIC -1
 #define NULLARY 0
@@ -457,25 +337,6 @@ static int getSubexprsCount(Expr* expr)
     return ExprChain_length(*getSubexprs(expr));
 }
 
-
-bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
-{
-    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in isExprTerm");
-    int64_t symbol_id = getTokenSymbolId(token);
-    if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF || expr->type == EXPR_WHILE) && symbol_id == SYMBOL_BLOCK_END) return true; 
-    if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
-    if (flags & EXPRTERM_ARG) {
-        if (symbol_id == SYMBOL_ARGSPEC_END || symbol_id == SYMBOL_COMMA) return true;
-        if (symbol_id == SYMBOL_SEMICOLON) raiseBRError(ast, (BRError){
-            .code = BR_ERR_ARG_DEF_EXPECTED,
-            .loc = token
-        });
-        return false;
-    }
-    if (flags & EXPRTERM_BRACKET) return symbol_id == SYMBOL_ARGSPEC_END;
-    return false;
-}
-
 void fprintType(FILE* dst, TypeDef type)
 {
     static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in fprintType");
@@ -502,6 +363,298 @@ void fprintType(FILE* dst, TypeDef type)
 }
 #define printType(type) fprintType(stdout, type)
 
+void raiseInvalidGlobalStmtError(AST* ast, Token token)
+{
+    fprintTokenLoc(stderr, token.loc);
+    eputs("error: expected a global statement specifier, instead got ");
+    fprintTokenStr(stderr, token, ast->prep);
+    eputc('\n');
+    exit(1);
+}
+
+void raiseVarDeclAsStmtBodyError(AST* ast, TokenLoc loc, const char* stmt_name)
+{
+    fprintTokenLoc(stderr, loc);
+    eprintf("error: variable declarations cannot be a body of %s\n", stmt_name);
+    exit(1);
+}
+
+void raiseUnknownBuiltinNameError(AST* ast, Token token)
+{
+    fprintTokenLoc(stderr, token.loc);
+    eprintf("error: unknown built-in value `%s`\n", token.word);
+    exit(1);
+}
+
+void raiseUnknownSyscallNameError(AST* ast, Token token)
+{
+    fprintTokenLoc(stderr, token.loc);
+    eprintf("error: unknown syscall name `%s`\n", token.word);
+    exit(1);
+}
+
+void raiseInvalidExprError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: invalid expression\n");
+    exit(1);
+}
+
+void raiseTooManySyscallArgsError(AST* ast, TokenLoc loc, int n_args)
+{
+    fprintTokenLoc(stderr, loc);
+    eprintf("expected at most 6 arguments for a syscall, instead got %d\n", n_args);
+    exit(1);
+}
+
+void raiseNoValueExprError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: expected a value\n");
+    exit(1);
+}
+
+void raiseUnknownNameError(AST* ast, Token token)
+{
+    fprintTokenLoc(stderr, token.loc);
+    eprintf("error: unknown name `%s`\n", token.word);
+    exit(1);
+}
+
+void raiseNameTakenError(AST* ast, Token token, TokenLoc decl_loc)
+{
+    fprintTokenLoc(stderr, token.loc);
+    eprintf("error: name `%s` is already taken\n", token.word);
+    fprintTokenLoc(stderr, decl_loc);
+    eprintf("note: declaration, which uses this name is here\n");
+    exit(1);
+}
+
+void raiseInvalidTypeError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: invalid type specifier\n");
+    exit(1);
+}
+
+void raiseVoidVarDeclError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: can't declare a variable of type `");
+    fprintType(stderr, VOID_TYPE);
+    eputs("`\n");
+    exit(1);
+}
+
+void raiseTooManyProcArgs(AST* ast, TokenLoc loc, int n_args)
+{
+    fprintTokenLoc(stderr, loc);
+    eprintf("error: expected at most 6 arguments to a function, instead got %d", n_args);
+    exit(1);
+}
+
+void raiseArgCountMismatchError(AST* ast, TokenLoc loc, FuncDecl* func, int n_args)
+{
+    fprintTokenLoc(stderr, loc);
+    if (n_args >= 0) {
+        eprintf(
+            "error: function `%s` expects exactly %d argument(s), instead got %d\n",
+            func->name, getSubexprsCount(&func->args) - 1, n_args
+        );
+    } else {
+        eprintf(
+            "error: function `%s` expects exactly %d argument(s), instead got more\n",
+            func->name, getSubexprsCount(&func->args) - 1
+        );
+    }
+    fprintTokenLoc(stderr, func->loc);
+    eprintf("note: function `%s` is declared here\n", func->name);
+    exit(1);
+}
+
+void raiseVoidCastError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: cannot cast a value to type `");
+    fprintType(stderr, VOID_TYPE);
+    eputs("`\n");
+}
+
+void raiseMainProcRetTypeMismatchError(AST* ast, TokenLoc loc, TypeDef ret_type)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: the `main` procedure must return nothing, instead the return type of `");
+    fprintType(stderr, ret_type);
+    eputs("` is declared\n");
+    exit(1);
+}
+
+void raiseMainProcArgCountMismatch(AST* ast, TokenLoc loc, int n_args)
+{
+    fprintTokenLoc(stderr, loc);
+    eprintf("error: the `main` procedure must accept exactly 0 arguments, instead %d arguments were declared\n", n_args);
+    exit(1);
+}
+
+void raiseUnbracketedAssignExpr(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: to use assignment expression as a value, wrap it in brackets\n");
+    exit(1);
+}
+
+void _raiseUnexpectedTokenError(AST* ast, Token actual, const char* msg, ...)
+{
+    va_list args;
+    va_start(args, msg);
+    int n_tokens = 0;
+    while (va_arg(args, Token).type != TOKEN_NONE) n_tokens++;
+    va_end(args);
+
+    fprintTokenLoc(stderr, actual.loc);
+    eputs("error: expected");
+    va_start(args, msg);
+    for (int n = 0; n < n_tokens; n++) {
+        Token iter = va_arg(args, Token);
+
+        if (iter.type == TOKEN_WORD) {
+            eputs(" a word");
+        } else fprintTokenStr(stderr, va_arg(args, Token), ast->prep);
+        if (n == n_tokens - 2) {
+            eputs(" or ");
+        } else if (n != n_tokens - 1) eputs(", ");
+    }
+    va_end(args);
+    
+    if (msg) {
+        eprintf(" as %s, ", msg);
+    } else eputs(", ");
+
+    eputs("instead got ");
+    fprintTokenStr(stderr, actual, ast->prep);
+    eputc('\n');
+    exit(1);
+}
+#define raiseUnexpectedTokenError(ast, token, msg, ...) _raiseUnexpectedTokenError(ast, token, msg, __VA_ARGS__, (Token){0})
+
+void raiseForLoopTermExpectedError(AST* ast, Token actual)
+{
+    fprintTokenLoc(stderr, actual.loc);
+    eputs("error: expected a `for` loop terminating expression\n");
+    exit(1);
+}
+
+void raiseForLoopIncrExpectedError(AST* ast, Token actual)
+{
+    fprintTokenLoc(stderr, actual.loc);
+    eputs("error: expected a `for` loop incrementing expression\n");
+    exit(1);
+}
+
+void raiseUnreferrableExprError(AST* ast, TokenLoc loc, TypeDef subexpr_type)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: the following expression is type `");
+    printType(subexpr_type);
+    eputs("`, which cannot be referenced\n");
+    exit(1);
+}
+
+void raiseUndereferrableExprError(AST* ast, TokenLoc loc, TypeDef subexpr_type)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: the following expression is of type `");
+    fprintType(stderr, subexpr_type);
+    eputs("`, which can't be dereferenced\n");
+    exit(1);
+}
+
+void raiseComparisonTypeMismatchError(AST* ast, TokenLoc loc, TypeDef entry_type, TypeDef field_type)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("cannot compare a value of type `");
+    fprintType(stderr, entry_type);
+    eputs("` to a value of type `");
+    fprintType(stderr, field_type);
+    eputs("`\n");
+    exit(1);
+}
+
+void raiseAssignmentTypeMismatchError(AST* ast, TokenLoc loc, Expr* var_decl, TypeDef entry_type)
+{
+    fprintTokenLoc(stderr, loc);
+    char* var_name = getSubexpr(var_decl, 0)->name;
+    eprintf("variable `%s` expects a value of type `", var_name);
+    fprintType(stderr, *getSubexpr(var_decl, 1)->var_type);
+    eputs("`, instead got a value of type `");
+    fprintType(stderr, entry_type);
+    eputs("`\n");
+    fprintTokenLoc(stderr, var_decl->loc);
+    eprintf("note: variable `%s` is declared here\n", var_name);
+    exit(1);
+}
+
+void raiseReturnTypeMismatchError(AST* ast, TokenLoc loc, TypeDef entry_type, FuncDecl* func)
+{
+    fprintTokenLoc(stderr, loc);
+    eprintf("function `%s` is declared to return a value of type `", func->name);
+    fprintType(stderr, func->return_type);
+    eputs("`, instead attempted to return value of type `");
+    fprintType(stderr, entry_type);
+    eputs("`\n");
+    fprintTokenLoc(stderr, func->loc);
+    eprintf("note: function `%s` is declared here\n", func->name);
+    exit(1);
+}
+
+void raiseArgTypeMismatchError(AST* ast, TokenLoc loc, FuncDecl* func, Expr* arg_decl, TypeDef entry_type)
+{
+    fprintTokenLoc(stderr, loc);
+    if (func) {
+        eprintf("error: argument `%s` of function `%s` expects a value of type `", getSubexpr(arg_decl, 0)->name, func->name);
+        fprintType(stderr, *getSubexpr(arg_decl, 1)->var_type);
+    } else {
+        eputs("error: a syscall argument expects a value of type `");
+        fprintType(stderr, BUILTIN_VAL_TYPE);
+    }
+    eputs("`, instead got value of type `");
+    fprintType(stderr, entry_type);
+    eputs("`\n");
+    if (func) {
+        fprintTokenLoc(stderr, func->loc);
+        eprintf("note: function `%s` is declared here\n", func->name);
+    }
+    exit(1);
+}
+
+void raiseDivByZeroError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: attempted to divide by zero, which is an undefined operation\n");
+    exit(1);
+}
+
+void raiseNegativeBitShiftError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: attempted to bit-shift a value by a negative amount of bits, which is an undefined operation\n");
+    exit(1);
+}
+
+void raiseInvalidComplexAssignmentError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: complex assignment operator cannot be used with a variable declaration\n");
+    exit(1);
+}
+
+void raiseNoProcReturnError(AST* ast, FuncDecl* decl)
+{
+    fprintTokenLoc(stderr, decl->body.loc);
+    eprintf("error: the function `%s` is declared to return a value, but its definition does not return a value in all control paths\n", decl->name);
+    exit(1);
+}
+
 int getTypeSize(TypeDef type)
 {
     static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in getTypeSize");
@@ -519,13 +672,30 @@ int getTypeSize(TypeDef type)
     }
 }
 
-bool typeMatches(TypeDef field, TypeDef entry)
+bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
+{
+    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in isExprTerm");
+    int64_t symbol_id = getTokenSymbolId(token);
+    if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF || expr->type == EXPR_WHILE) && symbol_id == SYMBOL_BLOCK_END) return true; 
+    if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
+    if (flags & EXPRTERM_ARG) {
+        if (symbol_id == SYMBOL_ARGSPEC_END || symbol_id == SYMBOL_COMMA) return true;
+        if (symbol_id == SYMBOL_SEMICOLON)
+            raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
+        return false;
+    }
+    if (flags & EXPRTERM_BRACKET) return symbol_id == SYMBOL_ARGSPEC_END;
+    return false;
+}
+
+bool _typeMatches(TypeDef field, TypeDef entry)
 {
     static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in typeMatches");
+    if (entry.kind == KIND_VOID) return true;
     switch (field.kind) {
-        case KIND_VOID: return entry.kind != KIND_PTR;
+        case KIND_VOID: return true;
         case KIND_PTR:
-            return entry.kind == KIND_PTR ? typeMatches(*field.base, *entry.base) : entry.kind == KIND_BUILTIN_VAL;
+            return entry.kind == KIND_PTR ? _typeMatches(*field.base, *entry.base) : entry.kind == KIND_BUILTIN_VAL;
         case KIND_INT:
             return (entry.kind == KIND_INT && entry.size == field.size) ||
                 (entry.kind == KIND_BUILTIN_VAL && field.size == 8) ||
@@ -536,6 +706,66 @@ bool typeMatches(TypeDef field, TypeDef entry)
         default:
             eprintf("internal compiler bug in typeMatches: unknown field type kind %d\n", field.kind);
             abort();
+    }
+}
+
+bool typeMatches(TypeDef field, TypeDef entry)
+{
+    return field.kind == KIND_VOID ? false : _typeMatches(field, entry);
+}
+
+bool parseType(AST* ast, TypeDef* dst)
+{
+    static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in parseType");
+    *dst = (TypeDef){0};
+    bool fetched = false;
+    while (true) {
+        Token token = peekToken(ast->prep);
+        if (token.type == TOKEN_KEYWORD) {
+            switch (token.keyword_id) {
+                case KW_INT8:
+                case KW_INT16:
+                case KW_INT32:
+                case KW_INT64:
+                    if (dst->kind != KIND_NONE) raiseInvalidTypeError(ast, token.loc);
+
+                    fetchToken(ast->prep);
+                    dst->kind = KIND_INT;
+                    fetched = true;
+                    dst->size = 1 << (token.keyword_id - KW_INT8);
+                    break;
+                case KW_VOID:
+                    if (dst->kind != KIND_NONE) raiseInvalidTypeError(ast, token.loc);
+
+                    fetchToken(ast->prep);
+                    fetched = true;
+                    dst->kind = KIND_VOID;
+                    break;
+                case KW_BOOL:
+                    if (dst->kind != KIND_NONE) raiseInvalidTypeError(ast, token.loc);
+
+                    fetchToken(ast->prep);
+                    fetched = true;
+                    dst->kind = KIND_BOOL;
+                    break;
+                default:
+                    return fetched;
+            }
+        } else if (token.type == TOKEN_SYMBOL) {
+            switch (token.symbol_id) {
+                case SYMBOL_STAR:
+                    if (dst->kind == KIND_NONE) return fetched;
+
+                    fetchToken(ast->prep);
+                    TypeDef* new_base = malloc(sizeof(TypeDef));
+                    *new_base = *dst;
+                    dst->base = new_base;
+                    dst->kind = KIND_PTR;
+                    break;
+                default:
+                    return fetched;
+            }
+        } else return fetched;
     }
 }
 
@@ -855,10 +1085,7 @@ void defaultExprTypeSetter(AST* ast, Expr* expr, ExprType new_type)
 void setExprNameToExprGetVar(AST* ast, Expr* expr, ExprType new_type)
 {
     Expr* decl = getVarDecl(expr->block, expr->name);
-    if (!decl) raiseBRError(ast, (BRError){
-        .code = BR_ERR_UNKNOWN_VAR,
-        .loc = (Token){ .loc = expr->loc, .type = TOKEN_WORD, .word = expr->name }
-    });
+    if (!decl) raiseUnknownNameError(ast, (Token){ .loc = expr->loc, .type = TOKEN_WORD, .word = expr->name });
 
     expr->type = EXPR_GET_VAR;
     expr->arg1 = decl;
@@ -867,10 +1094,7 @@ void setExprNameToExprGetVar(AST* ast, Expr* expr, ExprType new_type)
 void setExprNameToExprFuncCall(AST* ast, Expr* expr, ExprType new_type)
 {
     FuncDecl* decl = getFuncDecl(ast, expr->name);
-    if (!decl) raiseBRError(ast, (BRError){
-        .code = BR_ERR_UNKNOWN_PROC,
-        .loc = (Token){ .loc = expr->loc, .type = TOKEN_WORD, .word = expr->name }
-    });
+    if (!decl) raiseUnknownNameError(ast, (Token){ .loc = expr->loc, .type = TOKEN_WORD, .word = expr->name });
 
     expr->type = new_type;
     initExpr(expr);
@@ -997,10 +1221,7 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
     };
 
     ExprTypeSetter setter = override_table[expr->type][new_type];
-    if (!setter) raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_EXPR,
-        .loc = (Token){ .loc = expr->loc }
-    });
+    if (!setter) raiseInvalidExprError(ast, expr->loc);
     if (parent_expr ? expr_order_table[parent_expr->type] < expr_order_table[new_type] && expr_order_table[parent_expr->type] > 0 : false) return true;
 
     setter(ast, expr, new_type);
@@ -1100,322 +1321,6 @@ TypeDef getExprValueType(AST* ast, Expr expr)
     }
 }
 
-void raiseBRError(AST* ast, BRError err)
-{
-    static_assert(N_BR_ERRORS == 32, "not all BRidge errors are handled");
-    if (err.code) {
-        fprintTokenLoc(stderr, err.loc.loc);
-        eputs("error: ");
-        switch (err.code) {
-            case BR_ERR_INVALID_GLOBAL_STMT:
-                eputs("expected a global statement specifier, instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_PROC_NAME_EXPECTED:
-                eputs("expected a word as function name specifier, instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_ARG_DEF_START_EXPECTED:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_START }, ast->prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_ARG_DEF_EXPECTED:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_COMMA }, ast->prep);
-                eputs(" or ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_END }, ast->prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_ARG_NAME_EXPECTED:
-                eputs("expected word as a name of the function argument, instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_INVALID_SYSCALL_NAME:
-                eputs("expected word as the syscall name specifier, instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_INVALID_VAR_DECL:
-                eputs("variable declarations cannot be a body of a function declaration or an `if` statement\n");
-                exit(1);
-            case BR_ERR_BUILTIN_NAME_EXPECTED:
-                eputs("expected a word as the name of the built-in value, instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_INVALID_BUILTIN_NAME:
-                eprintf("unknown built-in value `%s`\n", err.loc.word);
-                exit(1);
-            case BR_ERR_INVALID_EXPR:
-                eputs("invalid expression\n");
-                exit(1);
-            case BR_ERR_TOO_MANY_SYSCALL_ARGS:
-                eprintf("expected at most 6 arguments for a syscall, instead got %d\n", err.n_args);
-                exit(1);
-            case BR_ERR_INVALID_VAR_NAME:
-                eputs("expected a word as the variable name, instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_NO_VALUE_EXPR:
-                eputs("expected a value\n");
-                exit(1);
-            case BR_ERR_UNCLOSED_BLOCK:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_BLOCK_END }, ast->prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_UNKNOWN_VAR:
-                eprintf("unknown variable name `%s`\n", err.loc.word);
-                exit(1);
-            case BR_ERR_VAR_EXISTS:
-                eprintf("variable `%s` is aliready declared\n", err.loc.word);
-                exit(1);
-            case BR_ERR_INVALID_TYPE:
-                eputs("invalid type specifier\n");
-                exit(1);
-            case BR_ERR_VAR_TYPE_MISMATCH: {
-                char* var_name = getSubexpr(err.var_decl, 0)->name;
-                eprintf("variable `%s` expects a value of type `", var_name);
-                fprintType(stderr, *getSubexpr(err.var_decl, 1)->var_type);
-                eputs("`, instead got a value of type `");
-                fprintType(stderr, err.entry_type);
-                eputs("`\n");
-                fprintTokenLoc(stderr, err.var_decl->loc);
-                eprintf("note: variable `%s` is declared here\n", var_name);
-                exit(1);
-            } case BR_ERR_VOID_VAR_DECL:
-                eputs("cannot declare a variable of type `");
-                fprintType(stderr, VOID_TYPE);
-                eputs("`\n");
-                exit(1);
-            case BR_ERR_UNKNOWN_PROC:
-                eprintf("unknown function name `%s`\n", err.loc.word);
-                exit(1);
-            case BR_ERR_TOO_MANY_PROC_ARGS:
-                eprintf("expected at most 6 arguments to a function, instead got %d", err.n_args);
-                exit(1);
-            case BR_ERR_RETURN_TYPE_MISMATCH:
-                eprintf("function `%s` is declared to return a value of type `", err.func->name);
-                fprintType(stderr, err.func->return_type);
-                eputs("`, instead attempted to return value of type `");
-                fprintType(stderr, err.entry_type);
-                eputs("`\n");
-                fprintTokenLoc(stderr, err.func->loc);
-                eprintf("note: function `%s` is declared here\n", err.func->name);
-                exit(1);
-            case BR_ERR_ARG_COUNT_MISMATCH:
-                if (err.n_args >= 0) {
-                    eprintf(
-                        "function `%s` expects exactly %d argument(s), instead got %d\n",
-                        err.func->name, getSubexprsCount(&err.func->args) - 1, err.n_args
-                    );
-                } else {
-                    eprintf(
-                        "function `%s` expects exactly %d argument(s), instead got more\n",
-                        err.func->name, getSubexprsCount(&err.func->args) - 1
-                    );
-                }
-                fprintTokenLoc(stderr, err.func->loc);
-                eprintf("note: function `%s` is declared here\n", err.func->name);
-                exit(1);
-            case BR_ERR_ARG_TYPE_MISMATCH:
-                if (err.func) {
-                    eprintf("argument `%s` of function `%s` expects a value of type `", getSubexpr(err.arg_decl, 0)->name, err.func->name);
-                    fprintType(stderr, *getSubexpr(err.arg_decl, 1)->var_type);
-                } else {
-                    eputs("a syscall argument expects a value of type `");
-                    fprintType(stderr, BUILTIN_VAL_TYPE);
-                }
-                eputs("`, instead got value of type `");
-                fprintType(stderr, err.entry_type);
-                eputs("`\n");
-                fprintTokenLoc(stderr, err.func->loc);
-                eprintf("note: function `%s` is declared here\n", err.func->name);
-                exit(1);
-            case BR_ERR_CAST_TYPE_EXPECTED:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_COMMA }, ast->prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_ARG_DEF_END_EXPECTED:
-                eputs("expected ");
-                fprintTokenStr(stderr, (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_END }, ast->prep);
-                eputs(", instead got ");
-                fprintTokenStr(stderr, err.loc, ast->prep);
-                eputc('\n');
-                exit(1);
-            case BR_ERR_VOID_TYPE_CAST:
-                eputs("cannot cast a value to type `");
-                fprintType(stderr, VOID_TYPE);
-                eputs("`\n");
-                exit(1);
-            case BR_ERR_MAIN_PROC_RET_TYPE_MISMATCH:
-                eputs("the `main` procedure must return nothing, instead the return type of `");
-                fprintType(stderr, err.entry_type);
-                eputs("` is declared\n");
-                exit(1);
-            case BR_ERR_MAIN_PROC_ARG_COUNT_MISMATCH:
-                eprintf("the `main` procedure must accept exactly 0 arguments, instead %d arguments were declared\n", err.n_args);
-                exit(1);
-            case BR_ERR_COMPARISON_TYPE_MISMATCH:
-                eputs("cannot compare a value of type `");
-                fprintType(stderr, getExprValueType(ast, *err.left_expr));
-                eputs("` to a value of type `");
-                fprintType(stderr, err.entry_type);
-                eputs("`\n");
-                exit(1);
-            case BR_ERR_UNBRACKETED_SET_EXPR:
-                eputs("to use variable assignment as a value, wrap it in brackets\n");
-                exit(1);
-            case N_BR_ERRORS:
-            case BR_ERR_NONE:
-            default:
-                eprintf("undefined error code %d\n", err.code);
-                exit(1);
-        }
-    }
-}
-
-void raiseUnexpectedTokenError(AST* ast, Token actual, int n_tokens, Token expected[])
-{
-    fprintTokenLoc(stderr, actual.loc);
-    eprintf("error: expected");
-    for (int n = 0; n < n_tokens; n++) {
-        fprintTokenStr(stderr, expected[n], ast->prep);
-        if (n == n_tokens - 2) {
-            eputs(" or ");
-        } else eputs(", ");
-    }
-    eputs("instead got ");
-    fprintTokenStr(stderr, actual, ast->prep);
-    eputc('\n');
-    exit(1);
-}
-
-void raiseForLoopTermExpectedError(AST* ast, Token actual)
-{
-    fprintTokenLoc(stderr, actual.loc);
-    eputs("error: expected a `for` loop terminating expression\n");
-    exit(1);
-}
-
-void raiseForLoopIncrExpectedError(AST* ast, Token actual)
-{
-    fprintTokenLoc(stderr, actual.loc);
-    eputs("error: expected a `for` loop incrementing expression\n");
-    exit(1);
-}
-
-void raiseUnreferrableExprError(AST* ast, TokenLoc loc, TypeDef subexpr_type)
-{
-    fprintTokenLoc(stderr, loc);
-    eputs("error: the following expression is type `");
-    printType(subexpr_type);
-    eputs("`, which cannot be referenced\n");
-    exit(1);
-}
-
-void raiseUndereferrableExprError(AST* ast, TokenLoc loc, TypeDef subexpr_type)
-{
-    fprintTokenLoc(stderr, loc);
-    eputs("error: the following expression is of type `");
-    fprintType(stderr, subexpr_type);
-    eputs("`, which can't be dereferenced\n");
-    exit(1);
-}
-
-void raiseComparisonTypeMismatchError(AST* ast, TokenLoc loc, TypeDef entry_type, TypeDef field_type)
-{
-    fprintTokenLoc(stderr, loc);
-    eputs("cannot compare a value of type `");
-    fprintType(stderr, entry_type);
-    eputs("` to a value of type `");
-    fprintType(stderr, field_type);
-    eputs("`\n");
-    exit(1);
-}
-
-void raiseAssignmentTypeMismatchError(AST* ast, TokenLoc loc, Expr* var_decl, TypeDef entry_type)
-{
-    fprintTokenLoc(stderr, loc);
-    char* var_name = getSubexpr(var_decl, 0)->name;
-    eprintf("variable `%s` expects a value of type `", var_name);
-    fprintType(stderr, *getSubexpr(var_decl, 1)->var_type);
-    eputs("`, instead got a value of type `");
-    fprintType(stderr, entry_type);
-    eputs("`\n");
-    fprintTokenLoc(stderr, var_decl->loc);
-    eprintf("note: variable `%s` is declared here\n", var_name);
-    exit(1);
-}
-
-void raiseReturnTypeMismatchError(AST* ast, TokenLoc loc, TypeDef entry_type, FuncDecl* func)
-{
-    fprintTokenLoc(stderr, loc);
-    eprintf("function `%s` is declared to return a value of type `", func->name);
-    fprintType(stderr, func->return_type);
-    eputs("`, instead attempted to return value of type `");
-    fprintType(stderr, entry_type);
-    eputs("`\n");
-    fprintTokenLoc(stderr, func->loc);
-    eprintf("note: function `%s` is declared here\n", func->name);
-    exit(1);
-}
-
-void raiseArgTypeMismatchError(AST* ast, TokenLoc loc, FuncDecl* func, Expr* arg_decl, TypeDef entry_type)
-{
-    fprintTokenLoc(stderr, loc);
-    if (func) {
-        eprintf("error: argument `%s` of function `%s` expects a value of type `", getSubexpr(arg_decl, 0)->name, func->name);
-        fprintType(stderr, *getSubexpr(arg_decl, 1)->var_type);
-    } else {
-        eputs("error: a syscall argument expects a value of type `");
-        fprintType(stderr, BUILTIN_VAL_TYPE);
-    }
-    eputs("`, instead got value of type `");
-    fprintType(stderr, entry_type);
-    eputs("`\n");
-    if (func) {
-        fprintTokenLoc(stderr, func->loc);
-        eprintf("note: function `%s` is declared here\n", func->name);
-    }
-    exit(1);
-}
-
-void raiseDivByZeroError(AST* ast, TokenLoc loc)
-{
-    fprintTokenLoc(stderr, loc);
-    eputs("error: attempted to divide by zero, which is an undefined operation\n");
-    exit(1);
-}
-
-void raiseNegativeBitShiftError(AST* ast, TokenLoc loc)
-{
-    fprintTokenLoc(stderr, loc);
-    eputs("error: attempted to bit-shift a value by a negative amount of bits, which is an undefined operation\n");
-    exit(1);
-}
-
-void raiseInvalidComplexAssignmentError(AST* ast, TokenLoc loc)
-{
-    fprintTokenLoc(stderr, loc);
-    eputs("error: complex assignment operator cannot be used with a variable declaration\n");
-    exit(1);
-}
-
 void printAST(AST* ast)
 {
     chain_foreach(FuncDecl, func, ast->functions, 
@@ -1463,21 +1368,13 @@ bool parseVarDecl(AST* ast, Token token, TypeDef var_type, Expr* dst, Expr* pare
     dst->loc = token.loc;
     if (setExprType(ast, dst, parent_expr, EXPR_NEW_VAR)) return true;
 
-    if (var_type.kind == KIND_VOID) raiseBRError(ast, (BRError){
-        .code = BR_ERR_VOID_VAR_DECL,
-        .loc = token
-    });
+    if (var_type.kind == KIND_VOID) raiseVoidVarDeclError(ast, token.loc);
     initExpr(dst);
 
     token = fetchToken(ast->prep);
-    if (token.type != TOKEN_WORD) raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_VAR_NAME,
-        .loc = token
-    });
-    if (getVarDecl(dst->block, token.word)) raiseBRError(ast, (BRError){
-        .code = BR_ERR_VAR_EXISTS,
-        .loc = token
-    });
+    if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a variable name", wordToken(NULL));
+    Expr* decl = getVarDecl(dst->block, token.word);
+    if (decl) raiseNameTakenError(ast, token, decl->loc);
     addSubexpr(dst, (Expr){
         .type = EXPR_NAME,
         .str_literal = token.word,
@@ -1540,10 +1437,7 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
 
     initExpr(dst);
     token = fetchToken(ast->prep);
-    if (token.type != TOKEN_WORD) raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_SYSCALL_NAME,
-        .loc = token
-    });
+    if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a syscall name", wordToken(NULL));
     bool name_vaildated = false;
     for (int i = 0; i < N_SYS_OPS; i++) {
         if (sbufeq(syscallNames[i], fromstr(token.word))) {
@@ -1551,10 +1445,7 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
             break;
         }
     }
-    if (!name_vaildated) raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_SYSCALL_NAME,
-        .loc = token
-    });
+    if (!name_vaildated) raiseUnknownSyscallNameError(ast, token);
     addSubexpr(dst, (Expr){
         .type = EXPR_NAME,
         .name = token.word,
@@ -1563,10 +1454,7 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
     });
 
     token = fetchToken(ast->prep);
-    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(ast, (BRError){
-        .code = BR_ERR_ARG_DEF_START_EXPECTED,
-        .loc = token
-    });
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 
     token = peekToken(ast->prep);
     if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
@@ -1578,18 +1466,11 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
             token = fetchToken(ast->prep);
             if (token.symbol_id == SYMBOL_ARGSPEC_END) {
                 break;
-            } else if (token.symbol_id != SYMBOL_COMMA) raiseBRError(ast, (BRError){
-                .code = BR_ERR_ARG_DEF_EXPECTED,
-                .loc = token
-            });
+            } else if (token.symbol_id != SYMBOL_COMMA)
+                raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
         }
     } else fetchToken(ast->prep);
-    if (getSubexprsCount(dst) > 7) raiseBRError(ast, (BRError){
-// syscalls cannot accept more than 6 arguments; 7 is 6 maximum arguments + the first expression, which holds the name of the syscall
-        .code = BR_ERR_TOO_MANY_SYSCALL_ARGS,
-        .loc = token,
-        .n_args = getSubexprsCount(dst) - 1
-    });
+    if (getSubexprsCount(dst) > 7) raiseTooManySyscallArgsError(ast, token.loc, getSubexprsCount(dst) - 1);
 
     return false;
 }
@@ -1603,10 +1484,7 @@ bool parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDec
     }
 
     token = fetchToken(ast->prep);
-    if (token.type != TOKEN_WORD) raiseBRError(ast, (BRError){
-        .code = BR_ERR_BUILTIN_NAME_EXPECTED,
-        .loc = token
-    });
+    if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a built-in name", wordToken(NULL));
     bool name_vaildated = false;
     for (int i = 0; i < N_BUILTINS; i++) {
         if (sbufeq(fromstr(builtins[i].name), fromstr(token.word))) {
@@ -1614,10 +1492,7 @@ bool parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDec
             break;
         }
     }
-    if (!name_vaildated) raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_BUILTIN_NAME,
-        .loc = token
-    });
+    if (!name_vaildated) raiseUnknownBuiltinNameError(ast, token);
     dst->str_literal = token.word;
 
     return false;
@@ -1646,34 +1521,19 @@ bool parseKwCast(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* 
     }
     
     token = fetchToken(ast->prep);
-    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(ast, (BRError){
-        .code = BR_ERR_ARG_DEF_START_EXPECTED,
-        .loc = token
-    });
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 
     dst->arg1 = calloc(1, sizeof(Expr));
     parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_ARG | EXPRTYPE_EVALUATABLE);
     token = fetchToken(ast->prep);
-    if (getTokenSymbolId(token) != SYMBOL_COMMA) raiseBRError(ast, (BRError){
-        .code = BR_ERR_CAST_TYPE_EXPECTED,
-        .loc = token
-    });
+    if (getTokenSymbolId(token) != SYMBOL_COMMA) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA));
 
     token = peekToken(ast->prep);
     dst->var_type = malloc(sizeof(TypeDef));
-    if (!parseType(ast, dst->var_type)) raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_TYPE,
-        .loc = token
-    });
-    if (dst->var_type->kind == KIND_VOID) raiseBRError(ast, (BRError){
-        .code = BR_ERR_VOID_TYPE_CAST,
-        .loc = token
-    });
+    if (!parseType(ast, dst->var_type)) raiseInvalidTypeError(ast, token.loc);
+    if (dst->var_type->kind == KIND_VOID) raiseVoidCastError(ast, token.loc);
     token = fetchToken(ast->prep);
-    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) raiseBRError(ast, (BRError){
-        .code = BR_ERR_ARG_DEF_END_EXPECTED,
-        .loc = token
-    });
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_END));
 
     return false;
 }
@@ -1716,22 +1576,16 @@ bool parseKwIf(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* fu
     }
 
     token = fetchToken(ast->prep);
-    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(ast, (BRError){
-        .code = BR_ERR_ARG_DEF_START_EXPECTED,
-        .loc = token
-    });
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 
     dst->arg1 = calloc(1, sizeof(Expr));
-    parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE);
+    parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
     fetchToken(ast->prep);
 
     dst->arg2 = calloc(1, sizeof(Expr));
     token = peekToken(ast->prep);
     parseExpr(ast, dst->arg2, dst, dst->block, func, EXPRTERM_FULL);
-    if (dst->arg2->type == EXPR_NEW_VAR) raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_VAR_DECL,
-        .loc = token
-    });
+    if (dst->arg2->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "`if` statement");
 
     Token stmt_term = fetchToken(ast->prep);
     token = peekToken(ast->prep);
@@ -1749,10 +1603,7 @@ bool parseKwIf(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* fu
     
     token = peekToken(ast->prep);
     parseExpr(ast, dst->arg3, dst, dst->block, func, EXPRTERM_FULL);
-    if (dst->arg3->type == EXPR_NEW_VAR) raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_VAR_DECL,
-        .loc = token
-    });
+    if (dst->arg3->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "`else` statement");
 
     return false;
 }
@@ -1776,10 +1627,7 @@ bool parseKwWhile(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl*
         dst->arg2 = calloc(1, sizeof(Expr));
         token = peekToken(ast->prep);
         parseExpr(ast, dst->arg2, dst, dst->block, func, EXPRTERM_FULL);
-        if (dst->arg2->type == EXPR_NEW_VAR) raiseBRError(ast, (BRError){
-            .code = BR_ERR_INVALID_VAR_DECL,
-            .loc = token
-        });
+        if (dst->arg2->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "`while` statement");
     } else {
         if (setExprType(ast, dst, parent_expr, EXPR_DOWHILE)) {
             unfetchToken(ast->prep, token);
@@ -1788,17 +1636,11 @@ bool parseKwWhile(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl*
 
         dst->arg1 = calloc(1, sizeof(Expr));
         parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_FULL);
-        if (dst->arg1->type == EXPR_NEW_VAR) raiseBRError(ast, (BRError){
-            .code = BR_ERR_INVALID_VAR_DECL,
-            .loc = token
-        });
+        if (dst->arg1->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, dst->arg1->loc, "`while` statement");
         fetchToken(ast->prep);
 
         token = fetchToken(ast->prep);
-        if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(ast, (BRError){
-            .code = BR_ERR_ARG_DEF_START_EXPECTED,
-            .loc = token
-        });
+        if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
         dst->arg2 = calloc(1, sizeof(Expr));
         parseExpr(ast, dst->arg2, dst, dst->block, func, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
         fetchToken(ast->prep);
@@ -1816,10 +1658,7 @@ bool parseKwFor(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
     dst->loc = token.loc;
 
     token = fetchToken(ast->prep);
-    static Token expected[] = {
-        (Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_ARGSPEC_START }
-    };
-    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, 1, expected);
+    if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 // fetching the initializer
     initExpr(dst);
     addSubexpr(dst, (Expr){ .type = EXPR_REF, .loc = token.loc, .block = dst });
@@ -1860,10 +1699,7 @@ bool parseKwFor(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
 
 bool parseInvalidKw(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
 {
-    raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_EXPR,
-        .loc = token
-    });
+    raiseInvalidExprError(ast, token.loc);
     return false;
 }
 
@@ -1888,16 +1724,12 @@ bool parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
         if (token.symbol_id != SYMBOL_ASSIGNMENT) raiseInvalidComplexAssignmentError(ast, token.loc);
         parseExpr(ast, addSubexpr(dst, (Expr){0}), dst, dst->block, func, EXPRTERM_FULL | EXPRTYPE_EVALUATABLE);
     } else {
-        if (flags & EXPRTYPE_EVALUATABLE && !(flags & EXPRTERM_BRACKET) && !(flags & EXPRCTX_DEREF)) raiseBRError(ast, (BRError){
-            .code = BR_ERR_UNBRACKETED_SET_EXPR,
-            .loc = token
-        });
-
         dst->loc = token.loc;
         if (setExprType(ast, dst, parent_expr, symbol_to_expr[token.symbol_id])) {
             unfetchToken(ast->prep, token);
             return true;
         }
+        if (flags & EXPRTYPE_EVALUATABLE && !(flags & EXPRTERM_BRACKET)) raiseUnbracketedAssignExpr(ast, token.loc);
 
         dst->arg2 = malloc(sizeof(Expr));
         Token entry_loc = peekToken(ast->prep);
@@ -1924,10 +1756,7 @@ bool parseSymbolBlockStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 
     while (true) {
         token = peekToken(ast->prep);
-        if (token.type == TOKEN_NONE) raiseBRError(ast, (BRError){
-            .code = BR_ERR_UNCLOSED_BLOCK,
-            .loc = token
-        });
+        if (token.type == TOKEN_NONE) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_BLOCK_END));
         if (getTokenSymbolId(token) == SYMBOL_BLOCK_END) break;
 
         Expr* expr = addSubexpr(dst, (Expr){0});
@@ -1982,31 +1811,19 @@ bool parseSymbolArgspecStart(AST* ast, Token token, Expr* dst, Expr* parent_expr
         if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
             while (true) {
                 token = peekToken(ast->prep);
-                if (arg_id == expected_arg_count) raiseBRError(ast, (BRError){
-                    .code = BR_ERR_ARG_COUNT_MISMATCH,
-                    .loc = token,
-                    .func = def,
-                    .n_args = -1
-                });
+                if (arg_id == expected_arg_count) raiseArgCountMismatchError(ast, token.loc, def, -1);
 
                 parseExpr(ast, addSubexpr(dst, (Expr){0}), dst, dst->block, func, EXPRTERM_ARG | EXPRTYPE_EVALUATABLE);
                 arg_id++;
                 token = fetchToken(ast->prep);
                 if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
                     break;
-                } else if (token.symbol_id != SYMBOL_COMMA) raiseBRError(ast, (BRError){
-                    .code = BR_ERR_ARG_DEF_EXPECTED,
-                    .loc = token
-                });
+                } else if (token.symbol_id != SYMBOL_COMMA)
+                    raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
             }
         } else fetchToken(ast->prep);
 
-        if (arg_id < expected_arg_count) raiseBRError(ast, (BRError){
-            .code = BR_ERR_ARG_COUNT_MISMATCH,
-            .loc = token,
-            .func = def,
-            .n_args = arg_id
-        });
+        if (arg_id < expected_arg_count) raiseArgCountMismatchError(ast, token.loc, def, arg_id);
     } else {
         dst->type = EXPR_WRAPPER;
         dst->arg1 = calloc(1, sizeof(Expr));
@@ -2067,7 +1884,7 @@ bool parseSymbolStar(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDe
         }
 
         dst->arg1 = calloc(1, sizeof(Expr));
-        parseExpr(ast, dst->arg1, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE | EXPRCTX_DEREF);
+        parseExpr(ast, dst->arg1, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
     } else return parseBinaryExprSymbol(ast, token, dst, parent_expr, func, flags);
 
     return false;
@@ -2075,10 +1892,7 @@ bool parseSymbolStar(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDe
 
 bool parseInvalidSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
 {
-    raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_EXPR,
-        .loc = token
-    });
+    raiseInvalidExprError(ast, token.loc);
     return false;
 }
 
@@ -2096,10 +1910,7 @@ bool parseWord(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* fu
 
 bool parseEmptyToken(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
 {
-    raiseBRError(ast, (BRError){
-        .code = BR_ERR_INVALID_EXPR,
-        .loc = token
-    });
+    raiseInvalidExprError(ast, token.loc);
     return false;
 }
 
@@ -2193,10 +2004,7 @@ void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* fu
 
     if (dst->type == EXPR_NAME) (void)setExprType(ast, dst, parent_expr, EXPR_GET_VAR);
     if (dst->type == EXPR_INVALID && flags & EXPRTYPE_VOIDABLE) dst->type = EXPR_VOID;
-    if (!isExprEvaluatable(dst->type) && flags & EXPRTYPE_EVALUATABLE) raiseBRError(ast, (BRError){
-        .code = BR_ERR_NO_VALUE_EXPR,
-        .loc = token
-    });
+    if (!isExprEvaluatable(dst->type) && flags & EXPRTYPE_EVALUATABLE) raiseNoValueExprError(ast, token.loc);
 }
 
 void removeExprWrappers(Expr* expr)
@@ -2533,10 +2341,28 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
         case EXPR_INT:
         case EXPR_BUILTIN:
         case EXPR_STRING:
+        case EXPR_VOID:
             break;
         default:
             eprintf("internal compiler bug: expression with no defined optimizations: %d\n", expr->type);
             abort();
+    }
+}
+
+bool validateReturnStmt(Expr expr)
+{
+    switch (expr.type) {
+        case EXPR_BLOCK:
+            chain_foreach(Expr, subexpr, *getSubexprs(&expr), 
+                if (validateReturnStmt(subexpr)) return true;
+            );
+            return false;
+        case EXPR_RETURN:
+            return true;
+        case EXPR_IF:
+            if (expr.arg3) return validateReturnStmt(*expr.arg2) && validateReturnStmt(*expr.arg3);
+        default:
+            return false;
     }
 }
 
@@ -2578,18 +2404,12 @@ void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
                 .loc = new_func->args.loc
             });
     // fetching function prototype specification
-            if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseBRError(dst, (BRError){
-                .code = BR_ERR_ARG_DEF_START_EXPECTED,
-                .loc = token
-            });
+            if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(dst, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
             while (true) {
                 Token type_spec = peekToken(obj);
                 if (parseType(dst, &type)) {
                     token = fetchToken(obj);
-                    if (token.type != TOKEN_WORD) raiseBRError(dst, (BRError){
-                        .code = BR_ERR_ARG_NAME_EXPECTED,
-                        .loc = token
-                    });
+                    if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(dst, token, "an argument name", wordToken(NULL));
 
                     Expr* new_arg = addSubexpr(&new_func->args, (Expr){
                         .type = EXPR_NEW_VAR,
@@ -2621,44 +2441,31 @@ void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
                     token = fetchToken(obj);
                     if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
                         break;
-                    } else if (getTokenSymbolId(token) != SYMBOL_COMMA) raiseBRError(dst, (BRError){
-                        .code = BR_ERR_ARG_DEF_EXPECTED,
-                        .loc = token
-                    });
+                    } else if (getTokenSymbolId(token) != SYMBOL_COMMA)
+                        raiseUnexpectedTokenError(dst, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
                 }
             }
 
             if (streq(func_name_spec.word, "main")) {
-                if (new_func->return_type.kind != KIND_VOID) raiseBRError(dst, (BRError){
-                    .code = BR_ERR_MAIN_PROC_RET_TYPE_MISMATCH,
-                    .loc = func_name_spec,
-                    .entry_type = new_func->return_type
-                });
+                if (new_func->return_type.kind != KIND_VOID) raiseMainProcRetTypeMismatchError(dst, func_name_spec.loc, new_func->return_type);
                 int main_proc_n_args = getSubexprsCount(&new_func->args) - 1;
-                if (main_proc_n_args != 0) raiseBRError(dst, (BRError){
-                    .code = BR_ERR_MAIN_PROC_ARG_COUNT_MISMATCH,
-                    .loc = token,
-                    .n_args = main_proc_n_args
-                });
+                if (main_proc_n_args != 0) raiseMainProcArgCountMismatch(dst, token.loc, main_proc_n_args);
             }
     // parsing the function body
             token = peekToken(obj);
             if (getTokenSymbolId(token) != SYMBOL_SEMICOLON) {
                 parseExpr(dst, &new_func->body, NULL, &new_func->args, new_func, EXPRTERM_FULL);
-                if (new_func->body.type == EXPR_NEW_VAR) raiseBRError(dst, (BRError){
-                    .code = BR_ERR_INVALID_VAR_DECL,
-                    .loc = token
-                });
+                if (new_func->body.type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(dst, token.loc, "a function definition");
                 fetchToken(obj);
                 removeExprWrappers(&new_func->body);
                 optimizeExpr(dst, &new_func->body, new_func);
+                if (new_func->return_type.kind != KIND_VOID) {
+                    if (!validateReturnStmt(new_func->body)) raiseNoProcReturnError(dst, new_func);
+                }
             } else fetchToken(obj);
         } else if (func_name_spec.type == TOKEN_NONE) {
             break;
-        } else raiseBRError(dst, (BRError){
-            .code = BR_ERR_INVALID_GLOBAL_STMT,
-            .loc = func_name_spec
-        });
+        } else raiseInvalidGlobalStmtError(dst, func_name_spec);
     }
 }
 
@@ -2752,7 +2559,7 @@ int64_t getIntLiteral(Expr* expr)
     if (expr->type == EXPR_INT) return expr->int_literal;
     if (expr->type == EXPR_CAST) {
         if (expr->var_type->kind == KIND_BOOL) return getIntLiteral(expr->arg1) != 0;
-        return getIntLiteral(expr->arg1) & ((1LL << getTypeSize(*expr->var_type) * 8) - 1);
+        return getIntLiteral(expr->arg1) & byteMask(getTypeSize(*expr->var_type));
     }
     return -69;
 }
@@ -2884,7 +2691,7 @@ bool compileExprBlock(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int 
     return true;
 }
 
-bool compileExprFuncCall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+bool compileExprProcCall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
     compileSrcRef(ctx, expr.loc);
 
@@ -3410,9 +3217,9 @@ bool compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst
             fprintf(ctx->dst, "\tgoto:neq .else%d\n", block_id);
             break;
         case EXPR_CAST:
-            if (expr.arg2->var_type->kind == KIND_BOOL) {
-                if (!expr_compilers[expr.arg2->arg1->type](ctx, *expr.arg2->arg1, reg_state, dst_reg)) return false;
-                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:neq .start%d\n", dst_reg, block_id);
+            if (expr.arg1->var_type->kind == KIND_BOOL) {
+                if (!expr_compilers[expr.arg1->arg1->type](ctx, *expr.arg1->arg1, reg_state, dst_reg)) return false;
+                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:equ .else%d\n", dst_reg, block_id);
                 break;
             }
         default:
@@ -3481,9 +3288,9 @@ bool compileExprWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int 
             fprintf(ctx->dst, "\tgoto:neq .end%d\n", block_id);
             break;
         case EXPR_CAST:
-            if (expr.arg2->var_type->kind == KIND_BOOL) {
-                if (!expr_compilers[expr.arg2->arg1->type](ctx, *expr.arg2->arg1, reg_state, dst_reg)) return false;
-                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:neq .start%d\n", dst_reg, block_id);
+            if (expr.arg1->var_type->kind == KIND_BOOL) {
+                if (!expr_compilers[expr.arg1->arg1->type](ctx, *expr.arg1->arg1, reg_state, dst_reg)) return false;
+                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:equ .end%d\n", dst_reg, block_id);
                 break;
             }
         default:
@@ -3585,14 +3392,14 @@ bool compileExprCast(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int d
         if (expr.var_type->kind == KIND_BOOL) {
             fprintf(ctx->dst, "\tset r%d %d\n", dst_reg, getIntLiteral(expr.arg1) != 0);
         } else {
-            fprintf(ctx->dst, "\tset r%d %lld\n", dst_reg, getIntLiteral(expr.arg1) & (1LL << new_type_size * 8) - 1);
+            fprintf(ctx->dst, "\tset r%d %lld\n", dst_reg, getIntLiteral(expr.arg1) & byteMask(new_type_size));
         }
     } else {
         if (!expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg)) return false;
         if (expr.var_type->kind == KIND_BOOL) {
             fprintf(ctx->dst, "\tcmp r%d 0\n\tsetc r%d neq\n", dst_reg, dst_reg);
         } else if (new_type_size < old_type_size) {
-            fprintf(ctx->dst, "\tand r%d r%d %lld\n", dst_reg, dst_reg, (1LL << new_type_size * 8) - 1);
+            fprintf(ctx->dst, "\tand r%d r%d %lld\n", dst_reg, dst_reg, byteMask(new_type_size));
         }
     }
 
@@ -3613,7 +3420,7 @@ ExprCompiler expr_compilers[] = {
     [EXPR_TYPE       ] = &compileExprInvalid,
     [EXPR_REF        ] = &compileExprInvalid,
     [EXPR_PROC_REF   ] = &compileExprInvalid,
-    [EXPR_PROC_CALL  ] = &compileExprFuncCall,
+    [EXPR_PROC_CALL  ] = &compileExprProcCall,
     [EXPR_RETURN     ] = &compileExprReturn,
     [EXPR_ADD        ] = &compileExprAdd,
     [EXPR_SUB        ] = &compileExprSub,

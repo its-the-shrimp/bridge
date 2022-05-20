@@ -52,6 +52,13 @@ typedef struct token {
 declArray(sbuf);
 declQueue(Token);
 
+#define emptyToken ((Token){ .type = TOKEN_NONE })
+#define wordToken(_word) ((Token){ .type = TOKEN_WORD, .word = _word })
+#define keywordToken(kw_id) ((Token){ .type = TOKEN_KEYWORD, .keyword_id = kw_id })
+#define symbolToken(_symbol_id) ((Token){ .type = TOKEN_SYMBOL, .symbol_id = _symbol_id })
+#define intToken(_int) ((Token){ .type = TOKEN_INT, .value = _int })
+#define stringToken(_word) ((Token){ .type = TOKEN_STRING, .word = _word })
+
 typedef enum {
 	BRP_ERR_OK,
 	BRP_ERR_UNCLOSED_STR,

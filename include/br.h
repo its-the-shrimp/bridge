@@ -88,5 +88,6 @@ bool fpipe(FILE** readable_end_ptr, FILE** writable_end_ptr);
 	v1 = v2; \
 	v2 = __tmp; \
 }
+#define byteMask(n_bytes) ((1LL << ((n_bytes) * 8 - 1)) * 2 - 1)
 
 #endif // _BRIDGE_
