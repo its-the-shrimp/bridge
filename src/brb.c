@@ -158,7 +158,7 @@ void write3RegOp(ModuleWriter* writer, Op op)
 
 void writeOpVar(ModuleWriter* writer, Op op)
 {
-	fputc(op.var_size, writer->dst);
+	writeInt(writer->dst, op.new_var_size);
 }
 
 void writeOpLdv(ModuleWriter* writer, Op op)
@@ -568,7 +568,7 @@ BRBLoadError load3RegOp(ModuleLoader* loader, Op* dst)
 BRBLoadError loadOpVar(ModuleLoader* loader, Op* dst)
 {
 	long status = 0;
-	dst->var_size = loadInt8(loader->src, &status);
+	dst->new_var_size = loadInt(loader->src, &status);
 
 	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -1322,7 +1322,7 @@ bool setStackSpec(ExecEnv* env, void* ptr, DataSpec spec)
 	array_rev_foreach(DataSpec, cur_spec, arrayhead(env->vars)->vars,
 		int cur_spec_size = dataSpecSize(cur_spec);
 		if (inRange(ptr, cur_stack_pos, cur_stack_pos + cur_spec_size)) {
-			if (ptr == cur_stack_pos) {
+			if (ptr == cur_stack_pos && spec.type != DS_VOID) {
 				if (spec_size == cur_spec_size) {
 					arrayhead(env->vars)->vars.data[_cur_spec] = spec;
 					return true;
@@ -1330,7 +1330,7 @@ bool setStackSpec(ExecEnv* env, void* ptr, DataSpec spec)
 					arrayhead(env->vars)->vars.data[_cur_spec] = intSpecFromSize(cur_spec_size);
 					return true;
 				}
-			}
+			} else if (spec.type == DS_VOID) return true;
 			return false;
 		}
 		cur_stack_pos += cur_spec_size;
@@ -2120,7 +2120,7 @@ bool handleOpStr64(ExecEnv* env, Module* module)
 			if (!setStackSpec(
 				env,
 				(void*)env->registers[op.dst_reg],
-				dataSpecSize(env->regs_trace[op.src_reg]) == 8 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_INT64}
+				dataSpecSize(env->regs_trace[op.src_reg]) == 8 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
 			)) {
 				env->exitcode = EC_ACCESS_FAILURE;
 				env->err_ptr = (void*)env->registers[op.dst_reg];
@@ -2174,7 +2174,7 @@ bool handleOpStr32(ExecEnv* env, Module* module)
 			if (!setStackSpec(
 				env,
 				(void*)env->registers[op.dst_reg], 
-				dataSpecSize(env->regs_trace[op.src_reg]) == 4 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_INT32}
+				dataSpecSize(env->regs_trace[op.src_reg]) == 4 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
 			)) {
 				env->exitcode = EC_ACCESS_FAILURE;
 				env->err_ptr = (void*)env->registers[op.dst_reg];
@@ -2228,7 +2228,7 @@ bool handleOpStr16(ExecEnv* env, Module* module)
 			if (!setStackSpec(
 				env,
 				(void*)env->registers[op.dst_reg], 
-				dataSpecSize(env->regs_trace[op.src_reg]) == 2 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_INT16}
+				dataSpecSize(env->regs_trace[op.src_reg]) == 2 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
 			)) {
 				env->exitcode = EC_ACCESS_FAILURE;
 				env->err_ptr = (void*)env->registers[op.dst_reg];
@@ -2281,8 +2281,8 @@ bool handleOpStr8(ExecEnv* env, Module* module)
 		} else if (ref.type == BUF_VAR) {
 			if (!setStackSpec(
 				env,
-				(void*)env->registers[op.dst_reg], 
-				dataSpecSize(env->regs_trace[op.src_reg]) == 1 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_INT8}
+				(void*)env->registers[op.dst_reg],
+				dataSpecSize(env->regs_trace[op.src_reg]) == 1 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
 			)) {
 				env->exitcode = EC_ACCESS_FAILURE;
 				env->err_ptr = (void*)env->registers[op.dst_reg];
@@ -2306,18 +2306,18 @@ bool handleOpVar(ExecEnv* env, Module* module)
 			&arrayhead(env->vars)->vars, 
 			(DataSpec){
 				.type = DS_VOID,
-				.size = op.var_size
+				.size = op.new_var_size
 			}
 		);
 
-		if (env->stack_head - op.var_size < env->stack_brk) {
+		if (env->stack_head - op.new_var_size < env->stack_brk) {
 			env->exitcode = EC_STACK_OVERFLOW;
-			env->err_push_size = op.var_size;
+			env->err_push_size = op.new_var_size;
 			return true;
 		}
 	}
 
-	env->stack_head -= op.var_size;
+	env->stack_head -= op.new_var_size;
 	env->op_id++;
 	return false;
 }
@@ -2522,7 +2522,7 @@ bool handleOpStrv(ExecEnv* env, Module* module)
 		if (!setStackSpec(
 			env,
 			env->stack_head + op.symbol_id,
-			dataSpecSize(env->regs_trace[op.src_reg]) == op.var_size ? env->regs_trace[op.src_reg] : intSpecFromSize(op.var_size)
+			dataSpecSize(env->regs_trace[op.src_reg]) == op.var_size ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
 		)) {
 			env->exitcode = EC_ACCESS_FAILURE;
 			env->err_ptr = env->stack_head + op.symbol_id;

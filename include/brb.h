@@ -271,6 +271,7 @@ typedef struct {
 	union {
 		uint64_t value;
 		int64_t symbol_id;
+		int64_t new_var_size;
 		int64_t op_offset;
 		char* mark_name;
 		uint8_t syscall_id; 
@@ -317,6 +318,11 @@ typedef char* str;
 declArray(str);
 
 typedef struct {
+	char* name;
+	int64_t size;
+} Var;
+
+typedef struct {
 	OpArray execblock;
 	MemBlockArray memblocks;
 	DataBlockArray datablocks;
@@ -349,8 +355,7 @@ typedef enum {
 	VBRB_ERR_DATA_BLOCK_NOT_FOUND,
 	VBRB_ERR_MEM_BLOCK_NOT_FOUND,
 	VBRB_ERR_INVALID_REG_ID,
-	VBRB_ERR_INVALID_VAR_SIZE,
-	VBRB_ERR_UNKNOWN_CONST,
+	VBRB_ERR_UNKNOWN_BUILTIN,
 	VBRB_ERR_NON_PROC_CALL,
 	VBRB_ERR_UNKNOWN_VAR_NAME,
 	VBRB_ERR_UNCLOSED_PROC,
@@ -361,6 +366,7 @@ typedef enum {
 	VBRB_ERR_PREPROCESSOR_FAILURE,
 	VBRB_ERR_NO_VAR,
 	VBRB_ERR_DELNV_TOO_FEW_VARS,
+	VBRB_ERR_VAR_TOO_LARGE,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -379,6 +385,7 @@ typedef struct vbrb_error {
 		char* module_name;
 		int var_count;
 		BRBLoadError load_error;
+		Var var;
 	};
 } VBRBError;
 
@@ -437,12 +444,6 @@ typedef struct {
 	};
 } DataSpec;
 declArray(DataSpec);
-
-typedef struct {
-	char* name;
-	int8_t size;
-	int32_t n_elements;
-} Var;
 
 typedef struct {
 	DataSpecArray vars;

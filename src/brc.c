@@ -61,6 +61,8 @@ typedef enum {
     SYMBOL_TILDE,
     SYMBOL_LT,
     SYMBOL_GT,
+    SYMBOL_INDEX_START,
+    SYMBOL_INDEX_END,
     N_SYMBOLS
 } BRSymbol;
 
@@ -71,11 +73,13 @@ typedef enum {
     KIND_BUILTIN_VAL,
     KIND_VOID,
     KIND_BOOL,
+    KIND_ARRAY,
     N_TYPE_KINDS
 } TypeKind;
 
 typedef struct typedef_t {
     TypeKind kind;
+    int32_t n_items;
     union {
         int size;
         struct typedef_t* base;
@@ -93,6 +97,8 @@ static TypeDef PTR_TYPE(TypeDef base)
     return (TypeDef){ .kind = KIND_PTR, .base = base_p };
 }
 static TypeDef TYPE_STR_LITERAL;
+#define isPtrType(tdef) ((tdef).kind == KIND_ARRAY || (tdef).kind == KIND_PTR)
+#define isIntType(tdef) ((tdef).kind == KIND_BUILTIN_VAL || (tdef).kind == KIND_INT)
 
 typedef enum {
     EXPR_INVALID,
@@ -146,6 +152,7 @@ typedef enum {
     EXPR_DOWHILE, // main, binary, non-evaluatable
     EXPR_GET_REF, // main, unary, evaluatable
     EXPR_DEREF, // main, unary, evaluatable
+    EXPR_GET_ITEM, // main, binary, evaluatable
     N_EXPR_TYPES
 } ExprType;
 
@@ -188,10 +195,11 @@ typedef struct {
 #define EXPRTERM_FULL        0x1
 #define EXPRTERM_ARG         0x2
 #define EXPRTERM_BRACKET     0x4
-#define EXPRTYPE_EVALUATABLE 0x8
-#define EXPRTYPE_VOIDABLE    0x10
-#define EXPRTYPE_LOGICAL     0x20
-#define EXPRTERM             (EXPRTERM_FULL | EXPRTERM_ARG | EXPRTERM_BRACKET)
+#define EXPRTERM_SQBRACKET   0x8
+#define EXPRTYPE_EVALUATABLE 0x10
+#define EXPRTYPE_VOIDABLE    0x20
+#define EXPRTYPE_LOGICAL     0x40
+#define EXPRTERM             (EXPRTERM_FULL | EXPRTERM_ARG | EXPRTERM_BRACKET | EXPRTERM_SQBRACKET)
 #define EXPRTYPE             (EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE | EXPRTYPE_LOGICAL)
 
 #define VARIADIC -1
@@ -251,7 +259,8 @@ static char expr_arity_table[] = {
     [EXPR_WHILE      ] = BINARY,
     [EXPR_DOWHILE    ] = BINARY,
     [EXPR_GET_REF    ] = UNARY,
-    [EXPR_DEREF      ] = UNARY
+    [EXPR_DEREF      ] = UNARY,
+    [EXPR_GET_ITEM    ] = BINARY
 };
 static char expr_order_table[] = {
     [EXPR_INVALID    ] = 0,
@@ -273,6 +282,7 @@ static char expr_order_table[] = {
     [EXPR_WHILE      ] = 0,
     [EXPR_DOWHILE    ] = 0,
     [EXPR_VOID       ] = 0,
+    [EXPR_GET_ITEM    ] = 0,
     [EXPR_NOT        ] = 1,
     [EXPR_LOGICAL_NOT] = 1,
     [EXPR_GET_REF    ] = 1,
@@ -306,7 +316,7 @@ static char expr_order_table[] = {
     [EXPR_SHR_ASSIGN ] = 12,
     [EXPR_RETURN     ] = 13
 };
-static_assert(N_EXPR_TYPES == 51, "not all expression types have their arity and order set");
+static_assert(N_EXPR_TYPES == 52, "not all expression types have their arity and order set");
 
 static void initExpr(Expr* expr)
 {
@@ -339,7 +349,7 @@ static int getSubexprsCount(Expr* expr)
 
 void fprintType(FILE* dst, TypeDef type)
 {
-    static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in fprintType");
+    static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in fprintType");
     if (type.kind == KIND_INT) {
         switch (type.size) {
             case 1: fputs("int8", dst); break;
@@ -356,6 +366,9 @@ void fprintType(FILE* dst, TypeDef type)
         fputs("__builtin_val", dst);
     } else if (type.kind == KIND_BOOL) {
         fputs("bool", dst);
+    } else if (type.kind == KIND_ARRAY) {
+        fprintType(dst, *type.base);
+        fprintf(dst, "[%d]", type.n_items);
     } else {
         eprintf("internal compiler bug in fprintType: unknown type kind %d\n", type.kind);
         abort();
@@ -519,6 +532,8 @@ void _raiseUnexpectedTokenError(AST* ast, Token actual, const char* msg, ...)
 
         if (iter.type == TOKEN_WORD) {
             eputs(" a word");
+        } else if (iter.type == TOKEN_INT) {
+            eputs(" an integer");
         } else fprintTokenStr(stderr, va_arg(args, Token), ast->prep);
         if (n == n_tokens - 2) {
             eputs(" or ");
@@ -655,12 +670,56 @@ void raiseNoProcReturnError(AST* ast, FuncDecl* decl)
     exit(1);
 }
 
+void raiseVoidArrayError(AST* ast, TokenLoc loc)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: invalid type; an array cannot contain items of type `");
+    fprintType(stderr, VOID_TYPE);
+    eputs("`\n");
+    exit(1);
+}
+
+void raiseUnindexableExprError(AST* ast, TokenLoc loc, TypeDef entry_type)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: value of type `");
+    fprintType(stderr, entry_type);
+    eputs("` can't be interpreted as an array\n");
+    exit(1);
+}
+
+void raiseInvalidArrayIndexError(AST* ast, TokenLoc loc, TypeDef index_type)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: array index must be of an integer type, instead got value of type `");
+    fprintType(stderr, index_type);
+    eputs("`\n");
+    exit(1);
+}
+
+void raiseOutOfBoundsIndexError(AST* ast, TokenLoc loc, TypeDef array_type, int64_t index)
+{
+    fprintTokenLoc(stderr, loc);
+    eputs("error: value of type `");
+    fprintType(stderr, array_type);
+    eprintf("` doesn't have an element at index %lld\n", index);
+    exit(1);
+}
+
+void raiseNegativeArraySizeError(AST* ast, TokenLoc loc, int64_t n_items)
+{
+    fprintTokenLoc(stderr, loc);
+    eprintf("error: an array can't have %lld items\n", n_items);
+    exit(1);
+}
+
 int getTypeSize(TypeDef type)
 {
-    static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in getTypeSize");
+    static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in getTypeSize");
     switch (type.kind) {
         case KIND_INT: return type.size;
-        case KIND_PTR: 
+        case KIND_PTR:
+        case KIND_ARRAY:
         case KIND_BUILTIN_VAL:
             return 8;
         case KIND_VOID: return 0;
@@ -674,7 +733,7 @@ int getTypeSize(TypeDef type)
 
 bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
 {
-    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in isExprTerm");
+    static_assert(N_EXPR_TYPES == 52, "not all expression types are handled in isExprTerm");
     int64_t symbol_id = getTokenSymbolId(token);
     if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF || expr->type == EXPR_WHILE) && symbol_id == SYMBOL_BLOCK_END) return true; 
     if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
@@ -685,17 +744,19 @@ bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
         return false;
     }
     if (flags & EXPRTERM_BRACKET) return symbol_id == SYMBOL_ARGSPEC_END;
+    if (flags & EXPRTERM_SQBRACKET) return symbol_id == SYMBOL_INDEX_END;
     return false;
 }
 
 bool _typeMatches(TypeDef field, TypeDef entry)
 {
-    static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in typeMatches");
+    static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in typeMatches");
     if (entry.kind == KIND_VOID) return true;
     switch (field.kind) {
         case KIND_VOID: return true;
         case KIND_PTR:
-            return entry.kind == KIND_PTR ? _typeMatches(*field.base, *entry.base) : entry.kind == KIND_BUILTIN_VAL;
+        case KIND_ARRAY:
+            return isPtrType(entry) ? _typeMatches(*field.base, *entry.base) : entry.kind == KIND_BUILTIN_VAL;
         case KIND_INT:
             return (entry.kind == KIND_INT && entry.size == field.size) ||
                 (entry.kind == KIND_BUILTIN_VAL && field.size == 8) ||
@@ -716,7 +777,7 @@ bool typeMatches(TypeDef field, TypeDef entry)
 
 bool parseType(AST* ast, TypeDef* dst)
 {
-    static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in parseType");
+    static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in parseType");
     *dst = (TypeDef){0};
     bool fetched = false;
     while (true) {
@@ -753,7 +814,7 @@ bool parseType(AST* ast, TypeDef* dst)
             }
         } else if (token.type == TOKEN_SYMBOL) {
             switch (token.symbol_id) {
-                case SYMBOL_STAR:
+                case SYMBOL_STAR: {
                     if (dst->kind == KIND_NONE) return fetched;
 
                     fetchToken(ast->prep);
@@ -762,7 +823,28 @@ bool parseType(AST* ast, TypeDef* dst)
                     dst->base = new_base;
                     dst->kind = KIND_PTR;
                     break;
-                default:
+                } case SYMBOL_INDEX_START: {
+                    if (dst->kind == KIND_NONE) return fetched;
+                    if (dst->kind == KIND_VOID) raiseVoidArrayError(ast, token.loc);
+
+                    fetchToken(ast->prep);
+                    Token index_spec = fetchToken(ast->prep);
+                    int64_t n_items = 0;
+                    if (index_spec.type == TOKEN_INT) {
+                        n_items = index_spec.value;
+                        if (n_items < 0) raiseNegativeArraySizeError(ast, index_spec.loc, n_items);
+                        token = fetchToken(ast->prep);
+                        if (getTokenSymbolId(token) != SYMBOL_INDEX_END) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_INDEX_END));
+                    } else if (getTokenSymbolId(index_spec) != SYMBOL_INDEX_END)
+                        raiseUnexpectedTokenError(ast, index_spec, "the array size specifier", symbolToken(SYMBOL_INDEX_END), intToken(0));
+                    
+                    TypeDef* new_base = malloc(sizeof(TypeDef));
+                    *new_base = *dst;
+                    dst->base = new_base;
+                    dst->kind = n_items ? KIND_ARRAY : KIND_PTR;
+                    dst->n_items = n_items;
+                    break;
+                } default:
                     return fetched;
             }
         } else return fetched;
@@ -770,7 +852,7 @@ bool parseType(AST* ast, TypeDef* dst)
 }
 
 bool isExprEvaluatable(ExprType type) {
-    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in isExprEvaluatable");
+    static_assert(N_EXPR_TYPES == 52, "not all expression types are handled in isExprEvaluatable");
     static bool expr_evaluatability_info[N_EXPR_TYPES] = {
         [EXPR_INVALID   ] = false,
         [EXPR_INVALID + 1 ... N_EXPR_TYPES - 1] = true,
@@ -793,7 +875,7 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
     for (int i = 0; i < indent_level; i++) {
         fputc('\t', dst);
     }
-    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in fprintExpr");
+    static_assert(N_EXPR_TYPES == 52, "not all expression types are handled in fprintExpr");
 
     fprintTokenLoc(dst, expr.loc);
     switch (expr.type) {
@@ -1044,6 +1126,11 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             fputs("DEREFERENCE:\n", dst);
             fprintExpr(dst, *expr.arg1, indent_level + 1);
             break;
+        case EXPR_GET_ITEM:
+            fputs("GET ITEM:\n", dst);
+            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            break;
         case EXPR_INVALID:
         case N_EXPR_TYPES:
         default:
@@ -1073,6 +1160,23 @@ FuncDecl* getFuncDecl(AST* ast, char* name)
         if (streq(name, func.name)) return &_func->value;
     );
     return NULL;
+}
+
+bool isExprIntLiteral(Expr* expr)
+{
+    if (expr->type == EXPR_INT) return true;
+    if (expr->type == EXPR_CAST) return isExprIntLiteral(expr->arg1);
+    return false;
+}
+
+int64_t getIntLiteral(Expr* expr)
+{
+    if (expr->type == EXPR_INT) return expr->int_literal;
+    if (expr->type == EXPR_CAST) {
+        if (expr->var_type->kind == KIND_BOOL) return getIntLiteral(expr->arg1) != 0;
+        return getIntLiteral(expr->arg1) & byteMask(getTypeSize(*expr->var_type));
+    }
+    return -69;
 }
 
 typedef void (*ExprTypeSetter) (AST*, Expr*, ExprType);
@@ -1115,48 +1219,46 @@ void setBinaryExprType(AST* ast, Expr* expr, ExprType new_type)
     expr->arg1 = arg1;
 }
 
-void setExprAssign(AST* ast, Expr* expr, ExprType new_type)
-{
-    if (expr->type == EXPR_NAME) setExprNameToExprGetVar(ast, expr, new_type);
-    Expr* new_subexpr = malloc(sizeof(Expr));
-    *new_subexpr = *expr;
-    expr->type = new_type;
-    expr->arg1 = new_subexpr;
-}
-
 bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type) __result_use_check;
 
 bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
 // changes the type of the expression if the new type is suitable in place of the current expression type
 {
-    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in setExprType");
+    static_assert(N_EXPR_TYPES == 52, "not all expression types are handled in setExprType");
     static ExprTypeSetter override_table[N_EXPR_TYPES][N_EXPR_TYPES] = {
         [EXPR_INVALID   ] = {
             [EXPR_SYSCALL ... N_EXPR_TYPES - 1] = defaultExprTypeSetter,
             [EXPR_INVALID] = NULL,
             [EXPR_ADD ... EXPR_SHR] = NULL,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = NULL
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = NULL,
+            [EXPR_GET_ITEM] = NULL
         },
         [EXPR_SYSCALL   ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
         },
         [EXPR_NAME      ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_GET_VAR] = setExprNameToExprGetVar,
-            [EXPR_ASSIGN] = setExprAssign,
-            [EXPR_ADD_ASSIGN ... EXPR_SHR_ASSIGN] = setExprAssign,
+            [EXPR_ASSIGN ... EXPR_SHR_ASSIGN] = setBinaryExprType,
             [EXPR_PROC_CALL] = setExprNameToExprFuncCall,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
         },
         [EXPR_BUILTIN   ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
             [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
         },
-        [EXPR_STRING    ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
+        [EXPR_STRING    ] = {
+            [0 ... N_EXPR_TYPES - 1] = NULL,
+            [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
+        },
         [EXPR_INT       ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
@@ -1165,21 +1267,21 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
         [EXPR_REF       ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_PROC_REF  ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_NEW_VAR   ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
-        [EXPR_ASSIGN    ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
-        [EXPR_ADD_ASSIGN ... EXPR_SHR_ASSIGN] = { [0 ... N_EXPR_TYPES - 1] = NULL },
+        [EXPR_ASSIGN ... EXPR_SHR_ASSIGN] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_GET_VAR   ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
-            [EXPR_ASSIGN] = setExprAssign,
-            [EXPR_ADD_ASSIGN ... EXPR_SHR_ASSIGN] = setExprAssign,
+            [EXPR_ASSIGN ... EXPR_SHR_ASSIGN] = setBinaryExprType,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
         },
         [EXPR_BLOCK     ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_TYPE      ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_PROC_CALL ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
         },
         [EXPR_RETURN    ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_ADD ... EXPR_NOT] = {
@@ -1190,7 +1292,8 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
         [EXPR_CAST ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
         },
         [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_NOT] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
@@ -1200,7 +1303,8 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
         [EXPR_WRAPPER ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
         },
         [EXPR_IF      ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
         [EXPR_VOID    ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
@@ -1209,14 +1313,22 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
         [EXPR_GET_REF ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
         },
         [EXPR_DEREF  ] = {
             [0 ... N_EXPR_TYPES - 1] = NULL,
-            [EXPR_ASSIGN] = setExprAssign,
-            [EXPR_ADD_ASSIGN ... EXPR_SHR_ASSIGN] = setExprAssign,
+            [EXPR_ASSIGN ... EXPR_SHR_ASSIGN] = setBinaryExprType,
             [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
+        },
+        [EXPR_GET_ITEM] = {
+            [0 ... N_EXPR_TYPES - 1] = NULL,
+            [EXPR_ASSIGN ... EXPR_SHR_ASSIGN] = setBinaryExprType,
+            [EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
+            [EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
+            [EXPR_GET_ITEM] = setBinaryExprType
         }
     };
 
@@ -1230,8 +1342,8 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
 
 TypeDef getExprValueType(AST* ast, Expr expr)
 {
-    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in getExprValueType");
-    static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in getExprValueType");
+    static_assert(N_EXPR_TYPES == 52, "not all expression types are handled in getExprValueType");
+    static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in getExprValueType");
     switch (expr.type) {
         case EXPR_INVALID:
         case EXPR_NAME:
@@ -1267,6 +1379,8 @@ TypeDef getExprValueType(AST* ast, Expr expr)
         case EXPR_ADD: {
             TypeDef arg1_type = getExprValueType(ast, *expr.arg1);
             TypeDef arg2_type = getExprValueType(ast, *expr.arg2);
+            if (arg1_type.kind == KIND_ARRAY) arg1_type.kind = KIND_PTR;
+            if (arg2_type.kind == KIND_ARRAY) arg2_type.kind = KIND_PTR;
 
             if (arg1_type.kind == KIND_PTR && arg2_type.kind == KIND_PTR) return INT_TYPE(8);
             if (arg1_type.kind == KIND_PTR) {
@@ -1313,7 +1427,9 @@ TypeDef getExprValueType(AST* ast, Expr expr)
         case EXPR_WRAPPER: return getExprValueType(ast, *expr.arg1);
         case EXPR_VOID: return VOID_TYPE;
         case EXPR_GET_REF: return PTR_TYPE(getExprValueType(ast, *expr.arg1));
-        case EXPR_DEREF: return *getExprValueType(ast, *expr.arg1).base;
+        case EXPR_DEREF:
+        case EXPR_GET_ITEM:
+            return *getExprValueType(ast, *expr.arg1).base;
         case N_EXPR_TYPES:
         default:
             eprintf("internal compiler bug in getExprValueType: unknown expression type %d\n", expr.type);
@@ -1335,7 +1451,7 @@ void printAST(AST* ast)
 
 bool matchType(AST* ast, TypeDef field_type, Expr* expr)
 {
-    static_assert(N_TYPE_KINDS == 6, "not all type kinds are handled in typeMatches");
+    static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in typeMatches");
 
     TypeDef expr_val_type = getExprValueType(ast, *expr);
     if (typeMatches(field_type, expr_val_type)) return true;
@@ -1890,6 +2006,20 @@ bool parseSymbolStar(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDe
     return false;
 }
 
+bool parseSymbolIndexStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+{
+    dst->loc = token.loc;
+    if (setExprType(ast, dst, parent_expr, EXPR_GET_ITEM)) {
+        unfetchToken(ast->prep, token);
+        return true;
+    }
+
+    dst->arg2 = calloc(1, sizeof(Expr));
+    parseExpr(ast, dst->arg2, dst, dst->block, func, EXPRTERM_SQBRACKET | EXPRTYPE_EVALUATABLE);
+    fetchToken(ast->prep);
+    return false;
+}
+
 bool parseInvalidSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
 {
     raiseInvalidExprError(ast, token.loc);
@@ -1916,7 +2046,7 @@ bool parseEmptyToken(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDe
 
 void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* func, int flags)
 {
-    static_assert(N_EXPR_TYPES == 51, "not all expression types are handled in parseExpr");
+    static_assert(N_EXPR_TYPES == 52, "not all expression types are handled in parseExpr");
     TypeDef new_type;
     Token token;
 
@@ -1989,7 +2119,9 @@ void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* fu
                 [SYMBOL_XOR_ASSIGN] = &parseSymbolAssignment,
                 [SYMBOL_OR_ASSIGN ] = &parseSymbolAssignment,
                 [SYMBOL_SHL_ASSIGN] = &parseSymbolAssignment,
-                [SYMBOL_SHR_ASSIGN] = &parseSymbolAssignment
+                [SYMBOL_SHR_ASSIGN] = &parseSymbolAssignment,
+                [SYMBOL_INDEX_START] = &parseSymbolIndexStart,
+                [SYMBOL_INDEX_END] = &parseInvalidSymbol
             };
             if (symbol_parsers[token.symbol_id](ast, token, dst, parent_expr, func, flags)) break;
         } else if (token.type == TOKEN_WORD) {
@@ -2054,7 +2186,7 @@ void makeLogicalExpr(Expr* expr)
 
 void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
 {
-    static_assert(N_EXPR_TYPES == 51, "not all expressions have any optimizations defined");
+    static_assert(N_EXPR_TYPES == 52, "not all expressions have any optimizations defined");
     switch (expr->type) {
         case EXPR_SYSCALL:
             for (ExprNode* iter = getSubexprs(expr)->start->next; iter != NULL; iter = iter->next) {
@@ -2337,6 +2469,32 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
                     raiseAssignmentTypeMismatchError(ast, expr->loc, expr, getExprValueType(ast, *initializer));
             }
             break;
+        case EXPR_GET_ITEM:
+            optimizeExpr(ast, expr->arg1, func);
+            optimizeExpr(ast, expr->arg2, func);
+
+            TypeDef array_type = getExprValueType(ast, *expr->arg1);
+            if (!isPtrType(array_type)) raiseUnindexableExprError(ast, expr->arg1->loc, array_type);
+
+            TypeDef index_type = getExprValueType(ast, *expr->arg2);
+            if (!isIntType(index_type)) raiseInvalidArrayIndexError(ast, expr->arg2->loc, index_type);
+
+            if (isExprIntLiteral(expr->arg2) && array_type.kind == KIND_ARRAY && array_type.n_items > 0) {
+                int64_t index_literal = getIntLiteral(expr->arg2);
+                if (!inRange(index_literal, 0, array_type.n_items)) raiseOutOfBoundsIndexError(ast, expr->arg2->loc, array_type, index_literal);
+            }
+
+            Expr* new_subexpr = malloc(sizeof(Expr));
+            *new_subexpr = (Expr){
+                .type = EXPR_ADD,
+                .block = expr->block,
+                .loc = expr->loc,
+                .arg1 = expr->arg1,
+                .arg2 = expr->arg2
+            };
+            expr->type = EXPR_DEREF;
+            expr->arg1 = new_subexpr;
+            break;
         case EXPR_GET_VAR:
         case EXPR_INT:
         case EXPR_BUILTIN:
@@ -2408,6 +2566,7 @@ void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
             while (true) {
                 Token type_spec = peekToken(obj);
                 if (parseType(dst, &type)) {
+                    if (type.kind == KIND_ARRAY) type.kind = KIND_PTR;
                     token = fetchToken(obj);
                     if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(dst, token, "an argument name", wordToken(NULL));
 
@@ -2547,23 +2706,6 @@ void compileSrcRef(ASTCompilerCtx* ctx, TokenLoc loc)
     }
 }
 
-bool isExprIntLiteral(Expr* expr)
-{
-    if (expr->type == EXPR_INT) return true;
-    if (expr->type == EXPR_CAST) return isExprIntLiteral(expr->arg1);
-    return false;
-}
-
-int64_t getIntLiteral(Expr* expr)
-{
-    if (expr->type == EXPR_INT) return expr->int_literal;
-    if (expr->type == EXPR_CAST) {
-        if (expr->var_type->kind == KIND_BOOL) return getIntLiteral(expr->arg1) != 0;
-        return getIntLiteral(expr->arg1) & byteMask(getTypeSize(*expr->var_type));
-    }
-    return -69;
-}
-
 bool compileExprInvalid(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
     return false;
@@ -2626,14 +2768,15 @@ bool compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 {
     compileSrcRef(ctx, expr.loc);
     char* name = getSubexpr(&expr, 0)->name;
-    int size = getTypeSize(*getSubexpr(&expr, 1)->var_type);
+    TypeDef var_type = *getSubexpr(&expr, 1)->var_type;
+    int size = getTypeSize(var_type);
 
     if (getSubexprsCount(&expr) == 4) {
         Expr* initializer = getSubexpr(&expr, 3);
         if (!expr_compilers[initializer->type](ctx, *initializer, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tpushv %s %d r%d\n", name, size, dst_reg);
     } else {
-        fprintf(ctx->dst, "\tvar %s %d\n", name, size);
+        fprintf(ctx->dst, "\tvar %s %d\n", name, var_type.kind == KIND_ARRAY ? var_type.n_items : size);
     }
     return true;
 }
@@ -2673,7 +2816,11 @@ bool compileExprAssign(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 bool compileExprGetVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
     compileSrcRef(ctx, expr.loc);
-    fprintf(ctx->dst, "\tldvs r%d %s\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
+    if (getSubexpr(expr.arg1, 1)->var_type->kind == KIND_ARRAY) {
+        fprintf(ctx->dst, "\tsetv r%d %s\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
+    } else {
+        fprintf(ctx->dst, "\tldvs r%d %s\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
+    }
     return true;
 }
 
@@ -3457,9 +3604,10 @@ ExprCompiler expr_compilers[] = {
     [EXPR_XOR_ASSIGN ] = &compileExprInvalid,
     [EXPR_OR_ASSIGN  ] = &compileExprInvalid,
     [EXPR_SHL_ASSIGN ] = &compileExprInvalid,
-    [EXPR_SHR_ASSIGN ] = &compileExprInvalid
+    [EXPR_SHR_ASSIGN ] = &compileExprInvalid,
+    [EXPR_GET_ITEM   ] = &compileExprInvalid
 };
-static_assert(N_EXPR_TYPES == 51, "not all expression types have corresponding compilers defined");
+static_assert(N_EXPR_TYPES == 52, "not all expression types have corresponding compilers defined");
 
 bool compileAST(AST* src, FILE* dst)
 {
@@ -3614,7 +3762,7 @@ int main(int argc, char* argv[])
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
         return 1;
     }
-    static_assert(N_SYMBOLS == 32, "not all symbols are handled");
+    static_assert(N_SYMBOLS == 34, "not all symbols are handled");
     setSymbols(
         &prep,
         BRP_SYMBOL("("),
@@ -3649,6 +3797,8 @@ int main(int argc, char* argv[])
         BRP_SYMBOL("~"),
         BRP_SYMBOL("<"),
         BRP_SYMBOL(">"),
+        BRP_SYMBOL("["),
+        BRP_SYMBOL("]"),
         BRP_HIDDEN_SYMBOL(" "),
         BRP_HIDDEN_SYMBOL("\t")
     );

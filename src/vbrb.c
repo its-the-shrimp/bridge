@@ -214,11 +214,8 @@ void printVBRBError(FILE* dst, VBRBError err) {
 			case VBRB_ERR_INVALID_REG_ID:
 				fprintf(dst, "invalid register index %d\n", err.loc.word[1] - '0');
 				break;
-			case VBRB_ERR_UNKNOWN_CONST:
-				fprintf(dst, "unknown constant `%s`\n", getTokenWord(err.prep, err.loc));
-				break;
-			case VBRB_ERR_INVALID_VAR_SIZE:
-				fprintf(dst, "variable size can only be either 1, 2, 4 or 8, instead got %lld\n", err.loc.value);
+			case VBRB_ERR_UNKNOWN_BUILTIN:
+				fprintf(dst, "unknown built-in name `%s`\n", getTokenWord(err.prep, err.loc));
 				break;
 			case VBRB_ERR_NON_PROC_CALL:
 				fprintf(dst, "mark `%s` must point to the start of a procedure to be able to be called\n", err.mark_name);
@@ -253,6 +250,14 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				break;
 			case VBRB_ERR_DELNV_TOO_FEW_VARS:
 				fprintf(dst, "cannot use `delnv` operation; the amount of variables on the stack is less than %d\n", err.var_count);
+				break;
+			case VBRB_ERR_VAR_TOO_LARGE:
+				fprintf(
+					dst,
+					"cannot use `ldv`, `strv` and `pushv` operations; variable `%s` is larger than a BRB register (%lld > 8)\n",
+					err.var.name,
+					err.var.size
+				);
 				break;
 		}
 	}
@@ -487,7 +492,7 @@ VBRBError compileOpSetb(CompilerCtx* ctx, Module* dst)
 	if (op->symbol_id == -1) {
 		return (VBRBError){
             .prep = ctx->prep,
-			.code = VBRB_ERR_UNKNOWN_CONST,
+			.code = VBRB_ERR_UNKNOWN_BUILTIN,
 			.loc = arg
 		};
 	}
@@ -694,14 +699,7 @@ VBRBError compileOpVar(CompilerCtx* ctx, Module* dst)
 		.arg_id = 1,
 		.expected_token_type = TOKEN_INT
 	};
-	if (token.value != 1 && token.value != 2 && token.value != 4 && token.value != 8) {
-		return (VBRBError){
-            .prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_VAR_SIZE,
-			.loc = token
-		};
-	}
-	op->var_size = new_var->size = (int8_t)token.value;
+	op->new_var_size = new_var->size = token.value;
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -726,8 +724,18 @@ VBRBError compileOpLdv(CompilerCtx* ctx, Module* dst)
 	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &op->dst_reg, op->type, 0);
 	if (err.code) return err;
 
-	err = getVarArg(ctx, fetchToken(ctx->prep), &op->symbol_id, &op->var_size, op->type, 1);
+	Token var_name = fetchToken(ctx->prep);
+	err = getVarArg(ctx, var_name, &op->symbol_id, &op->var_size, op->type, 1);
 	if (err.code) return err;
+
+	if (op->var_size > 8) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_VAR_TOO_LARGE,
+		.var = (Var){
+			.name = var_name.word,
+			.size = op->var_size
+		}
+	};
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -736,8 +744,18 @@ VBRBError compileOpStrv(CompilerCtx* ctx, Module* dst)
 {
 	Op* op = arrayhead(dst->execblock);
 
-	VBRBError err = getVarArg(ctx, fetchToken(ctx->prep), &op->symbol_id, &op->var_size, op->type, 1);
+	Token var_name = fetchToken(ctx->prep);
+	VBRBError err = getVarArg(ctx, var_name, &op->symbol_id, &op->var_size, op->type, 1);
 	if (err.code) return err;
+
+	if (op->var_size > 8) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_VAR_TOO_LARGE,
+		.var = (Var){
+			.name = var_name.word,
+			.size = op->var_size
+		}
+	};
 
 	err = getRegIdArg(ctx, fetchToken(ctx->prep), &op->src_reg, op->type, 0);
 	if (err.code) return err;
@@ -794,14 +812,13 @@ VBRBError compileOpPushv(CompilerCtx* ctx, Module* dst)
 		.arg_id = 1,
 		.expected_token_type = TOKEN_INT
 	};
-	if (token.value != 1 && token.value != 2 && token.value != 4 && token.value != 8) {
-		return (VBRBError){
-            .prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_VAR_SIZE,
-			.loc = token
-		};
-	}
 	op->var_size = new_var->size = (int8_t)token.value;
+
+	if (token.value > 8) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_VAR_TOO_LARGE,
+		.var = *new_var
+	};
 
 	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &op->src_reg, op->type, 2);
 	if (err.code) return err;
