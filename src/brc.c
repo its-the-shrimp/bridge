@@ -1350,7 +1350,7 @@ bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type)
 
     ExprTypeSetter setter = override_table[expr->type][new_type];
     if (!setter) raiseInvalidExprError(ast, expr->loc);
-    if (parent_expr ? expr_order_table[parent_expr->type] < expr_order_table[new_type] && expr_order_table[parent_expr->type] > 0 : false) return true;
+    if (parent_expr ? expr_order_table[parent_expr->type] <= expr_order_table[new_type] && expr_order_table[parent_expr->type] > 0 : false) return true;
 
     setter(ast, expr, new_type);
     return false;

@@ -423,10 +423,10 @@ typedef struct execEnv {
 	sbuf* exec_argv;
 	char* src_path;
 	int src_line;
-	bool (**exec_callbacks) (struct execEnv*, Module*);
+	bool (**exec_callbacks) (struct execEnv*, Module*, const Op*);
 } ExecEnv;
 
-typedef bool (*ExecCallback) (ExecEnv*, Module*);
+typedef bool (*ExecCallback) (ExecEnv*, Module*, const Op*);
 
 #define getCurStackSize(execenv_p, module_p) (int64_t)((execenv_p)->stack_brk + (module_p)->stack_size - (execenv_p)->stack_head)
 
@@ -438,8 +438,9 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);
 void printLoadError(BRBLoadError err);
 void initExecEnv(ExecEnv* env, Module* module, char** args);
-bool addPreCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback);
-bool addPostCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback);
+bool addDefaultCallback(ExecEnv* env, ExecCallback callback);
+bool addCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback);
+void execOp(ExecEnv* env, Module* module);
 void execModule(ExecEnv* env, Module* module, volatile bool* interruptor);
 
 #endif // _BRB_

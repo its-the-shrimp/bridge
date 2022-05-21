@@ -12,9 +12,6 @@
 #define sbuf_format "%.*s"
 #define unpack(array) (int)array.length, array.data
 
-#define fileloc_format sbuf_format":%u:%u"
-#define fileloc_arg(obj) unpack(obj.filename), obj.lineno, obj.colno
-
 #define sbufshift(obj, offset) obj.length -= offset; obj.data += offset;
 #define sbufpshift(obj, offset) obj->length -= offset; obj->data += offset;
 
@@ -59,6 +56,8 @@ bool sbufint(sbuf src);
 long sbuftoint(sbuf obj);
 sbuf_size_t sbufstriplv(sbuf* src, sbuf items[]);
 sbuf_size_t _sbufstripl(sbuf* src, ...);
+sbuf_size_t sbufstriprv(sbuf* src, sbuf items[]);
+sbuf_size_t _sbufstripr(sbuf* src, ...);
 char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format);
 sbuf_size_t sbufindex(sbuf obj, sbuf sub);
@@ -67,6 +66,9 @@ sbuf sbufcopy(sbuf obj);
 sbuf sbufcutv(sbuf* src, sbuf items[]);
 sbuf sbufcutva(sbuf* src, va_list args);
 sbuf _sbufcut(sbuf* src, ...);
+sbuf sbufcutrv(sbuf* src, sbuf items[]);
+sbuf sbufcutrva(sbuf* src, va_list args);
+sbuf _sbufcutr(sbuf* src, ...);
 sbuf sbufwrite(sbuf dst, sbuf src, sbuf_size_t offset);
 
 sbuf smalloc(sbuf_size_t size);
@@ -83,8 +85,10 @@ void sfree(sbuf* obj);
 #define sbufsplitr(src, dst, ...) _sbufsplitr(src, dst, __VA_ARGS__, (sbuf){0})
 #define sbufsplitesc(src, dst, ...) _sbufsplitesc(src, dst, __VA_ARGS__, (sbuf){0})
 #define sbufcut(src, ...) _sbufcut(src, __VA_ARGS__, (sbuf){0})
+#define sbufcutr(src, ...) _sbufcutr(src, __VA_ARGS__, (sbuf){0})
 
 #define sbufstripl(src, ...) _sbufstripl(src, __VA_ARGS__, (sbuf){0})
+#define sbufstripr(src, ...) _sbufstripr(src, __VA_ARGS__, (sbuf){0})
 
 #define fputsbuflnesc(fd, obj, format) fputsbufesc(fd, obj, format); fputc('\n', fd)
 #define putsbufesc(obj, format) fputsbufesc(stdout, obj, format)
@@ -450,6 +454,31 @@ sbuf_size_t _sbufstripl(sbuf* src, ...)
 	return n_stripped;
 }
 
+sbuf_size_t sbufstriprv(sbuf* src, sbuf items[])
+{
+	sbuf_size_t n_stripped = 0;
+	while (true) {
+		sbuf item = sbufcutrv(src, items);
+		if (!item.length) break;
+		n_stripped += item.length;
+	}
+	return n_stripped;
+}
+
+sbuf_size_t _sbufstripr(sbuf* src, ...)
+{
+	sbuf_size_t n_stripped = 0;
+	va_list args;
+	while (true) {
+		va_start(args, src);
+		sbuf item = sbufcutrva(src, args);
+		va_end(args);
+		if (!item.length) break;
+		n_stripped += item.length;
+	}
+	return n_stripped;
+}
+
 // writes the character `obj` with escaping specified by a set of flags `format` to the file descriptor `fd`
 // supported formatting flags:
 //	BYTEFMT_HEX - write unprintable characters in the form of "\x<hexadecimal value of the character>"
@@ -562,6 +591,37 @@ sbuf _sbufcut(sbuf* src, ...)
 	va_list args;
 	va_start(args, src);
 	sbuf res = sbufcutva(src, args);
+	va_end(args);
+	return res;
+}
+
+sbuf sbufcutrv(sbuf* src, sbuf items[])
+{
+	for (int i = 0; items[i].data; i++) {
+		if (sbufendswith(*src, items[i])) {
+			src->length -= items[i].length;
+			return items[i];
+		}
+	}
+	return (sbuf){0};
+}
+sbuf sbufcutrva(sbuf* src, va_list args)
+{
+	sbuf new;
+	while ((new = va_arg(args, sbuf)).data) {
+		if (sbufendswith(*src, new)) {
+			src->length -= new.length;
+			return new;
+		}
+	}
+	return (sbuf){0};
+}
+
+sbuf _sbufcutr(sbuf* src, ...)
+{
+	va_list args;
+	va_start(args, src);
+	sbuf res = sbufcutrva(src, args);
 	va_end(args);
 	return res;
 }

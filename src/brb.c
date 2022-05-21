@@ -25,18 +25,18 @@ typedef struct {
 	fieldArray unresolved;
 } ModuleLoader;
 
-void writeInt(FILE* fd, uint64_t x)
+void writeInt(FILE* fd, int64_t x)
 {
 	if (x) {
-		if (x <= UINT8_MAX) {
+		if (x == (int8_t)(x & 0xFF)) {
 			fputc(1, fd);
 			int8_t x8 = (int8_t)x;
 			fputc(x8, fd);
-		} else if (x <= UINT16_MAX) {
+		} else if (x == (int16_t)(x & 0xFFFF)) {
 			fputc(2, fd);
 			int16_t x16 = (int16_t)x;
 			fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
-		} else if (x <= UINT32_MAX) {
+		} else if (x == (int32_t)(x & 0xFFFFFFFFLL)) {
 			fputc(4, fd);
 			int32_t x32 = (int32_t)x;
 			fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
@@ -323,38 +323,38 @@ void writeModule(Module* src, FILE* dst)
 	strArray_clear(&writer.consts);
 }
 
-uint8_t loadInt8(FILE* fd, long* n_fetched)
+int8_t loadInt8(FILE* fd, long* n_fetched)
 {
 	if (feof(fd) || ferror(fd)) { *n_fetched = 0; return 0; }
 	*n_fetched = 1;
 	return fgetc(fd);
 }
 
-uint16_t loadInt16(FILE* fd, long* n_fetched)
+int16_t loadInt16(FILE* fd, long* n_fetched)
 {
 	char res[2];
 	if (fread(&res, 1, 2, fd) != 2) { *n_fetched = 0; return 0; };
 	*n_fetched = 2;
-	return *(uint16_t*)BRByteOrder(&res, 2); 
+	return *(int16_t*)BRByteOrder(&res, 2); 
 }
 
-uint32_t loadInt32(FILE* fd, long* n_fetched)
+int32_t loadInt32(FILE* fd, long* n_fetched)
 {
 	char res[4];
 	if (fread(&res, 1, 4, fd) != 4) { *n_fetched = 0; return 0; };
 	*n_fetched = 4;
-	return *(uint32_t*)BRByteOrder(&res, 4);
+	return *(int32_t*)BRByteOrder(&res, 4);
 }
 
-uint64_t loadInt64(FILE* fd, long* n_fetched)
+int64_t loadInt64(FILE* fd, long* n_fetched)
 {
 	char res[8];
 	if (fread(&res, 1, 8, fd) != 8) { *n_fetched = 0; return 0; }
 	*n_fetched = 8;
-	return *(uint64_t*)BRByteOrder(&res, 8);
+	return *(int64_t*)BRByteOrder(&res, 8);
 }
 
-uint64_t loadInt(FILE* fd, long* n_fetched)
+int64_t loadInt(FILE* fd, long* n_fetched)
 {
 	if (feof(fd) || ferror(fd)) { *n_fetched = 0; return 0; }
 	int8_t size = fgetc(fd);
@@ -946,115 +946,7 @@ BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags)
 	resolveModule(dst, flags & BRB_EXECUTABLE);
 	return (BRBLoadError){0};
 }
-/*
-typedef void (*OpPrinter) (Op);
 
-void printNoArgOp(Op op, FILE* dst)
-{
-	fputc('\n', dst);
-}
-
-void printRegImmOp(Op op, FILE* dst)
-{
-	fprintf(dst, "r%hhd %lld\n", op.dst_reg, op.value);
-}
-
-void print2RegOp(Op op, FILE* dst)
-{
-	fprintf(dst, "r%hhd r%hhd\n", op.dst_reg, op.src_reg);
-}
-
-static OpPrinter op_printers[] = {
-	[OP_NONE] = &printNoArgOp,
-	[OP_END] = &printNoArgOp,
-	[OP_MARK] = &printNoArgOp,
-	[OP_SET] = &printRegImmOp,
-	[OP_SETR] = &print2RegOp,
-	OP_SETD, // uses Op::dst_reg and Op::symbol_id
-	OP_SETB, // uses Op::dst_reg and Op::symbol_id
-	OP_SETM, // uses Op::dst_reg and Op::symbol_id
-	OP_ADD, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_ADDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_SUB, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_SUBR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_SYS, // uses Op::syscall_id
-	OP_GOTO, // uses Op::op_offset
-	OP_CMP, // uses Op::src_reg and Op::value
-	OP_CMPR, // uses Op::src_reg and Op::src2_reg
-	OP_AND, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_ANDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_OR, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_ORR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_NOT, // uses Op::dst_reg and Op::src_reg
-	OP_XOR, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_XORR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_SHL, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_SHLR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_SHR, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_SHRR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_SHRS, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_SHRSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_PROC, // uses Op::mark_name
-	OP_CALL, // uses Op::symbol_id
-	OP_RET,
-	OP_ENDPROC,
-	OP_LD64, // uses Op::dst_reg and Op::src_reg
-	OP_STR64, // uses Op::dst_reg and Op::src_reg
-	OP_LD32, // uses Op::dst_reg and Op::src_reg
-	OP_STR32, // uses Op::dst_reg and Op::src_reg
-	OP_LD16, // uses Op::dst_reg and Op::src_reg
-	OP_STR16, // uses Op::dst_reg and Op::src_reg
-	OP_LD8, // uses Op::dst_reg and Op::src_reg
-	OP_STR8, // uses Op::dst_reg and Op::src_reg
-	OP_VAR, // uses Op::var_size
-	OP_SETV, // uses Op::dst_reg and Op::symbol_id
-	OP_MUL, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_MULR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	OP_DIV, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_DIVR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
-	OP_DIVS, // uses Op::dst_reg, Op::src_reg and Op::value
-	OP_DIVSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
-	OP_EXTPROC, // uses Op::mark_name
-	OP_LDV, // uses Op::src_reg, Op::symbol_id and Op::var_size
-	OP_STRV, // uses Op::dst_reg, Op::symbol_id and Op::var_size
-	OP_POPV, // uses Op::dst_reg, Op::var_size
-	OP_PUSHV, // uses Op::src_reg and Op::var_size
-	OP_ATF, // uses Op::mark_name
-	OP_ATL, // uses Op::symbol_id
-	OP_SETC, // uses Op::cond_arg and Op::dst_reg
-	OP_DELNV,
-}
-
-void printModule(Module* module, FILE* dst)
-{
-	if (module->datablocks.length) {
-		fputs("data {\n", dst);
-		array_foreach(DataBlock, block, module->datablocks, 
-			fprintf(dst, "\t%s \"", block.name);
-			fputsbufesc(dst, block.spec, BYTEFMT_HEX);
-			fputs("\"\n", dst);
-		);
-		fputs("}\n", dst);
-	}
-
-	if (module->memblocks.length) {
-		fputs("memory {\n", dst);
-		array_foreach(MemBlock, block, module->memblocks, 
-			fprintf(dst, "\t%s %lld\n", block.name, block.size);
-		);
-		fputs("}\n", dst);
-	}
-
-	if (module->execblock.length) {
-		fputs("exec {\n", dst);
-		array_foreach(Op, op, module->execblock, 
-			fprintf(dst, "\t%s", opNames[op.type]);
-			if (op.cond_id) fprintf(dst, ":%s ", conditionNames[op.cond_id].data);
-			else fputc(' ', dst);
-		);
-	}
-}
-*/
 void initExecEnv(ExecEnv* env, Module* module, char** args)
 {
 	env->exec_callbacks = NULL;
@@ -1062,9 +954,8 @@ void initExecEnv(ExecEnv* env, Module* module, char** args)
 	env->exitcode = 0,
 	env->memblocks = sbufArray_new(module->memblocks.length * -1),
 	env->op_id = module->entry_opid,
-	env->registers = malloc(sizeof(int64_t) * N_REGS),
+	env->registers = calloc(N_REGS, sizeof(uint64_t)),
 	env->prev_stack_head = env->stack_head = env->stack_brk + module->stack_size;
-	memset(env->registers, 0, sizeof(int64_t) * N_REGS);
 
 	sbuf* newblock;
 	array_foreach(MemBlock, block, module->memblocks,
@@ -1081,23 +972,23 @@ void initExecEnv(ExecEnv* env, Module* module, char** args)
 	}
 }
 
-bool addPreCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback)
+bool addCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback)
 {
 	if (!env->exec_callbacks) {
-		env->exec_callbacks = calloc(2 * N_OPS, sizeof(env->exec_callbacks));
+		env->exec_callbacks = calloc(N_OPS, sizeof(env->exec_callbacks));
 		if (!env->exec_callbacks) return false;
 	}
 	env->exec_callbacks[op_id] = callback;
 	return true;
 }
 
-bool addPostCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback)
+bool addDefaultCallback(ExecEnv* env, ExecCallback callback)
 {
 	if (!env->exec_callbacks) {
-		env->exec_callbacks = calloc(2 * N_OPS, sizeof(env->exec_callbacks));
+		env->exec_callbacks = calloc(N_OPS, sizeof(env->exec_callbacks));
 		if (!env->exec_callbacks) return false;
 	}
-	env->exec_callbacks[op_id + N_OPS] = callback;
+	memset_pattern8(env->exec_callbacks, &callback, N_OPS * sizeof(ExecCallback));
 	return true;
 }
 
@@ -1812,25 +1703,43 @@ ExecHandler op_handlers[] = {
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 
+void execOp(ExecEnv* env, Module* module)
+{
+	Op* op = module->execblock.data + env->op_id;
+	if (op->cond_id) {
+		if (!handleCondition(env, op->cond_id)) {
+			env->op_id++;
+			return;
+		}
+	}
+
+	if (env->exec_callbacks)
+		if (env->exec_callbacks[op->type])
+			if (env->exec_callbacks[op->type](env, module, op)) return;
+
+	if (op_handlers[op->type](env, module)) return;
+}
+
 void execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
 {
 	while (true) {
-		if (module->execblock.data[env->op_id].cond_id) {
-			if (!handleCondition(env, module->execblock.data[env->op_id].cond_id)) {
+		Op* op = module->execblock.data + env->op_id;
+		if (op->cond_id) {
+			if (!handleCondition(env, op->cond_id)) {
 				env->op_id++;
 				continue;
 			}
 		}
-		Op* op = module->execblock.data + env->op_id;
+
 		if (env->exec_callbacks)
 			if (env->exec_callbacks[op->type])
-				if (env->exec_callbacks[op->type](env, module)) break;
+				if (env->exec_callbacks[op->type](env, module, op)) break;
 
 		if (op_handlers[op->type](env, module)) break;
 
 		if (env->exec_callbacks)
 			if (env->exec_callbacks[N_OPS + op->type])
-				if (env->exec_callbacks[N_OPS + op->type](env, module)) break;
+				if (env->exec_callbacks[N_OPS + op->type](env, module, op)) break;
 		if (interruptor ? *interruptor : false) break;
 	}
 }
