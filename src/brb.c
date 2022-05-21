@@ -8,8 +8,6 @@
 defArray(Op);
 defArray(DataBlock);
 defArray(MemBlock);
-defArray(DataSpec)
-defArray(ProcFrame);
 defArray(str);
 
 typedef struct {
@@ -264,7 +262,11 @@ const OpWriter op_writers[] = {
 	[OP_LDVS] = &writeOpLdv,
 	[OP_SX32] = &write2RegOp,
 	[OP_SX16] = &write2RegOp,
-	[OP_SX8] = &write2RegOp
+	[OP_SX8] = &write2RegOp,
+	[OP_MOD] = &write2RegImmOp,
+	[OP_MODS] = &write2RegImmOp,
+	[OP_MODR] = &write3RegOp,
+	[OP_MODSR] = &write3RegOp
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
 
@@ -701,7 +703,11 @@ OpLoader op_loaders[] = {
 	[OP_LDVS] = &loadOpLdv,
 	[OP_SX32] = &load2RegOp,
 	[OP_SX16] = &load2RegOp,
-	[OP_SX8] = &load2RegOp
+	[OP_SX8] = &load2RegOp,
+	[OP_MOD] = &load2RegImmOp,
+	[OP_MODS] = &load2RegImmOp,
+	[OP_MODR] = &load3RegOp,
+	[OP_MODSR] = &load3RegOp
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 
@@ -1049,293 +1055,50 @@ void printModule(Module* module, FILE* dst)
 	}
 }
 */
-ExecEnv initExecEnv(Module* module, int8_t flags, char** args)
+void initExecEnv(ExecEnv* env, Module* module, char** args)
 {
-	ExecEnv res = {
-		.heap = smalloc(0),
-		.stack_brk = malloc(module->stack_size),
-		.exitcode = 0,
-		.memblocks = sbufArray_new(module->memblocks.length * -1),
-		.op_id = module->entry_opid,
-		.registers = malloc(sizeof(int64_t) * N_REGS),
-		.flags = flags,
-		.call_count = 0
-	};
-	res.prev_stack_head = res.stack_head = res.stack_brk + module->stack_size;
-	memset(res.registers, 0, sizeof(int64_t) * N_REGS);
+	env->exec_callbacks = NULL;
+	env->stack_brk = malloc(module->stack_size),
+	env->exitcode = 0,
+	env->memblocks = sbufArray_new(module->memblocks.length * -1),
+	env->op_id = module->entry_opid,
+	env->registers = malloc(sizeof(int64_t) * N_REGS),
+	env->prev_stack_head = env->stack_head = env->stack_brk + module->stack_size;
+	memset(env->registers, 0, sizeof(int64_t) * N_REGS);
 
 	sbuf* newblock;
 	array_foreach(MemBlock, block, module->memblocks,
-		newblock = sbufArray_append(&res.memblocks, smalloc(block.size));
+		newblock = sbufArray_append(&env->memblocks, smalloc(block.size));
 		memset(newblock->data, 0, newblock->length);
 	);
 
-	if (flags & BRBX_TRACING) {
-		res.regs_trace = malloc(sizeof(DataSpec) * N_REGS);
-		for (int i = 0; i < N_REGS; i++) {
-			res.regs_trace[i].type = DS_VOID;
-		}
-		res.vars = ProcFrameArray_new(1, (ProcFrame){ .call_id = 0, .prev_opid = 0, .vars = DataSpecArray_new(0) });
-	}
-
-	res.exec_argc = 0;
-	while (args[++res.exec_argc]) {}
-	res.exec_argv = malloc(res.exec_argc * sizeof(sbuf));
-	for (int i = 0; i < res.exec_argc; i++) {
-		res.exec_argv[i] = fromstr(args[i]);
-		res.exec_argv[i].length++;
-	}
-
-	return res;
-}
-
-BufferRef classifyPtr(ExecEnv* env, Module* module, void* ptr)
-{
-	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
-
-	if (inRange(ptr, env->stack_head, env->stack_brk + module->stack_size)) {
-		return (BufferRef){ .type = BUF_VAR };
-	}
-
-	array_foreach(DataBlock, block, module->datablocks,
-		if (inRange(ptr, block.spec.data, block.spec.data + block.spec.length)) {
-			return ((BufferRef){ .type = BUF_DATA, .id = _block });
-		}
-	);
-
-	array_foreach(sbuf, block, env->memblocks, 
-		if (inRange(ptr, block.data, block.data + block.length)) {
-			return ((BufferRef){ .type = BUF_MEMORY, .id = _block });
-		}
-	);
-
+	env->exec_argc = 0;
+	while (args[++env->exec_argc]) {}
+	env->exec_argv = malloc(env->exec_argc * sizeof(sbuf));
 	for (int i = 0; i < env->exec_argc; i++) {
-		if (inRange(ptr, env->exec_argv[i].data, env->exec_argv[i].data + env->exec_argv[i].length)) {
-			return (BufferRef){ .type = BUF_ARGV, .id = i };
-		}
-	}
-	return (BufferRef){0};
-}
-
-sbuf getBufferByRef(ExecEnv* env, Module* module, BufferRef ref)
-{
-	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
-	switch (ref.type) {
-		case BUF_DATA: return module->datablocks.data[ref.id].spec;
-		case BUF_MEMORY: return env->memblocks.data[ref.id];
-		case BUF_VAR: return (sbuf){ .data = env->stack_head, .length = getCurStackSize(env, module) };
-		case BUF_ARGV: return env->exec_argv[ref.id];
-		default: return (sbuf){0};
+		env->exec_argv[i] = fromstr(args[i]);
+		env->exec_argv[i].length++;
 	}
 }
 
-void printDataSpec(FILE* fd, Module* module, ExecEnv* env, DataSpec spec, int64_t value)
+bool addPreCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback)
 {
-	static_assert(N_DS_TYPES == 8, "not all data types are handled");
-	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
-	switch (spec.type) {
-		case DS_VOID: {
-			fprintf(fd, "(void)\n");
-			break;
-		} case DS_BOOL: {
-			fprintf(fd, "(bool)%s\n", value ? "true" : "false");
-			break;
-		} case DS_INT64: {
-			fprintf(fd, "(int64_t)%lld\n", value);
-			break;
-		} case DS_INT32: {
-			fprintf(fd, "(int32_t)%lld\n", value);
-			break;
-		} case DS_INT16: {
-			fprintf(fd, "(int16_t)%lld\n", value);
-			break;
-		} case DS_INT8: {
-			fprintf(fd, "(char)'");
-			fputcesc(fd, value, BYTEFMT_HEX);
-			fprintf(fd, "' // %lld\n", value);
-			break;
-		} case DS_PTR: {
-			if (!spec.ref.type) {
-				spec.ref = classifyPtr(env, module, (void*)value);
-			}
-			sbuf buf = getBufferByRef(env, module, spec.ref);
-			switch (spec.ref.type) {
-				case BUF_DATA:
-					fprintf(fd, "(void*)%s ", module->datablocks.data[spec.ref.id].name);
-					break;
-				case BUF_MEMORY:
-					fprintf(fd, "(void*)%s ", module->memblocks.data[spec.ref.id].name);
-					break;
-				case BUF_VAR:
-					fprintf(fd, "(stackptr_t)sp ");
-					break;
-				case BUF_ARGV:
-					fprintf(fd, "(char*)argv[%d] ", spec.ref.id);
-					break;
-				default:
-					fprintf(fd, "(void*)%p\n", (void*)value);
-					return;
-			}
-
-			if ((uint64_t)value < (uint64_t)buf.data) {
-				fprintf(fd, "- %llu ", (uint64_t)buf.data - (uint64_t)value);
-			} else if ((uint64_t)value > (uint64_t)buf.data) {
-				fprintf(fd, "+ %llu ", (uint64_t)value - (uint64_t)buf.data);
-			}
-			fprintf(fd, "// %p\n", (void*)value);
-			break;
-		} case DS_CONST: {
-			fprintf(fd, "(const int)%s // %lld\n", builtins[spec.symbol_id].name, value);
-			break;
-		}
+	if (!env->exec_callbacks) {
+		env->exec_callbacks = calloc(2 * N_OPS, sizeof(env->exec_callbacks));
+		if (!env->exec_callbacks) return false;
 	}
+	env->exec_callbacks[op_id] = callback;
+	return true;
 }
 
-void printExecState(FILE* fd, ExecEnv* env, Module* module)
+bool addPostCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback)
 {
-	if (env->flags & BRBX_TRACING) {
-		fprintf(fd, "local stack frame:\n");
-		void* cur_stack_pos = env->prev_stack_head;
-		static_assert(N_DS_TYPES == 8, "not all tracer types are handled");
-
-		fprintf(fd, "\t[sp + %ld] start\n", cur_stack_pos - env->stack_head);
-		array_foreach(DataSpec, spec, arrayhead(env->vars)->vars,
-			int64_t input = 0;
-			switch (spec.type) {
-				case DS_VOID:
-					cur_stack_pos -= spec.size;
-					break;
-				case DS_CONST:
-				case DS_INT64:
-				case DS_PTR:
-					input = *(int64_t*)(cur_stack_pos -= 8);
-					break;
-				case DS_INT32:
-					input = (int64_t)*(int32_t*)(cur_stack_pos -= 4);
-					break;
-				case DS_INT16:
-					cur_stack_pos -= 2;
-					input = (int64_t)*(int16_t*)(cur_stack_pos -= 2);
-					break;
-				case DS_BOOL:
-				case DS_INT8:
-					input = (int64_t)*(int8_t*)(--cur_stack_pos);
-					break;
-			}
-			fprintf(fd, "\t[sp + %ld] ", cur_stack_pos - env->stack_head);
-			printDataSpec(fd, module, env, spec, input);
-		);
-		printf("\t[end]\n");
-		fprintf(
-			fd, 
-			"total stack usage: %.3f/%.3f Kb (%.3f%%)\n",
-			(float)getCurStackSize(env, module) / 1024.0f,
-			module->stack_size / 1024.0f,
-			(float)getCurStackSize(env, module) / (float)module->stack_size * 100.0f
-		);
-
-		fprintf(fd, "registers:\n");
-		for (char i = 0; i < N_USER_REGS; i++) {
-			fprintf(fd, "\t[%hhd]\t", i);
-			printDataSpec(fd, module, env, env->regs_trace[i], env->registers[i]);
-		}
-
-		if (env->flags & BRBX_PRINT_MEMBLOCKS) {
-			printf("memory blocks:\n");
-			array_foreach(sbuf, block, env->memblocks, 
-				printf("\t%s: \"", module->memblocks.data[_block].name);
-				putsbufesc(block, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
-				printf("\"\n");
-			);
-		}
-        printf("internal error code: %d (%s)\n", errno, errno ? strerror(errno) : "OK");
+	if (!env->exec_callbacks) {
+		env->exec_callbacks = calloc(2 * N_OPS, sizeof(env->exec_callbacks));
+		if (!env->exec_callbacks) return false;
 	}
-}
-
-BufferRef validateMemoryAccess(ExecEnv* env, Module* module, DataSpec spec, void* ptr, int64_t size)
-{
-	static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
-
-	if (size < 0) {
-		env->exitcode = EC_NEGATIVE_SIZE_ACCESS;
-		env->err_ptr = ptr,
-		env->err_access_length = size;
-		return (BufferRef){0};
-	}
-
-	BufferRef ref;
-	if (spec.type == DS_PTR) {
-		ref = spec.ref;
-	} else {
-		ref = classifyPtr(env, module, ptr);
-	}
-
-	if (!ref.type) {
-		env->exitcode = EC_ACCESS_FAILURE;
-		env->err_access_length = size;
-		env->err_ptr = ptr;
-		return (BufferRef){0};
-	}
-
-	if (ref.type == BUF_VAR && ref.id != env->call_count) {
-		env->exitcode = EC_OUTDATED_LOCALPTR;
-		env->err_ptr = ptr;
-		return (BufferRef){0};
-	}
-
-	sbuf buf = getBufferByRef(env, module, ref);
-	if (!isSlice(ptr, size, buf.data, buf.length)) {
-		env->exitcode = EC_ACCESS_MISALIGNMENT;
-		env->err_buf_ref = ref;
-		env->err_access_length = size;
-		env->err_ptr = ptr;
-		return (BufferRef){0};
-	}
-
-	return ref;
-}
-
-DataSpec getStackSpec(ExecEnv* env, void* ptr, int size)
-{
-	void* cur_stack_pos = env->stack_head;
-	array_rev_foreach(DataSpec, spec, arrayhead(env->vars)->vars,
-		int spec_size = dataSpecSize(spec);
-		if (inRange(ptr, cur_stack_pos, cur_stack_pos + spec_size)) {
-			if (ptr == cur_stack_pos && size <= spec_size) return spec;
-			env->exitcode = EC_ACCESS_FAILURE;
-			env->err_ptr = ptr;
-			env->err_access_length = size;
-			return (DataSpec){.type = DS_VOID};
-		}
-		cur_stack_pos += spec_size;
-	);
-	env->exitcode = EC_ACCESS_FAILURE;
-	env->err_ptr = ptr;
-	env->err_access_length = size;
-	return (DataSpec){.type = DS_VOID};
-}
-
-bool setStackSpec(ExecEnv* env, void* ptr, DataSpec spec)
-{
-	void* cur_stack_pos = env->stack_head;
-	int spec_size = dataSpecSize(spec);
-	array_rev_foreach(DataSpec, cur_spec, arrayhead(env->vars)->vars,
-		int cur_spec_size = dataSpecSize(cur_spec);
-		if (inRange(ptr, cur_stack_pos, cur_stack_pos + cur_spec_size)) {
-			if (ptr == cur_stack_pos && spec.type != DS_VOID) {
-				if (spec_size == cur_spec_size) {
-					arrayhead(env->vars)->vars.data[_cur_spec] = spec;
-					return true;
-				} else if (spec_size < cur_spec_size) {
-					arrayhead(env->vars)->vars.data[_cur_spec] = intSpecFromSize(cur_spec_size);
-					return true;
-				}
-			} else if (spec.type == DS_VOID) return true;
-			return false;
-		}
-		cur_stack_pos += cur_spec_size;
-	);
-	return false;
+	env->exec_callbacks[op_id + N_OPS] = callback;
+	return true;
 }
 
 void setCurrentSrc(ExecEnv* env, Module* module)
@@ -1365,22 +1128,13 @@ bool handleExitSyscall(ExecEnv* env, Module* module)
 
 bool handleWriteSyscall(ExecEnv* env, Module* module)
 {
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[0].type = DS_INT64;
-	}
-
 	env->registers[0] = write(env->registers[0], (char*)env->registers[1], env->registers[2]);
-
 	env->op_id++;
 	return false;
 }
 
 bool handleArgcSyscall(ExecEnv* env, Module* module)
 {
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[0].type = DS_INT32;
-	}
-
 	env->registers[0] = env->exec_argc;
 	env->op_id++;
 	return false;
@@ -1388,16 +1142,6 @@ bool handleArgcSyscall(ExecEnv* env, Module* module)
 
 bool handleArgvSyscall(ExecEnv* env, Module* module)
 {
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[0] = (DataSpec){ 
-			.type = DS_PTR,
-			.ref = (BufferRef){
-				.type = BUF_ARGV,
-				.id = env->registers[0]
-			} 
-		};
-	}
-
 	env->registers[0] = inRange(env->registers[0], 0, env->exec_argc) ? (uint64_t)env->exec_argv[env->registers[0]].data : 0;
 	env->op_id++;
 	return false;
@@ -1405,24 +1149,14 @@ bool handleArgvSyscall(ExecEnv* env, Module* module)
 
 bool handleReadSyscall(ExecEnv* env, Module* module)
 {
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[0].type = DS_INT64;
-	}
-
     env->registers[0] = read(env->registers[0], (void*)env->registers[1], env->registers[2]);
-
     env->op_id++;
     return false;
 }
 
 bool handleGetErrnoSyscall(ExecEnv* env, Module* module)
 {
-    if (env->flags & BRBX_TRACING) {
-        env->regs_trace[0].type = DS_INT32;
-    }
-
     env->registers[0] = errno;
-
     env->op_id++;
     return false;
 }
@@ -1481,11 +1215,6 @@ bool handleOpSet(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = op.value;
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg].type = DS_INT64;
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1494,11 +1223,6 @@ bool handleOpSetr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1507,17 +1231,6 @@ bool handleOpSetd(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)module->datablocks.data[op.symbol_id].spec.data;
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg] = (DataSpec){ 
-			.type = DS_PTR,
-			.ref = (BufferRef){ 
-				.type = BUF_DATA,
-				.id = op.symbol_id
-			}
-		};
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1526,11 +1239,6 @@ bool handleOpSetb(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = builtins[op.symbol_id].value;
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg] = (DataSpec){ .type = DS_CONST, .symbol_id = op.symbol_id };
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1539,17 +1247,6 @@ bool handleOpSetm(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->memblocks.data[op.symbol_id].data;
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg] = (DataSpec){ 
-			.type = DS_PTR,
-			.ref = (BufferRef){
-				.type = BUF_MEMORY,
-				.id = op.symbol_id
-			}
-		};
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1558,26 +1255,6 @@ bool handleOpAdd(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] + op.value;
-
-	if (env->flags &  BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-				break;
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1586,28 +1263,6 @@ bool handleOpAddr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] + env->registers[op.src2_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				if (isIntSpec(env->regs_trace[op.src2_reg])) {
-					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-					break;
-				}
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1616,26 +1271,6 @@ bool handleOpSub(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] - op.value;
-
-	if (env->flags & BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-				break;
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1644,28 +1279,6 @@ bool handleOpSubr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] - env->registers[op.src2_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				if (isIntSpec(env->regs_trace[op.src2_reg])) {
-					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-					break;
-				}
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1678,15 +1291,12 @@ bool handleOpSyscall(ExecEnv* env, Module* module)
 bool handleOpGoto(ExecEnv* env, Module* module)
 {
 	env->op_id += module->execblock.data[env->op_id].op_offset;
-	
-	if (env->flags & BRBX_TRACING) setCurrentSrc(env, module);
 	return false;
 }
 
 bool handleOpCmp(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
 	env->registers[CONDREG1_ID] = env->registers[op.src_reg];
 	env->registers[CONDREG2_ID] = op.value;
 	env->op_id++;
@@ -1696,7 +1306,6 @@ bool handleOpCmp(ExecEnv* env, Module* module)
 bool handleOpCmpr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
 	env->registers[CONDREG1_ID] = env->registers[op.src_reg];
 	env->registers[CONDREG2_ID] = env->registers[op.src2_reg];
 	env->op_id++;
@@ -1707,15 +1316,6 @@ bool handleOpAnd(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] & op.value;
-
-	if (env->flags & BRBX_TRACING) {
-		if (isIntSpec(env->regs_trace[op.src_reg])) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1724,24 +1324,6 @@ bool handleOpAndr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] & env->registers[op.src2_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		bool left_reg_int = isIntSpec(env->regs_trace[op.src_reg]), right_reg_int = isIntSpec(env->regs_trace[op.src2_reg]);
-		if (left_reg_int && right_reg_int) { // TODO: proper estimation of data size
-			if (env->regs_trace[op.src_reg].type > env->regs_trace[op.src2_reg].type) {
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src2_reg];
-			} else {
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-			}
-		} else if (left_reg_int) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-		} else if (right_reg_int) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src2_reg];
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1750,15 +1332,6 @@ bool handleOpOr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] | op.value;
-
-	if (env->flags & BRBX_TRACING) {
-		if (isIntSpec(env->regs_trace[op.src_reg])) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1767,24 +1340,6 @@ bool handleOpOrr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] | env->registers[op.src2_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		bool left_reg_int = isIntSpec(env->regs_trace[op.src_reg]), right_reg_int = isIntSpec(env->regs_trace[op.src2_reg]);
-		if (left_reg_int && right_reg_int) {
-			if (env->regs_trace[op.src_reg].type < env->regs_trace[op.src2_reg].type) {
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src2_reg];
-			} else {
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-			}
-		} else if (left_reg_int) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-		} else if (right_reg_int) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src2_reg];
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1793,11 +1348,6 @@ bool handleOpNot(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = ~env->registers[op.src_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg].type = DS_INT64;
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1806,15 +1356,6 @@ bool handleOpXor(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] ^ op.value;
-
-	if (env->flags & BRBX_TRACING) {
-		if (isIntSpec(env->regs_trace[op.src_reg])) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1823,24 +1364,6 @@ bool handleOpXorr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] ^ env->registers[op.src2_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		bool left_reg_int = isIntSpec(env->regs_trace[op.src_reg]), right_reg_int = isIntSpec(env->regs_trace[op.src2_reg]);
-		if (left_reg_int && right_reg_int) {
-			if (env->regs_trace[op.src_reg].type < env->regs_trace[op.src2_reg].type) {
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src2_reg];
-			} else {
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-			}
-		} else if (left_reg_int) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-		} else if (right_reg_int) {
-			env->regs_trace[op.dst_reg] = env->regs_trace[op.src2_reg];
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1849,26 +1372,6 @@ bool handleOpShl(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] << op.value;
-
-	if (env->flags & BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-				break;
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1877,28 +1380,6 @@ bool handleOpShlr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] << env->registers[op.src2_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				if (isIntSpec(env->regs_trace[op.src2_reg])) {
-					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-					break;
-				}
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1907,26 +1388,6 @@ bool handleOpShr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >> op.value;
-
-	if (env->flags & BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-				break;
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1935,28 +1396,6 @@ bool handleOpShrr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >> env->registers[op.src2_reg];
-
-	if (env->flags & BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				if (isIntSpec(env->regs_trace[op.src2_reg])) {
-					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-					break;
-				}
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1965,26 +1404,6 @@ bool handleOpShrs(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >> op.value;
-
-	if (env->flags & BRBX_TRACING) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-				break;
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -1993,28 +1412,6 @@ bool handleOpShrsr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >> env->registers[op.src2_reg];
-
-	if (env->flags & (BRBX_TRACING)) {
-		switch (env->regs_trace[op.src_reg].type) {
-			case DS_PTR:
-				if (isIntSpec(env->regs_trace[op.src2_reg])) {
-					env->regs_trace[op.dst_reg] = env->regs_trace[op.src_reg];
-					break;
-				}
-			default:
-				if (env->registers[op.dst_reg] >= (1L << 32)) {
-					env->regs_trace[op.dst_reg].type = DS_INT64;
-				} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-					env->regs_trace[op.dst_reg].type = DS_INT32;
-				} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-					env->regs_trace[op.dst_reg].type = DS_INT16;
-				} else {
-					env->regs_trace[op.dst_reg].type = DS_INT8;
-				}
-				break;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -2022,22 +1419,6 @@ bool handleOpShrsr(ExecEnv* env, Module* module)
 bool handleOpCall(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-	if (env->flags & BRBX_TRACING) {
-		if (env->stack_brk > env->stack_head - 16) {
-			env->exitcode = EC_STACK_OVERFLOW;
-			env->err_push_size = 16;
-			return true;
-		}
-
-		ProcFrameArray_append(
-			&env->vars,
-			(ProcFrame){
-				.call_id = ++env->call_count,
-				.prev_opid = env->op_id,
-				.vars = DataSpecArray_new(0)
-			}
-		);
-	}
 
 	env->stack_head -= 8;
 	*(int64_t*)env->stack_head = env->op_id + 1;
@@ -2048,27 +1429,11 @@ bool handleOpCall(ExecEnv* env, Module* module)
 
 	env->op_id = op.symbol_id;
 
-	if (env->flags & BRBX_TRACING) setCurrentSrc(env, module);
-
 	return false;
 }
 
 bool handleOpRet(ExecEnv* env, Module* module)
 {
-	if (env->flags & BRBX_TRACING) {
-		if (env->stack_head + 16 > env->stack_brk + module->stack_size) {
-			env->exitcode = EC_STACK_UNDERFLOW;
-			env->err_pop_size = 16;
-			return true;
-		}
-
-		if (env->vars.length == 1) {
-			env->exitcode = EC_NO_STACKFRAME;
-			return true;
-		}
-		env->vars.length--;
-	}
-
 	env->stack_head = env->prev_stack_head;
 	env->prev_stack_head = *(void**)env->stack_head;
 	env->stack_head += sizeof(env->prev_stack_head);
@@ -2076,33 +1441,12 @@ bool handleOpRet(ExecEnv* env, Module* module)
 	env->op_id = *(int64_t*)env->stack_head;
 	env->stack_head += 8;
 
-	if (env->flags & BRBX_TRACING) setCurrentSrc(env, module);
-
 	return false;
 }
 
 bool handleOpLd64(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
-			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-				if (!env->exitcode) {
-					env->exitcode = EC_UNDEFINED_STACK_LOAD;
-					env->err_ptr = (void*)env->registers[op.src_reg];
-				}
-				return true;
-			}
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	env->registers[op.dst_reg] = *(int64_t*)env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2111,25 +1455,6 @@ bool handleOpLd64(ExecEnv* env, Module* module)
 bool handleOpStr64(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 8);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			if (!setStackSpec(
-				env,
-				(void*)env->registers[op.dst_reg],
-				dataSpecSize(env->regs_trace[op.src_reg]) == 8 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
-			)) {
-				env->exitcode = EC_ACCESS_FAILURE;
-				env->err_ptr = (void*)env->registers[op.dst_reg];
-				env->err_access_length = 8;
-				return true;
-			}
-		}
-	}
-
 	*(int64_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2138,25 +1463,6 @@ bool handleOpStr64(ExecEnv* env, Module* module)
 bool handleOpLd32(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 4);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 4);
-			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-				if (!env->exitcode) {
-					env->exitcode = EC_UNDEFINED_STACK_LOAD;
-					env->err_ptr = (void*)env->registers[op.src_reg];
-				}
-				return true;
-			}
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT32;
-		}
-	}
-
 	env->registers[op.dst_reg] = *(int32_t*)env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2165,25 +1471,6 @@ bool handleOpLd32(ExecEnv* env, Module* module)
 bool handleOpStr32(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 4);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			if (!setStackSpec(
-				env,
-				(void*)env->registers[op.dst_reg], 
-				dataSpecSize(env->regs_trace[op.src_reg]) == 4 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
-			)) {
-				env->exitcode = EC_ACCESS_FAILURE;
-				env->err_ptr = (void*)env->registers[op.dst_reg];
-				env->err_access_length = 4;
-				return true;
-			}
-		}
-	}
-
 	*(int32_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2192,25 +1479,6 @@ bool handleOpStr32(ExecEnv* env, Module* module)
 bool handleOpLd16(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 2);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 2);
-			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-				if (!env->exitcode) {
-					env->exitcode = EC_UNDEFINED_STACK_LOAD;
-					env->err_ptr = (void*)env->registers[op.src_reg];
-				}
-				return true;
-			}
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT16;
-		}
-	}
-
 	env->registers[op.dst_reg] = *(int16_t*)env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2219,25 +1487,6 @@ bool handleOpLd16(ExecEnv* env, Module* module)
 bool handleOpStr16(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 2);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			if (!setStackSpec(
-				env,
-				(void*)env->registers[op.dst_reg], 
-				dataSpecSize(env->regs_trace[op.src_reg]) == 2 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
-			)) {
-				env->exitcode = EC_ACCESS_FAILURE;
-				env->err_ptr = (void*)env->registers[op.dst_reg];
-				env->err_access_length = 2;
-				return true;
-			}
-		}
-	}
-
 	*(int16_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2246,25 +1495,6 @@ bool handleOpStr16(ExecEnv* env, Module* module)
 bool handleOpLd8(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 1);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 1);
-			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-				if (!env->exitcode) {
-					env->exitcode = EC_UNDEFINED_STACK_LOAD;
-					env->err_ptr = (void*)env->registers[op.src_reg];
-				}
-				return true;
-			}
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT8;
-		}
-	}
-
 	env->registers[op.dst_reg] = *(int8_t*)env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2273,25 +1503,6 @@ bool handleOpLd8(ExecEnv* env, Module* module)
 bool handleOpStr8(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.dst_reg], (void*)env->registers[op.dst_reg], 1);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			if (!setStackSpec(
-				env,
-				(void*)env->registers[op.dst_reg],
-				dataSpecSize(env->regs_trace[op.src_reg]) == 1 ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
-			)) {
-				env->exitcode = EC_ACCESS_FAILURE;
-				env->err_ptr = (void*)env->registers[op.dst_reg];
-				env->err_access_length = 1;
-				return true;
-			}
-		}
-	}
-
 	*(int8_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2300,23 +1511,6 @@ bool handleOpStr8(ExecEnv* env, Module* module)
 bool handleOpVar(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		DataSpecArray_append(
-			&arrayhead(env->vars)->vars, 
-			(DataSpec){
-				.type = DS_VOID,
-				.size = op.new_var_size
-			}
-		);
-
-		if (env->stack_head - op.new_var_size < env->stack_brk) {
-			env->exitcode = EC_STACK_OVERFLOW;
-			env->err_push_size = op.new_var_size;
-			return true;
-		}
-	}
-
 	env->stack_head -= op.new_var_size;
 	env->op_id++;
 	return false;
@@ -2325,17 +1519,6 @@ bool handleOpVar(ExecEnv* env, Module* module)
 bool handleOpSetv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-	
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg] = (DataSpec){
-			.type = DS_PTR,
-			.ref = (BufferRef){
-				.type = BUF_VAR,
-				.id = arrayhead(env->vars)->call_id
-			}
-		};
-	}
-
 	env->registers[op.dst_reg] = (int64_t)env->stack_head + op.symbol_id;
 	env->op_id++;
 	return false;
@@ -2344,21 +1527,7 @@ bool handleOpSetv(ExecEnv* env, Module* module)
 bool handleOpMul(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
 	env->registers[op.dst_reg] = env->registers[op.src_reg] * (uint64_t)op.value;
-	
-	if (env->flags & BRBX_TRACING) {
-		if (env->registers[op.dst_reg] >= (1L << 32)) {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-			env->regs_trace[op.dst_reg].type = DS_INT32;
-		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-			env->regs_trace[op.dst_reg].type = DS_INT16;
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT8;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -2366,21 +1535,7 @@ bool handleOpMul(ExecEnv* env, Module* module)
 bool handleOpMulr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
 	env->registers[op.dst_reg] = env->registers[op.src_reg] * env->registers[op.src2_reg];
-	
-	if (env->flags & BRBX_TRACING) {
-		if (env->registers[op.dst_reg] >= (1L << 32)) {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-			env->regs_trace[op.dst_reg].type = DS_INT32;
-		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-			env->regs_trace[op.dst_reg].type = DS_INT16;
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT8;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -2388,26 +1543,7 @@ bool handleOpMulr(ExecEnv* env, Module* module)
 bool handleOpDiv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
 	env->registers[op.dst_reg] = env->registers[op.src_reg] / (uint64_t)op.value;
-	
-	if (env->flags & BRBX_TRACING) {
-		if (!op.value) {
-			env->exitcode = EC_ZERO_DIVISION;
-			return true;
-		}
-
-		if (env->registers[op.dst_reg] >= (1L << 32)) {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-			env->regs_trace[op.dst_reg].type = DS_INT32;
-		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-			env->regs_trace[op.dst_reg].type = DS_INT16;
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT8;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -2415,26 +1551,7 @@ bool handleOpDiv(ExecEnv* env, Module* module)
 bool handleOpDivr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
 	env->registers[op.dst_reg] = env->registers[op.src_reg] / env->registers[op.src2_reg];
-	
-	if (env->flags & BRBX_TRACING) {
-		if (!env->registers[op.src2_reg]) {
-			env->exitcode = EC_ZERO_DIVISION;
-			return true;
-		}
-
-		if (env->registers[op.dst_reg] >= (1L << 32)) {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-			env->regs_trace[op.dst_reg].type = DS_INT32;
-		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-			env->regs_trace[op.dst_reg].type = DS_INT16;
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT8;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -2442,26 +1559,7 @@ bool handleOpDivr(ExecEnv* env, Module* module)
 bool handleOpDivs(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] / op.value;
-	
-	if (env->flags & BRBX_TRACING) {
-		if (!op.value) {
-			env->exitcode = EC_ZERO_DIVISION;
-			return true;
-		}
-
-		if (env->registers[op.dst_reg] >= (1L << 32)) {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-			env->regs_trace[op.dst_reg].type = DS_INT32;
-		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-			env->regs_trace[op.dst_reg].type = DS_INT16;
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT8;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -2469,26 +1567,7 @@ bool handleOpDivs(ExecEnv* env, Module* module)
 bool handleOpDivsr(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] / (int64_t)env->registers[op.src2_reg];
-	
-	if (env->flags & BRBX_TRACING) {
-		if (!env->registers[op.src2_reg]) {
-			env->exitcode = EC_ZERO_DIVISION;
-			return true;
-		}
-
-		if (env->registers[op.dst_reg] >= (1L << 32)) {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		} else if (env->registers[op.dst_reg] >= (1 << 16)) {
-			env->regs_trace[op.dst_reg].type = DS_INT32;
-		} else if (env->registers[op.dst_reg] >= (1 << 8)) {
-			env->regs_trace[op.dst_reg].type = DS_INT16;
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT8;
-		}
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -2496,18 +1575,6 @@ bool handleOpDivsr(ExecEnv* env, Module* module)
 bool handleOpLdv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg] = getStackSpec(env, env->stack_head + op.symbol_id, op.var_size);
-		if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-			if (!env->exitcode) {
-				env->exitcode = EC_UNDEFINED_STACK_LOAD;
-				env->err_ptr = env->stack_head + op.symbol_id;
-			}
-			return true;
-		}
-	}
-
 	env->registers[op.dst_reg] = 0;
 	memcpy(env->registers + op.dst_reg, env->stack_head + op.symbol_id, op.var_size);
 	env->op_id++;
@@ -2517,20 +1584,6 @@ bool handleOpLdv(ExecEnv* env, Module* module)
 bool handleOpStrv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		if (!setStackSpec(
-			env,
-			env->stack_head + op.symbol_id,
-			dataSpecSize(env->regs_trace[op.src_reg]) == op.var_size ? env->regs_trace[op.src_reg] : (DataSpec){.type = DS_VOID}
-		)) {
-			env->exitcode = EC_ACCESS_FAILURE;
-			env->err_ptr = env->stack_head + op.symbol_id;
-			env->err_access_length = 2;
-			return true;
-		}
-	}
-
 	memcpy(env->stack_head + op.symbol_id, env->registers + op.src_reg, op.var_size);
 	env->op_id++;
 	return false;
@@ -2539,24 +1592,6 @@ bool handleOpStrv(ExecEnv* env, Module* module)
 bool handleOpPopv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		if (env->stack_head + op.var_size > env->stack_brk + module->stack_size) {
-			env->exitcode = EC_STACK_UNDERFLOW;
-			env->err_pop_size = op.var_size;
-			return true;
-		}
-
-		env->regs_trace[op.dst_reg] = DataSpecArray_pop(&arrayhead(env->vars)->vars, -1);
-		if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-			if (!env->exitcode) {
-				env->exitcode = EC_UNDEFINED_STACK_LOAD;
-				env->err_ptr = env->stack_head;
-			}
-			return true;
-		}
-	}
-
 	env->registers[op.dst_reg] = 0;
 	memcpy(env->registers + op.dst_reg, env->stack_head, op.var_size);
 	env->stack_head += op.var_size;
@@ -2567,20 +1602,6 @@ bool handleOpPopv(ExecEnv* env, Module* module)
 bool handleOpPushv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		DataSpecArray_append(
-			&arrayhead(env->vars)->vars,
-			dataSpecSize(env->regs_trace[op.src_reg]) == op.var_size ? env->regs_trace[op.src_reg] : intSpecFromSize(op.var_size)
-		);
-
-		if (env->stack_head - op.var_size < env->stack_brk) {
-			env->exitcode = EC_STACK_OVERFLOW;
-			env->err_push_size = op.var_size;
-			return true;
-		}
-	}
-
 	memcpy((env->stack_head -= op.var_size), env->registers + op.src_reg, op.var_size);
 	env->op_id++;
 	return false;
@@ -2605,11 +1626,6 @@ bool handleOpSetc(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = handleCondition(env, op.cond_arg);
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg] = (DataSpec){.type = DS_BOOL};
-	}
-
 	env->op_id++;
 	return false;
 }
@@ -2617,18 +1633,6 @@ bool handleOpSetc(ExecEnv* env, Module* module)
 bool handleOpDelnv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-	if (env->flags & BRBX_TRACING) {
-		if (env->stack_head + op.symbol_id > env->stack_brk + module->stack_size) {
-			env->exitcode = EC_STACK_UNDERFLOW;
-			env->err_pop_size = op.symbol_id;
-			return true;
-		}
-		uint64_t offset = op.symbol_id;
-		DataSpecArray* stack = &(arrayhead(env->vars)->vars);
-		while (offset > 0) { offset -= dataSpecSize(stack->data[stack->length - 1]); stack->length--; }
-	}
-// somehow, if in this function there is an odd amount of `printf` function calls, the function results in a segfault, WTF
-// DO NOT TOUCH THIS FUNCTION
 	env->stack_head += op.symbol_id;
 	env->op_id++;
 	return false;
@@ -2637,25 +1641,6 @@ bool handleOpDelnv(ExecEnv* env, Module* module)
 bool handleOpLd64S(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 8);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 8);
-			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-				if (!env->exitcode) {
-					env->exitcode = EC_UNDEFINED_STACK_LOAD;
-					env->err_ptr = (void*)env->registers[op.src_reg];
-				}
-				return true;
-			}
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	*(int64_t*)(env->registers + op.dst_reg) = *(int64_t*)env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2664,25 +1649,6 @@ bool handleOpLd64S(ExecEnv* env, Module* module)
 bool handleOpLd32S(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 4);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 4);
-			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-				if (!env->exitcode) {
-					env->exitcode = EC_UNDEFINED_STACK_LOAD;
-					env->err_ptr = (void*)env->registers[op.src_reg];
-				}
-				return true;
-			}
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	*(int64_t*)(env->registers + op.dst_reg) = *(int32_t*)env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2691,25 +1657,6 @@ bool handleOpLd32S(ExecEnv* env, Module* module)
 bool handleOpLd16S(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 2);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 2);
-			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-				if (!env->exitcode) {
-					env->exitcode = EC_UNDEFINED_STACK_LOAD;
-					env->err_ptr = (void*)env->registers[op.src_reg];
-				}
-				return true;
-			}
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	*(int64_t*)(env->registers + op.dst_reg) = *(int16_t*)env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2718,25 +1665,6 @@ bool handleOpLd16S(ExecEnv* env, Module* module)
 bool handleOpLd8S(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		BufferRef ref = validateMemoryAccess(env, module, env->regs_trace[op.src_reg], (void*)env->registers[op.src_reg], 1);
-		if (!ref.type) {
-			return true;
-		} else if (ref.type == BUF_VAR) {
-			env->regs_trace[op.dst_reg] = getStackSpec(env, (void*)env->registers[op.src_reg], 1);
-			if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-				if (!env->exitcode) {
-					env->exitcode = EC_UNDEFINED_STACK_LOAD;
-					env->err_ptr = (void*)env->registers[op.src_reg];
-				}
-				return true;
-			}
-		} else {
-			env->regs_trace[op.dst_reg].type = DS_INT64;
-		}
-	}
-
 	*(int64_t*)(env->registers + op.dst_reg) = *(int8_t*)env->registers[op.src_reg];
 	env->op_id++;
 	return false;
@@ -2745,18 +1673,6 @@ bool handleOpLd8S(ExecEnv* env, Module* module)
 bool handleOpLdvs(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg] = getStackSpec(env, env->stack_head + op.symbol_id, op.var_size);
-		if (env->regs_trace[op.dst_reg].type == DS_VOID) {
-			if (!env->exitcode) {
-				env->exitcode = EC_UNDEFINED_STACK_LOAD;
-				env->err_ptr = env->stack_head + op.symbol_id;
-			}
-			return true;
-		}
-	}
-
 	env->registers[op.dst_reg] = 0;
 	memcpy(env->registers + op.dst_reg, env->stack_head + op.symbol_id, op.var_size);
 	if (op.var_size < 8 ? env->registers[op.dst_reg] & (1LL << (op.var_size * 8 - 1)) : false) {
@@ -2769,11 +1685,6 @@ bool handleOpLdvs(ExecEnv* env, Module* module)
 bool handleOpSx32(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg].type = DS_INT64;
-	}
-
 	*(int64_t*)(env->registers + op.dst_reg) = *(int32_t*)(env->registers + op.src_reg);
 	env->op_id++;
 	return false;
@@ -2782,11 +1693,6 @@ bool handleOpSx32(ExecEnv* env, Module* module)
 bool handleOpSx16(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg].type = DS_INT64;
-	}
-
 	*(int64_t*)(env->registers + op.dst_reg) = *(int16_t*)(env->registers + op.src_reg);
 	env->op_id++;
 	return false;
@@ -2795,12 +1701,39 @@ bool handleOpSx16(ExecEnv* env, Module* module)
 bool handleOpSx8(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-
-	if (env->flags & BRBX_TRACING) {
-		env->regs_trace[op.dst_reg].type = DS_INT64;
-	}
-
 	*(int64_t*)(env->registers + op.dst_reg) = *(int8_t*)(env->registers + op.src_reg);
+	env->op_id++;
+	return false;
+}
+
+bool handleOpMod(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] % op.value;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpMods(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] % (int64_t)op.value;
+	env->op_id++;
+	return false;
+}
+
+bool handleOpModr(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = env->registers[op.src_reg] % env->registers[op.src2_reg];
+	env->op_id++;
+	return false;
+}
+
+bool handleOpModsr(ExecEnv* env, Module* module)
+{
+	Op op = module->execblock.data[env->op_id];
+	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] % (int64_t)env->registers[op.src2_reg];
 	env->op_id++;
 	return false;
 }
@@ -2871,114 +1804,33 @@ ExecHandler op_handlers[] = {
 	[OP_LDVS] = &handleOpLdvs,
 	[OP_SX32] = &handleOpSx32,
 	[OP_SX16] = &handleOpSx16,
-	[OP_SX8] = &handleOpSx8
+	[OP_SX8] = &handleOpSx8,
+	[OP_MOD] = &handleOpMod,
+	[OP_MODS] = &handleOpMods,
+	[OP_MODR] = &handleOpModr,
+	[OP_MODSR] = &handleOpModsr
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 
-void printRuntimeError(FILE* fd, ExecEnv* env, Module* module)
+void execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
 {
-	if (env->exitcode < 0) {
-		if (env->src_path) {
-			fprintf(fd, "%s:%d [0x%04x]:\n", env->src_path, env->src_line, env->op_id);
-		} else fprintf(fd, "0x%04x:\n", env->op_id);
-
-		switch (env->exitcode) {
-			case EC_NO_STACKFRAME:
-				fprintf(fd,"\truntime error: attempted to return from a global stack frame\n");
-				break;
-			case EC_ZERO_DIVISION:
-				fprintf(fd, "\truntime error: attempted to divide by zero\n");
-				break;
-			case EC_OUTDATED_LOCALPTR:
-				fprintf(fd, "\truntime error: attempted to use an outdated stack pointer\n");
-				fprintf(fd, "\tpointer %p references already deallocated stack frame\n", env->err_ptr);
-				break;
-			case EC_UNDEFINED_STACK_LOAD:
-				fprintf(fd, "\truntime error: attempted to read from an unused stack variable\n");
-				fprintf(fd, "\tstack variable with undefined value is at %p\n", env->err_ptr);
-				break;
-			case EC_ACCESS_FAILURE:
-				fprintf(fd,"\truntime error: memory access failure\n");
-				fprintf(fd,
-					"\tattempted to access %lld bytes from %p, which is not in bounds of the stack, the heap or any of the buffers\n",
-					env->err_access_length,
-					env->err_ptr
-				);
-				break;
-			case EC_NEGATIVE_SIZE_ACCESS:
-				fprintf(fd,"\truntime error: negative sized memory access\n");
-				fprintf(fd,
-					"\tattempted to access %lld bytes at %p; accessing memory by negative size is not allowed\n",
-					env->err_access_length, 
-					env->err_ptr
-				);
-				break;
-			case EC_STACK_OVERFLOW:
-				fprintf(fd,"\truntime error: stack overflow\n");
-				fprintf(fd,"\tattempted to expand the stack by %hhd bytes, overflowing the stack\n", env->err_push_size);
-				break;
-			case EC_STACK_UNDERFLOW:
-				fprintf(fd,"\truntime error: stack underflow\n");
-				fprintf(fd,"\tattempted to decrease the stack by %hhd bytes, underflowing the stack\n", env->err_pop_size);
-				break;
-			case EC_UNKNOWN_SYSCALL:
-				fprintf(fd,"\truntime error: invalid system call\n");
-				break;
-			case EC_ACCESS_MISALIGNMENT:
-				fprintf(fd,"\truntime error: misaligned memory access\n");
-				sbuf err_buf = getBufferByRef(env, module, env->err_buf_ref);
-				static_assert(N_BUF_TYPES == 5, "not all buffer types are handled");
-				switch (env->err_buf_ref.type) {
-					case BUF_DATA:
-						fprintf(fd,
-							"\tdata block `%s` is at %p\n\tblock size: %ld bytes\n",
-							module->datablocks.data[env->err_buf_ref.id].name,
-							(void*)err_buf.data,
-							err_buf.length
-						);
-						break;
-					case BUF_MEMORY:
-						fprintf(fd,
-							"\tmemory block `%s` is at %p\n\tblock size: %ld bytes\n",
-							module->memblocks.data[env->err_buf_ref.id].name,
-							(void*)err_buf.data,
-							err_buf.length
-						);
-						break;
-					case BUF_VAR:
-						fprintf(fd,"\tstack head is at %p\n\tstack size: %ld bytes\n", err_buf.data, err_buf.length);
-						break;
-					case BUF_ARGV:
-						fprintf(fd,"\targument #%d is at %p\n\targument length: %ld bytes\n", env->err_buf_ref.id, err_buf.data, err_buf.length);
-						break;
-					default: break;
-				}
-				fprintf(fd,"\tattempted to access %lld bytes from %p\n", env->err_access_length, env->err_ptr);
-				if (env->err_ptr < (void*)err_buf.data) {
-					fprintf(fd,"\tthe accessed field is %lld bytes before the start of the buffer\n", (int64_t)(err_buf.data - (int64_t)env->err_ptr));
-				} else if ((void*)(env->err_ptr + env->err_access_length) > (void*)(err_buf.data + err_buf.length)) {
-					fprintf(fd,
-						"\tthe accessed field exceeds the buffer by %lld bytes\n", 
-						(int64_t)(env->err_ptr + env->err_access_length - ((int64_t)err_buf.data + err_buf.length))
-					);
-				}
-				break;
-		}
-	}
-}
-
-ExecEnv execModule(Module* module, int8_t flags, char** args, volatile bool* interruptor)
-{
-	ExecEnv env = initExecEnv(module, flags, args);
 	while (true) {
-		if (module->execblock.data[env.op_id].cond_id) {
-			if (!handleCondition(&env, module->execblock.data[env.op_id].cond_id)) {
-				env.op_id++;
+		if (module->execblock.data[env->op_id].cond_id) {
+			if (!handleCondition(env, module->execblock.data[env->op_id].cond_id)) {
+				env->op_id++;
 				continue;
 			}
 		}
+		Op* op = module->execblock.data + env->op_id;
+		if (env->exec_callbacks)
+			if (env->exec_callbacks[op->type])
+				if (env->exec_callbacks[op->type](env, module)) break;
+
+		if (op_handlers[op->type](env, module)) break;
+
+		if (env->exec_callbacks)
+			if (env->exec_callbacks[N_OPS + op->type])
+				if (env->exec_callbacks[N_OPS + op->type](env, module)) break;
 		if (interruptor ? *interruptor : false) break;
-		if (op_handlers[module->execblock.data[env.op_id].type](&env, module)) break;
 	}
-	return env;
 }

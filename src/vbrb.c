@@ -77,6 +77,10 @@ typedef enum {
 	KW_SX32,
 	KW_SX16,
 	KW_SX8,
+	KW_MOD,
+	KW_MODS,
+	KW_MODR,
+	KW_MODSR,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -104,7 +108,7 @@ typedef enum {
 	KW_LOAD,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 66, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 70, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 typedef struct {
@@ -958,7 +962,11 @@ OpCompiler op_compilers[] = {
 	[OP_LDVS] = &compileOpLdv,
 	[OP_SX32] = &compile2RegOp,
 	[OP_SX16] = &compile2RegOp,
-	[OP_SX8] = &compile2RegOp
+	[OP_SX8] = &compile2RegOp,
+	[OP_MOD] = &compile2RegImmOp,
+	[OP_MODS] = &compile2RegImmOp,
+	[OP_MODR] = &compile3RegOp,
+	[OP_MODSR] = &compile3RegOp
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 

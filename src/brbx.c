@@ -16,21 +16,16 @@ void printUsageMsg(FILE* fd, char* exec_name)
 	fprintf(fd, "usage: %s [-chmrs] <file> [module-args...]\n", exec_name);
 	fprintf(fd, "options:\n");
 	fprintf(fd, "\t-h     Output this message and exit\n");
-	fprintf(fd, "\t-t     Trace data alignment and validate arguments to the operations. Provides precise error tracking and verbose reporting\n");
-	fprintf(fd, "\t-m     Output contents of memory blocks after execution of the module\n");
 }
 
 int main(int argc, char* argv[]) {
 	initBREnv();
 	char *input_name = NULL, **module_argv = NULL;
-	uint8_t exec_flags = 0;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
 			for (argv[i]++; *argv[i]; argv[i]++) {
 				switch (*argv[i]) {
 					case 'h': printUsageMsg(stdout, argv[0]); return 0;
-					case 't': exec_flags |= BRBX_TRACING; break;
-					case 'm': exec_flags |= BRBX_PRINT_MEMBLOCKS; break;
 					default: eprintf("error: unknown option `-%c`\n", *argv[i]); return 1;
 				}
 			}
@@ -64,11 +59,10 @@ int main(int argc, char* argv[]) {
 	}
 
 	signal(SIGINT, &handleExecInt);
-	ExecEnv res = execModule(&module, exec_flags, module_argv, &interrupt);
+	ExecEnv env;
+	initExecEnv(&env, &module, module_argv);
+	execModule(&env, &module, &interrupt);
 	signal(SIGINT, SIG_DFL);
 
-	printExecState(stdout, &res, &module);
-	printRuntimeError(stderr, &res, &module);
-
-	return res.exitcode;
+	return env.exitcode;
 }

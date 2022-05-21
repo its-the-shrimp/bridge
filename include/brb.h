@@ -70,6 +70,10 @@ typedef enum {
 	OP_SX32, // uses Op::dst_reg and Op::src_reg
 	OP_SX16, // uses Op::dst_reg and Op::src_reg
 	OP_SX8, // uses Op::dst_reg and Op::src_reg
+	OP_MOD, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_MODS, // uses Op::dst_reg, Op::src_reg and Op::value
+	OP_MODR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_MODSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	N_OPS
 } OpType;
 
@@ -139,7 +143,11 @@ typedef enum {
 	BRP_KEYWORD("ldvs"), \
 	BRP_KEYWORD("sx32"), \
 	BRP_KEYWORD("sx16"), \
-	BRP_KEYWORD("sx8") \
+	BRP_KEYWORD("sx8"), \
+	BRP_KEYWORD("mod"), \
+	BRP_KEYWORD("mods"), \
+	BRP_KEYWORD("modr"), \
+	BRP_KEYWORD("modsr") \
 
 static sbuf opNames[] = { _opNames };
 
@@ -393,106 +401,32 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 void printVBRBError(FILE* dst, VBRBError err);
 void cleanupVBRBCompiler(VBRBError status);
 
-typedef enum {
-	DS_INT8,
-	DS_INT16,
-	DS_VOID,
-	DS_INT32,
-	DS_BOOL,
-	DS_CONST,
-	DS_PTR,
-	DS_INT64,
-	N_DS_TYPES
-} DataType;
-
-static const char DataTypeSizes[] = {
-	[DS_INT8] = 1,
-	[DS_INT16] = 2,
-	[DS_VOID] = 0,
-	[DS_INT32] = 4,
-	[DS_BOOL] = 1,
-	[DS_CONST] = 8,
-	[DS_PTR] = 8,
-	[DS_INT64] = 8,
-};
-static_assert(N_DS_TYPES == sizeof(DataTypeSizes), "not all tracers have their sizes set");
-#define dataSpecSize(spec) ( (spec).type != DS_VOID ? DataTypeSizes[(spec).type] : (spec).size )
-#define intSpecFromSize(size) ((DataSpec){.type = (size) - 1})
-#define isIntSpec(spec) ( spec.type != DS_VOID && spec.type != DS_CONST && spec.type != DS_PTR )
-
-typedef enum {
-	BUF_UNKNOWN,
-	BUF_DATA,
-	BUF_MEMORY,
-	BUF_VAR,
-	BUF_ARGV,
-	N_BUF_TYPES
-} BufferRefType;
-
-typedef struct {
-	int8_t type;
-	int id;
-} BufferRef;
-
-typedef struct {
-	int8_t type;
-	union { // type-specific parameters
-		BufferRef ref; // for DS_PTR
-		int64_t symbol_id; // for DS_CONST
-		int64_t size; // for DS_VOID
-		char* mark_name; // for DS_PROCFRAME of DS_FRAME
-	};
-} DataSpec;
-declArray(DataSpec);
-
-typedef struct {
-	DataSpecArray vars;
-	int64_t prev_opid;
-	int64_t call_id;
-} ProcFrame;
-declArray(ProcFrame);
-
 #define N_REGS 10
 #define N_USER_REGS 8
 #define CONDREG1_ID 8
 #define CONDREG2_ID 9
 #define DEFAULT_STACK_SIZE 512 // 512 Kb, just like in JVM
 
-#define BRBX_TRACING         0b00000001 // used in execModule function to enable value tracing, it helps in debugging memory access errors, but reduces execution speed
 #define BRB_EXECUTABLE       0b00000010 // used in loadModule function to make the loaded module executable with execModule
-#define BRBX_PRINT_MEMBLOCKS 0b00001000
 
-typedef struct {
-	sbuf heap;
+
+typedef struct execEnv {
 	void* stack_brk;
 	void* stack_head;
 	void* prev_stack_head;
 	sbufArray memblocks;
-	int8_t exitcode;
+	uint8_t exitcode;
 	int op_id;
 	uint64_t* registers;
-	union {
-		int8_t err_pop_size; // for OP_POP*
-		int8_t err_push_size; // for OP_PUSH*
-		struct {
-			int64_t err_access_length;
-			union {
-				BufferRef err_buf_ref;
-				int err_spec_id;
-				int8_t err_var_size;
-			};
-			void* err_ptr;
-		};
-	};
 	int8_t flags;
-	DataSpec* regs_trace; // initialized only if BRBX_TRACING flag is set
-	ProcFrameArray vars; // initialized only if BRBX_TRACING flag is set
 	int exec_argc;
 	sbuf* exec_argv;
-	int64_t call_count;
 	char* src_path;
 	int src_line;
+	bool (**exec_callbacks) (struct execEnv*, Module*);
 } ExecEnv;
+
+typedef bool (*ExecCallback) (ExecEnv*, Module*);
 
 #define getCurStackSize(execenv_p, module_p) (int64_t)((execenv_p)->stack_brk + (module_p)->stack_size - (execenv_p)->stack_head)
 
@@ -503,8 +437,9 @@ void resolveModule(Module* dst, bool for_exec);
 BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);
 void printLoadError(BRBLoadError err);
-ExecEnv execModule(Module* module, int8_t flags, char** args, volatile bool* interruptor);
-void printExecState(FILE* fd, ExecEnv* env, Module* module);
-void printRuntimeError(FILE* fd, ExecEnv* env, Module* module);
+void initExecEnv(ExecEnv* env, Module* module, char** args);
+bool addPreCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback);
+bool addPostCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback);
+void execModule(ExecEnv* env, Module* module, volatile bool* interruptor);
 
 #endif // _BRB_

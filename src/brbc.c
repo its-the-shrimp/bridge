@@ -1013,6 +1013,162 @@ void compileOpSx8Native(Module* module, int index, CompCtx* ctx)
 	fprintf(ctx->dst, "\tsxtb x%hhd, w%hhd\n", op.dst_reg, op.src_reg);
 }
 
+void compileOpModNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	if (op.dst_reg == op.src_reg) {
+		if (op.value < 4096) {
+			fprintf(
+				ctx->dst,
+				"\tmov x8, x%1$hhd\n"
+				"\tudiv x%1$hhd, x%1$hhd, %2$lld\n"
+				"\tmul x%1$hhd, x%1$hhd, %2$lld\n"
+				"\tsub x%1$hhd, x8, x%1$hhd\n",
+				op.dst_reg, op.value
+			);
+		} else {
+			compileNativeImmSet(ctx->dst, 9, op.value);
+			fprintf(
+				ctx->dst,
+				"\tmov x8, x%1$hhd\n"
+				"\tudiv x%1$hhd, x%1$hhd, x9\n"
+				"\tmul x%1$hhd, x%1$hhd, x9\n"
+				"\tsub x%1$hhd, x8, x%1$hhd\n",
+				op.dst_reg
+			);
+		}
+	} else {
+		if (op.value < 4096) {
+			fprintf(
+				ctx->dst,
+				"\tudiv x%1$hhd, x%1$hhd, %2$lld\n"
+				"\tmul x%1$hhd, x%1$hhd, %2$lld\n"
+				"\tsub x%1$hhd, x%3$hhd, x%1$hhd\n",
+				op.dst_reg, op.value, op.src_reg
+			);
+		} else {
+			compileNativeImmSet(ctx->dst, 8, op.value);
+			fprintf(
+				ctx->dst,
+				"\tudiv x%1$hhd, x%1$hhd, x9\n"
+				"\tmul x%1$hhd, x%1$hhd, x9\n"
+				"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
+				op.dst_reg, op.src_reg
+			);
+		}
+	}
+}
+
+void compileOpModsNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	if (op.dst_reg == op.src_reg) {
+		if (op.value < 4096) {
+			fprintf(
+				ctx->dst,
+				"\tmov x8, x%1$hhd\n"
+				"\tsdiv x%1$hhd, x%1$hhd, %2$lld\n"
+				"\tmul x%1$hhd, x%1$hhd, %2$lld\n"
+				"\tsub x%1$hhd, x8, x%1$hhd\n",
+				op.dst_reg, op.value
+			);
+		} else {
+			compileNativeImmSet(ctx->dst, 9, op.value);
+			fprintf(
+				ctx->dst,
+				"\tmov x8, x%1$hhd\n"
+				"\tsdiv x%1$hhd, x%1$hhd, x9\n"
+				"\tmul x%1$hhd, x%1$hhd, x9\n"
+				"\tsub x%1$hhd, x8, x%1$hhd\n",
+				op.dst_reg
+			);
+		}
+	} else {
+		if (op.value < 4096) {
+			fprintf(
+				ctx->dst,
+				"\tsdiv x%1$hhd, x%1$hhd, %2$lld\n"
+				"\tmul x%1$hhd, x%1$hhd, %2$lld\n"
+				"\tsub x%1$hhd, x%3$hhd, x%1$hhd\n",
+				op.dst_reg, op.value, op.src_reg
+			);
+		} else {
+			compileNativeImmSet(ctx->dst, 8, op.value);
+			fprintf(
+				ctx->dst,
+				"\tsdiv x%1$hhd, x%1$hhd, x9\n"
+				"\tmul x%1$hhd, x%1$hhd, x9\n"
+				"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
+				op.dst_reg, op.src_reg
+			);
+		}
+	}
+}
+
+void compileOpModrNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	if (op.dst_reg == op.src_reg) {
+		fprintf(
+			ctx->dst,
+			"\tmov x8, x%1$hhd\n"
+			"\tudiv x%1$hhd, x%1$hhd, x%2$hhd\n"
+			"\tmul x%1$hhd, x%1$hhd, x%2$hhd\n"
+			"\tsub x%1$hhd, x8, x%1$hhd\n",
+			op.dst_reg, op.src2_reg
+		);
+	} else if (op.dst_reg == op.src2_reg) {
+		fprintf(
+			ctx->dst,
+			"\tmov x8, x%1$hhd\n"
+			"\tudiv x%1$hhd, x%2$hhd, x8\n"
+			"\tmul x%1$hhd, x%1$hhd, x8\n"
+			"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
+			op.dst_reg, op.src_reg
+		);
+	} else {
+		fprintf(
+			ctx->dst,
+			"\tudiv x%1$hhd, x%2$hhd, %3$hhd\n"
+			"\tmul x%1$hhd, x%1$hhd, %3$hhd\n"
+			"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
+			op.dst_reg, op.src_reg, op.src2_reg
+		);
+	}
+}
+
+void compileOpModsrNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->execblock.data[index];
+	if (op.dst_reg == op.src_reg) {
+		fprintf(
+			ctx->dst,
+			"\tmov x8, x%1$hhd\n"
+			"\tsdiv x%1$hhd, x%1$hhd, x%2$hhd\n"
+			"\tmul x%1$hhd, x%1$hhd, x%2$hhd\n"
+			"\tsub x%1$hhd, x8, x%1$hhd\n",
+			op.dst_reg, op.src2_reg
+		);
+	} else if (op.dst_reg == op.src2_reg) {
+		fprintf(
+			ctx->dst,
+			"\tmov x8, x%1$hhd\n"
+			"\tsdiv x%1$hhd, x%2$hhd, x8\n"
+			"\tmul x%1$hhd, x%1$hhd, x8\n"
+			"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
+			op.dst_reg, op.src_reg
+		);
+	} else {
+		fprintf(
+			ctx->dst,
+			"\tsdiv x%1$hhd, x%2$hhd, %3$hhd\n"
+			"\tmul x%1$hhd, x%1$hhd, %3$hhd\n"
+			"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
+			op.dst_reg, op.src_reg, op.src2_reg
+		);
+	}
+}
+
 OpNativeCompiler native_op_compilers[] = {
 	[OP_NONE] = &compileNopNative,
 	[OP_END] = &compileOpEndNative,
@@ -1079,7 +1235,11 @@ OpNativeCompiler native_op_compilers[] = {
 	[OP_LDVS] = &compileOpLdvsNative,
 	[OP_SX32] = &compileOpSx32Native,
 	[OP_SX16] = &compileOpSx16Native,
-	[OP_SX8] = &compileOpSx8Native
+	[OP_SX8] = &compileOpSx8Native,
+	[OP_MOD] = &compileOpModNative,
+	[OP_MODS] = &compileOpModsNative,
+	[OP_MODR] = &compileOpModrNative,
+	[OP_MODSR] = &compileOpModsrNative
 };
 static_assert(
 	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),
