@@ -11,10 +11,6 @@
 #include "sys/wait.h"
 extern char** environ;
 
-defArray(sbuf);
-defArray(InputCtx);
-defQueue(Token);
-
 bool IS_BIG_ENDIAN, IS_LITTLE_ENDIAN;
 
 void initBREnv(void)
@@ -22,43 +18,6 @@ void initBREnv(void)
 	int _e = 0xDEADBEEF;
 	IS_BIG_ENDIAN = *(char*)&_e == 0xDE;
 	IS_LITTLE_ENDIAN = !IS_BIG_ENDIAN;
-}
-
-char* getAbsolutePath(char* src)
-{
-	sbuf input = fromstr(src);
-	if (!sbufstartswith(input, PATHSEP)) {
-		char resbuf[MAXPATHLEN];
-		getwd(resbuf);
-		input = sbufconcat(fromstr(resbuf), PATHSEP, input);
-	}
-
-	sbufArray components = sbufArray_new(sbufcount(input, PATHSEP) * -1 - 1);
-	sbuf new;
-	
-	while (input.length) {
-		sbufsplit(&input, &new, PATHSEP);
-		if (sbufeq(new, fromcstr(".."))) {
-			sbufArray_pop(&components, -1);
-		} else if (new.length && !sbufeq(new, fromcstr("."))) {
-			sbufArray_append(&components, new);
-		}
-	}
-	sbuf res = smalloc(input.length + 1);
-	memset(res.data, 0, res.length);
-	if (!res.data) {
-		sbufArray_clear(&components);
-		return NULL;
-	}
-	res.length = 0;
-	array_foreach(sbuf, component, components,
-		memcpy(res.data + res.length, PATHSEP.data, PATHSEP.length);
-		res.length += PATHSEP.length;
-		memcpy(res.data + res.length, component.data, component.length);
-		res.length += component.length;
-	);
-	free(components.data);
-	return res.data;
 }
 
 void* BRByteOrder(void* src, long length) {
@@ -178,7 +137,7 @@ char* setFileExt(char* path, char* ext)
 sbuf setFileExt_s(sbuf path, sbuf ext)
 {
 	sbuf noext;
-	sbufsplit(&path, &noext, fromcstr("."));
+	sbufsplitr(&path, &noext, fromcstr("."));
 	return sbufconcat(noext, ext);
 }
 
@@ -205,15 +164,4 @@ sbuf fileBaseName_s(sbuf path)
 		return delim.data ? res : path;
 	}
 	return path;
-}
-
-bool fpipe(FILE** readable_end_ptr, FILE** writable_end_ptr)
-{
-	int fds[2];
-	if (pipe(fds) != 0) return false;
-
-	*readable_end_ptr = fdopen(fds[0], "r");
-	*writable_end_ptr = fdopen(fds[1], "w");
-	
-	return true;
 }

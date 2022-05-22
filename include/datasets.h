@@ -74,7 +74,7 @@
 		va_start(args, n); \
 		t##Array res = (t##Array){  \
 			.length = (n < 0 ? 0 : n), \
-			.data = malloc(sizeof(t) * absInt(n)), \
+			.data = malloc(sizeof(t) * (n < 0 ? -n : n)), \
 		}; \
 		for (int i = 0; i < n; i++) { \
 			res.data[i] = va_arg(args, t); \

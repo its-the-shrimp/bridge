@@ -2293,6 +2293,51 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
                 free(expr->arg2);
                 Expr temp = *expr->arg1;
                 *expr = temp;
+            } else {
+                TypeDef arg1_type = getExprValueType(ast, *expr->arg1);
+                TypeDef arg2_type = getExprValueType(ast, *expr->arg2);
+
+                if (isPtrType(arg1_type)) {
+                    if (expr->arg2->type == EXPR_INT) {
+                        expr->arg2->int_literal *= getTypeSize(*arg1_type.base);
+                    } else {
+                        Expr* new_subexpr = expr->arg2;
+                        expr->arg2 = malloc(sizeof(Expr));
+                        *expr->arg2 = (Expr){
+                            .type = EXPR_MUL,
+                            .block = new_subexpr->block,
+                            .loc = new_subexpr->loc,
+                            .arg1 = new_subexpr,
+                            .arg2 = malloc(sizeof(Expr))
+                        };
+                        *expr->arg2->arg2 = (Expr){
+                            .type = EXPR_INT,
+                            .block = new_subexpr->block,
+                            .loc = new_subexpr->loc,
+                            .int_literal = getTypeSize(*arg1_type.base)
+                        };
+                    }
+                } else if (isPtrType(arg2_type)) {
+                    if (expr->arg1->type == EXPR_INT) {
+                        expr->arg1->int_literal *= getTypeSize(*arg2_type.base);
+                    } else {
+                        Expr* new_subexpr = expr->arg1;
+                        expr->arg1 = malloc(sizeof(Expr));
+                        *expr->arg1 = (Expr){
+                            .type = EXPR_MUL,
+                            .block = new_subexpr->block,
+                            .loc = new_subexpr->loc,
+                            .arg1 = new_subexpr,
+                            .arg2 = malloc(sizeof(Expr))
+                        };
+                        *expr->arg1->arg2 = (Expr){
+                            .type = EXPR_INT,
+                            .block = new_subexpr->block,
+                            .loc = new_subexpr->loc,
+                            .int_literal = getTypeSize(*arg2_type.base)
+                        };
+                    }
+                }
             }
             break;
         case EXPR_SUB:
@@ -2312,6 +2357,51 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
                 free(expr->arg2);
                 Expr temp = *expr->arg1;
                 *expr = temp;
+            } else {
+                TypeDef arg1_type = getExprValueType(ast, *expr->arg1);
+                TypeDef arg2_type = getExprValueType(ast, *expr->arg2);
+
+                if (isPtrType(arg1_type)) {
+                    if (expr->arg2->type == EXPR_INT) {
+                        expr->arg2->int_literal *= getTypeSize(*arg1_type.base);
+                    } else {
+                        Expr* new_subexpr = expr->arg2;
+                        expr->arg2 = malloc(sizeof(Expr));
+                        *expr->arg2 = (Expr){
+                            .type = EXPR_MUL,
+                            .block = new_subexpr->block,
+                            .loc = new_subexpr->loc,
+                            .arg1 = new_subexpr,
+                            .arg2 = malloc(sizeof(Expr))
+                        };
+                        *expr->arg2->arg2 = (Expr){
+                            .type = EXPR_INT,
+                            .block = new_subexpr->block,
+                            .loc = new_subexpr->loc,
+                            .int_literal = getTypeSize(*arg1_type.base)
+                        };
+                    }
+                } else if (isPtrType(arg2_type)) {
+                    if (expr->arg1->type == EXPR_INT) {
+                        expr->arg1->int_literal *= getTypeSize(*arg2_type.base);
+                    } else {
+                        Expr* new_subexpr = expr->arg1;
+                        expr->arg1 = malloc(sizeof(Expr));
+                        *expr->arg1 = (Expr){
+                            .type = EXPR_MUL,
+                            .block = new_subexpr->block,
+                            .loc = new_subexpr->loc,
+                            .arg1 = new_subexpr,
+                            .arg2 = malloc(sizeof(Expr))
+                        };
+                        *expr->arg1->arg2 = (Expr){
+                            .type = EXPR_INT,
+                            .block = new_subexpr->block,
+                            .loc = new_subexpr->loc,
+                            .int_literal = getTypeSize(*arg2_type.base)
+                        };
+                    }
+                }
             }
             break;
         case EXPR_MUL:
@@ -2524,6 +2614,7 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
             };
             expr->type = EXPR_DEREF;
             expr->arg1 = new_subexpr;
+            optimizeExpr(ast, expr->arg1, func);
             break;
         case EXPR_GET_VAR:
         case EXPR_INT:
@@ -2806,7 +2897,7 @@ bool compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
         if (!expr_compilers[initializer->type](ctx, *initializer, reg_state, dst_reg)) return false;
         fprintf(ctx->dst, "\tpushv %s %d r%d\n", name, size, dst_reg);
     } else {
-        fprintf(ctx->dst, "\tvar %s %d\n", name, var_type.kind == KIND_ARRAY ? var_type.n_items : size);
+        fprintf(ctx->dst, "\tvar %s %d\n", name, var_type.kind == KIND_ARRAY ? var_type.n_items * getTypeSize(*var_type.base) : size);
     }
     return true;
 }
@@ -3716,6 +3807,8 @@ void printUsageMsg(FILE* dst, char* program_name)
         "options:\n"
         "\t-h                     Display this message and quit\n"
         "\t-d                     Print the generated syntax tree and quit\n"
+        "\t-r                     Run the program immediately after the compilation with brbx\n"
+        "\t-s                     Compile silently, i.e. don't output compilation times\n"
         "\t--vbrb-output <path>   Output BRidge Assembly (`.vbrb` file) to <path>;\n"
         "\t\tif <path> is a directory, output will be at <path>/<source name>.vbrb;\n"
         "\t\tby default, BRidge Assembly is stored in a temporary file and is deleted after compilation\n"
@@ -3734,7 +3827,7 @@ int main(int argc, char* argv[])
     TypeDef str_lit_base = (TypeDef){ .kind = KIND_INT, .size = 1 };
     TYPE_STR_LITERAL.base = &str_lit_base;
 
-    bool print_ast = false;
+    bool print_ast = false, run_program = false, silent = false;
     char *input_path = NULL, *brb_output_path = NULL, *vbrb_output_path = NULL;
     for (int i = 1; i < argc; i++) {
         bool go_on = false;
@@ -3747,6 +3840,12 @@ int main(int argc, char* argv[])
                         return 0;
                     case 'd':
                         print_ast = true;
+                        break;
+                    case 'r':
+                        run_program = true;
+                        break;
+                    case 's':
+                        silent = true;
                         break;
                     case 'o':
 						if (!argv[++i]) {
@@ -3797,18 +3896,14 @@ int main(int argc, char* argv[])
         brb_output_path = setFileExt(input_path, BRB_EXT);
     }
 
-    if (vbrb_output_path) {
+    if (vbrb_output_path)
         if (isPathDir(vbrb_output_path))
             vbrb_output_path = tostr(fromstr(vbrb_output_path), PATHSEP, basename, fromcstr(VBRB_EXT));
-    }
 
-    char* vbrb_visual_output_path;
-    if (!vbrb_output_path) {
+    char* vbrb_visual_output_path = vbrb_output_path;
+    if (!vbrb_output_path)
         vbrb_visual_output_path = tostr(fromcstr("~"), setFileExt_s(fromstr(input_path), fromcstr(VBRB_EXT)));
-    } else {
-        vbrb_visual_output_path = vbrb_output_path;
-    }
-    
+
     BRP prep;
     if (!initBRP(&prep, &handleBRPError)) {
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
@@ -3919,7 +4014,7 @@ int main(int argc, char* argv[])
         printVBRBError(stderr, vbrb_err);
         return 1;
     }
-    printf("%s -> %s in %.3f ms\n", input_path, vbrb_visual_output_path, endTimer());
+    if (!silent) printf("%s -> %s in %.3f ms\n", input_path, vbrb_visual_output_path, endTimer());
 
     startTimer();
     FILE* brb_output = fopen(brb_output_path, "wb");
@@ -3928,9 +4023,20 @@ int main(int argc, char* argv[])
         return 1;
     }
     writeModule(&res, brb_output);
-    printf("%s -> %s in %.3f ms\n", vbrb_visual_output_path, brb_output_path, endTimer());
+    if (!silent) printf("%s -> %s in %.3f ms\n", vbrb_visual_output_path, brb_output_path, endTimer());
 
     fclose(brb_output);
     fclose(vbrb_output);
     delBRP(&prep);
+
+    if (run_program) {
+        char* cmd = NULL;
+        asprintf(&cmd, "brbx %s", brb_output_path);
+        if (!cmd) {
+            printf("error: could not invoke the command to execute the program\n");
+            return 1;
+        }
+
+        system(cmd);
+    }
 }

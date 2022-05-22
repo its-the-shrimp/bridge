@@ -5,6 +5,7 @@
 #include "sbuf.h"
 #include "datasets.h"
 #include "errno.h"
+#include "assert.h"
 
 #ifdef _WIN32_
 #define PATHSEP NT_PATHSEP
@@ -101,6 +102,7 @@ typedef void (*BRPErrorHandler) (BRP*);
 #define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
 // hidden symbols are delimiters that are not returned as generated tokens
 
+char* getNormPath(char* src);
 BRP* initBRP(BRP* obj, BRPErrorHandler handler);
 void delBRP(BRP* obj);
 
@@ -142,6 +144,44 @@ void printBRPError(FILE* fd, BRP* obj);
 
 #ifdef BRP_IMPLEMENTATION
 #undef BRP_IMPLEMENTATION
+
+defArray(sbuf);
+defArray(InputCtx);
+defQueue(Token);
+
+char* getNormPath(char* src)
+{
+	sbuf input = fromstr(src);
+	sbufArray components = sbufArray_new(sbufcount(input, PATHSEP) * -1 - 1);
+	sbuf new;
+	
+	while (input.length) {
+		sbufsplit(&input, &new, PATHSEP);
+		if (sbufeq(new, fromcstr(".."))) {
+			sbufArray_pop(&components, -1);
+		} else if (new.length && !sbufeq(new, fromcstr("."))) {
+			sbufArray_append(&components, new);
+		}
+	}
+	sbuf res = smalloc(input.length + 1);
+	memset(res.data, 0, res.length);
+	if (!res.data) {
+		sbufArray_clear(&components);
+		return NULL;
+	}
+	res.length = 0;
+	array_foreach(sbuf, component, components,
+	 	if (res.length) {
+			memcpy(res.data + res.length, PATHSEP.data, PATHSEP.length);
+			res.length += PATHSEP.length;
+		}
+		memcpy(res.data + res.length, component.data, component.length);
+		res.length += component.length;
+	);
+	free(components.data);
+	return res.data;
+}
+
 
 BRP* initBRP(BRP* obj, BRPErrorHandler handler)
 {
@@ -218,13 +258,14 @@ bool _setSymbols(BRP* obj, ...)
 
 bool setInputFrom(BRP *obj, char *name, FILE* fd)
 {
+	char* real_path = getNormPath(name);
 	if (!InputCtxArray_append(
 		&obj->sources,
 		(InputCtx){
-			.name = name,
+			.name = real_path,
 			.src = fd,
 			.cur_loc = (TokenLoc){
-				.src_name = name,
+				.src_name = real_path,
 				.colno = 1
 			}
 		}
@@ -261,6 +302,11 @@ InputCtx* updateLineBuffer(BRP* obj)
 	if (obj->buffer.length) input->cur_loc.colno += sbufstriplv(&obj->buffer, obj->hidden_symbols);
 	while (!obj->buffer.length) {
 		obj->buffer.data = fgetln(input->src, (size_t*)&obj->buffer.length);
+		if (sbufstartswith(obj->buffer, fromcstr("#!"))) {
+			obj->buffer.length = 0;
+			input->cur_loc.lineno++;
+			continue;
+		}
 		if (!obj->buffer.data) return NULL;
 		if (obj->buffer.data[obj->buffer.length - 1] == '\n') obj->buffer.length--;
 		input->cur_loc.lineno++;
