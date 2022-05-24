@@ -35,7 +35,6 @@ extern bool IS_LITTLE_ENDIAN;
 #define BR_EXT ".br"
 
 void initBREnv(void);
-char* getAbsolutePath(char* src);
 void* BRByteOrder(void* src, long length);
 
 static struct timespec TIME;

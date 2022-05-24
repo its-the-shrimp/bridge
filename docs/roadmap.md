@@ -11,7 +11,7 @@
 - ~Referencing and dereferencing~
 - ~Complex assignment expressions (`+=`, `&=`, etc.)~
 - ~Array variables~
-- Pointer arithmetic
+- ~Pointer arithmetic~
 - BRP: includes
 - BRP: macros
 - BRB: encapsulation

@@ -2361,7 +2361,7 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
                 TypeDef arg1_type = getExprValueType(ast, *expr->arg1);
                 TypeDef arg2_type = getExprValueType(ast, *expr->arg2);
 
-                if (isPtrType(arg1_type)) {
+                if (isPtrType(arg1_type) && getTypeSize(*arg1_type.base) != 1) {
                     if (expr->arg2->type == EXPR_INT) {
                         expr->arg2->int_literal *= getTypeSize(*arg1_type.base);
                     } else {
@@ -2381,7 +2381,7 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
                             .int_literal = getTypeSize(*arg1_type.base)
                         };
                     }
-                } else if (isPtrType(arg2_type)) {
+                } else if (isPtrType(arg2_type) && getTypeSize(*arg2_type.base) != 1) {
                     if (expr->arg1->type == EXPR_INT) {
                         expr->arg1->int_literal *= getTypeSize(*arg2_type.base);
                     } else {
@@ -2551,11 +2551,14 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
             optimizeExpr(ast, expr->arg1, func);
             if (getExprValueType(ast, *expr->arg1).kind != KIND_PTR) raiseUndereferrableExprError(ast, expr->loc, getExprValueType(ast, *expr->arg1));
             break;
-        case EXPR_GET_REF: {
+        case EXPR_GET_REF:
             optimizeExpr(ast, expr->arg1, func);
-            if (expr->arg1->type != EXPR_GET_REF) raiseUnreferrableExprError(ast, expr->loc, getExprValueType(ast, *expr->arg1));
+            if (expr->arg1->type == EXPR_DEREF) {
+                Expr* new_expr = expr->arg1->arg1;
+                free(expr->arg1);
+                expr->arg1 = new_expr;
+            } else if (expr->arg1->type != EXPR_GET_VAR) raiseUnreferrableExprError(ast, expr->loc, getExprValueType(ast, *expr->arg1));
             break;
-        }
         case EXPR_LOGICAL_EQ:
         case EXPR_LOGICAL_NEQ:
         case EXPR_LOGICAL_LT:
@@ -2666,7 +2669,7 @@ void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
                 &dst->functions,
                 (FuncDecl){
                     .return_type = type,
-                    .name = func_name_spec.word,
+                    .name = tostr(fromstr(func_name_spec.word)),
                     .loc = func_name_spec.loc,
                     .args = (Expr){
                         .type = EXPR_BLOCK,
@@ -2811,7 +2814,7 @@ void freeRegister(ASTCompilerCtx* ctx, regstate_t* reg_state, int reg_id, int ca
 
 void compileSrcRef(ASTCompilerCtx* ctx, TokenLoc loc)
 {
-    sbuf path_s = fromstr(loc.src_name);
+    sbuf path_s = fromstr((char*)loc.src_name);
     if (!sbufeq(ctx->cur_src_path, path_s)) {
         fprintf(
             ctx->dst, 

@@ -6,7 +6,7 @@
 typedef enum {
 	OP_NONE,
 	OP_END,
-	OP_MARK, // uses Op::mark_name
+	OP_MARK,
 	OP_SET, // uses Op::dst_reg and Op::value
 	OP_SETR, // uses Op::dst_reg and Op::src_reg
 	OP_SETD, // uses Op::dst_reg and Op::symbol_id
@@ -45,7 +45,7 @@ typedef enum {
 	OP_STR16, // uses Op::dst_reg and Op::src_reg
 	OP_LD8, // uses Op::dst_reg and Op::src_reg
 	OP_STR8, // uses Op::dst_reg and Op::src_reg
-	OP_VAR, // uses Op::var_size
+	OP_VAR, // uses Op::new_var_size
 	OP_SETV, // uses Op::dst_reg and Op::symbol_id
 	OP_MUL, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_MULR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
@@ -418,7 +418,6 @@ typedef struct execEnv {
 	uint8_t exitcode;
 	int op_id;
 	uint64_t* registers;
-	int8_t flags;
 	int exec_argc;
 	sbuf* exec_argv;
 	char* src_path;

@@ -360,14 +360,16 @@ int64_t loadInt(FILE* fd, long* n_fetched)
 	int8_t size = fgetc(fd);
 	int64_t res;
 
+	long local_n_fetched = 0;
 	switch (size) {
-		case 0: res = 0; break;
-		case 1: res = loadInt8(fd, n_fetched); break;
-		case 2: res = loadInt16(fd, n_fetched); break;
-		case 4: res = loadInt32(fd, n_fetched); break;
-		case 8: res = loadInt64(fd, n_fetched); break;
+		case 0: res = 0; local_n_fetched = 1; break;
+		case 1: res = loadInt8(fd, &local_n_fetched); break;
+		case 2: res = loadInt16(fd, &local_n_fetched); break;
+		case 4: res = loadInt32(fd, &local_n_fetched); break;
+		case 8: res = loadInt64(fd, &local_n_fetched); break;
 	}
-	if (n_fetched) { *n_fetched = *n_fetched + 1; }
+	if (local_n_fetched) *n_fetched += local_n_fetched;
+	else *n_fetched = 0;
 	return res;
 }
 

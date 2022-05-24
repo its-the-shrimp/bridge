@@ -1,3 +1,4 @@
-void main() {
+#!brc -rs
+main() {
     sys write(builtin STDOUT, "Hello, World\n", 13);
 }

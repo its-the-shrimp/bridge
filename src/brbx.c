@@ -60,8 +60,10 @@ int main(int argc, char* argv[]) {
 
 	signal(SIGINT, &handleExecInt);
 	ExecEnv env;
+	startTimer();
 	initExecEnv(&env, &module, module_argv);
 	execModule(&env, &module, &interrupt);
+	printf("executed in %.3f ms\n", endTimer());
 	signal(SIGINT, SIG_DFL);
 
 	return env.exitcode;

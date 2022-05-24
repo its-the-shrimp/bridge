@@ -8,3 +8,5 @@ a.out
 *.S
 *.o
 test*
+__pycache__
+*.pyc
