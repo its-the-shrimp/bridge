@@ -11,26 +11,17 @@
 #include "sys/wait.h"
 extern char** environ;
 
-bool IS_BIG_ENDIAN, IS_LITTLE_ENDIAN;
-
-void initBREnv(void)
-{
-	int _e = 0xDEADBEEF;
-	IS_BIG_ENDIAN = *(char*)&_e == 0xDE;
-	IS_LITTLE_ENDIAN = !IS_BIG_ENDIAN;
-}
-
+#if IS_LITTLE_ENDIAN
 void* BRByteOrder(void* src, long length) {
 	char* _src = src;
-	if (IS_LITTLE_ENDIAN) {
-		for (long i = 0; i < length / 2; i++) {
-			char tmp = _src[i];
-			_src[i] = _src[length - i - 1];
-			_src[length - i - 1] = tmp;
-		}
+	for (long i = 0; i < length / 2; i++) {
+		char tmp = _src[i];
+		_src[i] = _src[length - i - 1];
+		_src[length - i - 1] = tmp;
 	}
 	return src;
 }
+#endif
 
 bool startTimerAt(struct timespec* dst)
 {

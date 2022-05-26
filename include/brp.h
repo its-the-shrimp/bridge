@@ -38,6 +38,7 @@ typedef struct token_loc {
 	int32_t lineno;
 	int32_t colno;
 	char* src_name;
+	struct token_loc* included_from;
 } TokenLoc;
 
 typedef struct token {
@@ -50,9 +51,6 @@ typedef struct token {
 		int64_t symbol_id; // for TOKEN_SYMBOL
 	};
 } Token;
-declArray(sbuf);
-declQueue(Token);
-
 #define emptyToken ((Token){ .type = TOKEN_NONE })
 #define wordToken(_word) ((Token){ .type = TOKEN_WORD, .word = _word })
 #define keywordToken(kw_id) ((Token){ .type = TOKEN_KEYWORD, .keyword_id = kw_id })
@@ -66,17 +64,20 @@ typedef enum {
 	BRP_ERR_NO_MEMORY,
 	BRP_ERR_FILE_NOT_FOUND,
 	BRP_ERR_SYMBOL_CONFLICT,
+	BRP_ERR_INVALID_CMD_SYNTAX,
+	BRP_ERR_UNKNOWN_CMD,
 	N_PARSER_ERRORS
 } BRPError;
 
-typedef struct {
-	char* name;
-	FILE* src;
+declArray(sbuf);
+typedef struct input_ctx {
+	struct input_ctx* prev;
+	sbuf buffer;
+	char* orig_data;
 	TokenLoc cur_loc;
 } InputCtx;
-declArray(InputCtx);
 
-
+declQueue(Token);
 typedef struct brp {
 	sbuf* keywords;
 	sbuf* symbols;
@@ -89,18 +90,22 @@ typedef struct brp {
 		int32_t sys_errno;
 	};
 	void (*handler)(struct brp*);
-	InputCtxArray sources;
+	InputCtx* cur_input;
 	TokenQueue pending;
-	sbuf buffer;
 	TokenLoc last_loc;
 } BRP;
-
-typedef void (*BRPErrorHandler) (BRP*);
-
 #define BRP_KEYWORD(spec) fromcstr(spec)
 #define BRP_SYMBOL(spec) fromcstr(spec)
 #define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
 // hidden symbols are delimiters that are not returned as generated tokens
+
+#define BRPempty(prep) ((prep)->cur_input == NULL)
+#define getTokenKeywordId(token) ( (token).type == TOKEN_KEYWORD ? (token).keyword_id : -1 )
+#define getTokenSymbolId(token) ( (token).type == TOKEN_SYMBOL ? (token).symbol_id : -1 )
+#define isWordToken(token) ( (token).type == TOKEN_WORD || (token).type == TOKEN_KEYWORD )
+#define isSymbolSpecHidden(spec) (spec.data[spec.length] > 0)
+
+typedef void (*BRPErrorHandler) (BRP*);
 
 char* getNormPath(char* src);
 BRP* initBRP(BRP* obj, BRPErrorHandler handler);
@@ -110,48 +115,42 @@ bool _setKeywords(BRP* obj, ...);
 bool _setSymbols(BRP* obj, ...);
 #define setKeywords(obj, ...) _setKeywords(obj, __VA_ARGS__, (sbuf){0})
 #define setSymbols(obj, ...) _setSymbols(obj, __VA_ARGS__, (sbuf){0})
-bool setInputFrom(BRP *obj, char *name, FILE* fd);
-bool setInput(BRP* obj, char* name);
+bool appendInputFrom(BRP *obj, char *path, FILE* input_fd, TokenLoc include_loc);
+#define appendInput(obj, path, input_fd) appendInputFrom(obj, path, input_fd, (TokenLoc){0})
 Token fetchToken(BRP* obj);
 Token peekToken(BRP* obj);
 bool unfetchToken(BRP* obj, Token token);
 
 int fprintTokenLoc(FILE* fd, TokenLoc loc);
+#define printTokenLoc(loc) fprintTokenLoc(stdout, loc)
+
 int fprintTokenStr(FILE* fd, Token token, BRP* obj);
+#define printTokenStr(token, parser) fprintTokenStr(stdout, token, parser)
+
 int fprintToken(FILE* fd, Token token, BRP* obj);
+#define printToken(token, parser) fprintToken(stdout, token, parser)
+
 char* getTokenTypeName(TokenType type);
 char* getTokenWord(BRP* obj, Token token);
 void printBRPErrorStr(FILE* fd, BRP* obj);
 void printBRPError(FILE* fd, BRP* obj);
 
-
-#define setBRPError(prep, code, loc) \
-	if ((prep)->error_code == BRP_ERR_OK) { \
-		(prep)->error_code = code; \
-		(prep)->error_loc = loc; \
-	}
-#define BRPempty(prep) ( (prep)->sources.length ? feof((prep)->sources.data[0].src) || ferror((prep)->sources.data[0].src) : true )
-#define printTokenLoc(loc) fprintTokenLoc(stdout, loc)
-#define printTokenStr(token, parser) fprintTokenStr(stdout, token, parser)
-#define printToken(token, parser) fprintToken(stdout, token, parser)
-#define getTokenKeywordId(token) ( (token).type == TOKEN_KEYWORD ? (token).keyword_id : -1 )
-#define getTokenSymbolId(token) ( (token).type == TOKEN_SYMBOL ? (token).symbol_id : -1 )
-#define isWordToken(token) ( (token).type == TOKEN_WORD || (token).type == TOKEN_KEYWORD )
-#define isSymbolSpecHidden(spec) (spec.data[spec.length] > 0)
-
-#endif 
-
+#endif // _BRP_
 
 #ifdef BRP_IMPLEMENTATION
 #undef BRP_IMPLEMENTATION
 
 defArray(sbuf);
-defArray(InputCtx);
 defQueue(Token);
 
 char* getNormPath(char* src)
 {
 	sbuf input = fromstr(src);
+
+	sbuf res = smalloc(input.length + 1);
+	if (!res.data) return NULL;
+	memset(res.data, 0, res.length);
+
 	sbufArray components = sbufArray_new(sbufcount(input, PATHSEP) * -1 - 1);
 	sbuf new;
 	
@@ -159,16 +158,11 @@ char* getNormPath(char* src)
 		sbufsplit(&input, &new, PATHSEP);
 		if (sbufeq(new, fromcstr(".."))) {
 			sbufArray_pop(&components, -1);
-		} else if (new.length && !sbufeq(new, fromcstr("."))) {
+		} else if ((new.length || !components.length) && !sbufeq(new, fromcstr("."))) {
 			sbufArray_append(&components, new);
 		}
 	}
-	sbuf res = smalloc(input.length + 1);
-	memset(res.data, 0, res.length);
-	if (!res.data) {
-		sbufArray_clear(&components);
-		return NULL;
-	}
+
 	res.length = 0;
 	array_foreach(sbuf, component, components,
 	 	if (res.length) {
@@ -182,17 +176,13 @@ char* getNormPath(char* src)
 	return res.data;
 }
 
-
-BRP* initBRP(BRP* obj, BRPErrorHandler handler)
+bool pathEquals(char path1[], char path2[])
 {
-	*obj = (BRP){0};
-	obj->sources = InputCtxArray_new(-1);
-	if (!obj->sources.data) return NULL;
-	obj->pending = TokenQueue_new(0);
-	obj->error_loc = (TokenLoc){0};
-	obj->handler = handler;
-
-	return obj;
+	char path1_r[256];
+	char path2_r[256];
+	realpath(path1, path1_r);
+	realpath(path2, path2_r);
+	return streq(path1_r, path2_r);
 }
 
 bool _setKeywords(BRP* obj, ...)
@@ -256,64 +246,121 @@ bool _setSymbols(BRP* obj, ...)
 	return true;
 }
 
-bool setInputFrom(BRP *obj, char *name, FILE* fd)
+bool appendInputFrom(BRP *obj, char* path, FILE* input_fd, TokenLoc include_loc)
 {
-	char* real_path = getNormPath(name);
-	if (!InputCtxArray_append(
-		&obj->sources,
-		(InputCtx){
-			.name = real_path,
-			.src = fd,
-			.cur_loc = (TokenLoc){
-				.src_name = real_path,
-				.colno = 1
-			}
-		}
-	)) {
-		obj->error_code = BRP_ERR_NO_MEMORY;
+	path = getNormPath(path);
+	if (!input_fd) {
+		obj->error_code = BRP_ERR_FILE_NOT_FOUND;
+		obj->error_loc = include_loc;
+		obj->error_symbol = fromstr(path);
 		if (obj->handler) obj->handler(obj);
 		return false;
 	}
+	InputCtx* init_ctx = malloc(sizeof(InputCtx));
+	*init_ctx = (InputCtx){
+		.cur_loc = {
+			.src_name = path,
+			.lineno = 1,
+			.colno = 1,
+			.included_from = NULL
+		},
+		.buffer = filecontent(input_fd),
+		.prev = obj->cur_input
+	};
+	if (!init_ctx->buffer.data) {
+		obj->error_code = BRP_ERR_NO_MEMORY;
+		obj->error_loc = include_loc;
+		if (obj->handler) obj->handler(obj);
+		fclose(input_fd);
+		return false;
+	}
+	if (include_loc.src_name) {
+		init_ctx->cur_loc.included_from = malloc(sizeof(TokenLoc));
+		*init_ctx->cur_loc.included_from = include_loc;
+	}
 
+	sbufstriprv(&init_ctx->buffer, obj->hidden_symbols);
+	obj->cur_input = init_ctx;
+	fclose(input_fd);
 	return true;
 }
 
-bool setInput(BRP* obj, char* name)
+void delInput(BRP* obj)
 {
-	FILE* fd = fopen(name, "r");
-	if (!fd) {
-		obj->error_code = BRP_ERR_FILE_NOT_FOUND;
-		obj->sys_errno = errno;
-		if (obj->handler) obj->handler(obj);
-		return false;
-	}
-	return setInputFrom(obj, name, fd);
+	free(obj->cur_input->orig_data);
+	InputCtx* to_free = obj->cur_input;
+	obj->cur_input = to_free->prev;
+	free(to_free);
 }
 
-InputCtx* updateLineBuffer(BRP* obj)
+static sbuf nl_arg[2] = { NEWLINE };
+
+void cleanInput(BRP* obj, InputCtx* ctx)
 {
-	InputCtx* input = NULL;
-	for (int i = obj->sources.length - 1; i >= 0; i--) {
-		input = obj->sources.data + i;
-		if (feof(input->src) || ferror(input->src)) break;
-	}
-	if (!input) return NULL;
+	sbuf stripped = sbufstriplv(&ctx->buffer, obj->hidden_symbols);
+	int nl_count = sbufcount_v(stripped, nl_arg);
+	if (nl_count) {
+		ctx->cur_loc.lineno += nl_count;
+		sbuf last_stripped_line;
+		sbufsplitrv(&stripped, &last_stripped_line, nl_arg);
+		ctx->cur_loc.colno = stripped.length + 1;
+	} else ctx->cur_loc.colno += stripped.length;
+}
 
-	if (obj->buffer.length) input->cur_loc.colno += sbufstriplv(&obj->buffer, obj->hidden_symbols);
-	while (!obj->buffer.length) {
-		obj->buffer.data = fgetln(input->src, (size_t*)&obj->buffer.length);
-		if (sbufstartswith(obj->buffer, fromcstr("#!"))) {
-			obj->buffer.length = 0;
-			input->cur_loc.lineno++;
-			continue;
+#define BRP_INCLUDE fromcstr("include")
+#define BRP_DEFINE fromcstr("define")
+
+void preprocessInput(BRP* obj)
+{
+	if (!obj->cur_input) return;
+	if (!obj->cur_input->buffer.length) {
+		delInput(obj);
+		return;
+	}
+// stripping unwanted symbols from the start of the buffer
+	cleanInput(obj, obj->cur_input);
+// processing directives
+	while (sbufcutc(&obj->cur_input->buffer, fromcstr("#"))) {
+		obj->cur_input->cur_loc.colno++;
+		if (sbufcutc(&obj->cur_input->buffer, fromcstr("!"))) {
+			sbuf stub;
+			sbufsplitv(&obj->cur_input->buffer, &stub, nl_arg);
+			obj->cur_input->cur_loc.lineno++;
+			obj->cur_input->cur_loc.colno = 1;
+		} else if (sbufcut(&obj->cur_input->buffer, BRP_INCLUDE).data) {
+			obj->cur_input->cur_loc.colno += BRP_INCLUDE.length + sbufstripl(&obj->cur_input->buffer, SPACE, TAB).length;
+			char path_start = sbufcutc(&obj->cur_input->buffer, fromcstr("<\""));
+			if (!path_start) {
+				obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
+				obj->error_loc = obj->cur_input->cur_loc;
+				if (obj->handler) obj->handler(obj);
+				return;
+			}
+			sbuf path_spec;
+			sbufsplit(&obj->cur_input->buffer, &path_spec, path_start == '"' ? DQUOTE : fromchar('>'));
+			obj->cur_input->cur_loc.colno += path_spec.length + 2;
+			char path_spec_c[path_spec.length + 1];
+			memcpy(path_spec_c, path_spec.data, path_spec.length);
+			path_spec_c[path_spec.length] = '\0';
+
+			for (InputCtx* ctx = obj->cur_input; ctx; ctx = ctx->prev) {
+				if (pathEquals(path_spec_c, ctx->cur_loc.src_name)) path_spec.length = 0;
+			}
+
+			if (path_spec.length) {
+				obj->error_loc = obj->cur_input->cur_loc;
+				cleanInput(obj, obj->cur_input);
+				appendInputFrom(obj, path_spec_c, fopen(path_spec_c, "r"), obj->error_loc);
+			}
+		} else {
+			obj->error_code = BRP_ERR_UNKNOWN_CMD;
+			sbufsplitv(&obj->cur_input->buffer, &obj->error_symbol, nl_arg);
+			return;
 		}
-		if (!obj->buffer.data) return NULL;
-		if (obj->buffer.data[obj->buffer.length - 1] == '\n') obj->buffer.length--;
-		input->cur_loc.lineno++;
-		input->cur_loc.colno = sbufstriplv(&obj->buffer, obj->hidden_symbols) + 1;
+		cleanInput(obj, obj->cur_input);
 	}
 
-	return input;
+	if (!obj->cur_input->buffer.length) delInput(obj);
 }
 
 Token fetchToken(BRP* obj)
@@ -324,45 +371,44 @@ Token fetchToken(BRP* obj)
 	switch (res.type) {
 		case TOKEN_NONE: break;
 		case TOKEN_SYMBOL: if (isSymbolSpecHidden(obj->symbols[res.symbol_id])) break;
-		return res;
+			return res;
 		case TOKEN_STRING:
 		case TOKEN_WORD: if (sbufspace(fromstr(res.word))) break;
 		case TOKEN_KEYWORD:
 		case TOKEN_INT:
-		return res;
+			return res;
 	}
 
-	InputCtx* input = updateLineBuffer(obj);
-	if (!input) return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
-	char* orig_ptr = obj->buffer.data;
+	preprocessInput(obj);
+	if (obj->cur_input == NULL) return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
 
-	if (sbufcut(&obj->buffer, DQUOTE).data) {
+	if (sbufcut(&obj->cur_input->buffer, DQUOTE).data) {
 		sbuf new;
-		sbuf delim = sbufsplitesc(&obj->buffer, &new, DQUOTE);
+		sbuf delim = sbufsplitesc(&obj->cur_input->buffer, &new, DQUOTE);
 		if (!sbufeq(delim, DQUOTE)) {
 			obj->error_code = BRP_ERR_UNCLOSED_STR;
-			obj->error_loc = input->cur_loc;
+			obj->error_loc = obj->cur_input->cur_loc;
 			if (obj->handler) obj->handler(obj);
 			return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
 		}
 
 		res.type = TOKEN_STRING;
-		res.loc = input->cur_loc;
+		res.loc = obj->cur_input->cur_loc;
 		res.word = tostr(new);
 
-		input->cur_loc.colno += sbufutf8len(new) + 2;
+		obj->cur_input->cur_loc.colno += sbufutf8len(new) + 2;
 		obj->last_loc = res.loc;
 		return res;
 	} else {
 		res.type = TOKEN_WORD;
 		sbuf new;
 		int delim_id;
-		if (obj->buffer.data[0] == '-' && (obj->buffer.length > 1 ? (obj->buffer.data[1] >= '0' && obj->buffer.data[1] <= '9') : false)) {
-			sbufshift(obj->buffer, 1);
-			delim_id = sbufsplitv(&obj->buffer, &new, obj->symbols);
+		if (obj->cur_input->buffer.data[0] == '-' && (obj->cur_input->buffer.length > 1 ? (obj->cur_input->buffer.data[1] >= '0' && obj->cur_input->buffer.data[1] <= '9') : false)) {
+			sbufshift(obj->cur_input->buffer, 1);
+			delim_id = sbufsplitv(&obj->cur_input->buffer, &new, obj->symbols);
 			sbufshift(new, -1);
 		} else {
-			delim_id = sbufsplitv(&obj->buffer, &new, obj->symbols);
+			delim_id = sbufsplitv(&obj->cur_input->buffer, &new, obj->symbols);
 		}
 
 		if (new.length) {
@@ -379,30 +425,33 @@ Token fetchToken(BRP* obj)
 					res.value = sbuftoint(new);
 				}
 			}
-			if (res.type == TOKEN_WORD) {
-				res.word = tostr(new);
-			}
+			if (res.type == TOKEN_WORD) res.word = tostr(new);
 
-			res.loc = input->cur_loc;
-			input->cur_loc.colno += new.length;
+			res.loc = obj->cur_input->cur_loc;
+			obj->cur_input->cur_loc.colno += new.length;
 
             if (delim_id >= 0 ? !isSymbolSpecHidden(obj->symbols[delim_id]) : false) {
                 TokenQueue_add(
                     &obj->pending,
                     (Token){
                         .type = TOKEN_SYMBOL,
-                        .loc = input->cur_loc,
+                        .loc = obj->cur_input->cur_loc,
                         .symbol_id = delim_id
                     }
                 );
             } 
 		} else {
 			res.type = delim_id == -1 ? TOKEN_NONE : TOKEN_SYMBOL;
-			res.loc = input->cur_loc;
+			res.loc = obj->cur_input->cur_loc;
 			res.symbol_id = delim_id;
 		}
 
-		input->cur_loc.colno += obj->symbols[delim_id].length;
+		if (obj->symbols[delim_id].data[0] == '\n') {
+			obj->cur_input->cur_loc.lineno++;
+			obj->cur_input->cur_loc.colno = 1;
+		} else {
+			obj->cur_input->cur_loc.colno += obj->symbols[delim_id].length;
+		}
 
 		obj->last_loc = res.loc;
 		return res;
@@ -436,6 +485,10 @@ bool unfetchToken(BRP* obj, Token token)
 int fprintTokenLoc(FILE* fd, TokenLoc loc)
 {
 	if (loc.src_name) {
+		if (loc.included_from) {
+			fprintTokenLoc(fd, *loc.included_from);
+			fputs("-> ", fd);
+		}
 		return fprintf(fd, "[%s:%d:%d] ", loc.src_name, loc.lineno, loc.colno);
 	} else { return fprintf(fd, " "); }
 }
@@ -449,7 +502,8 @@ int fprintTokenStr(FILE* fd, Token token, BRP* obj)
 			return fprintf(fd, "string \"") + fputsbufesc(fd, fromstr(token.word), BYTEFMT_HEX) + fputc('"', fd);
 		case TOKEN_KEYWORD: return fprintf(fd, "keyword `"sbuf_format"`", unpack(obj->keywords[token.keyword_id]));
 		case TOKEN_SYMBOL: return fprintf(fd, "symbol `"sbuf_format"`", unpack(obj->symbols[token.symbol_id]));
-		default: return fprintf(fd, "nothing");
+		default:
+			return fprintf(fd, "nothing");
 	}
 }
 
@@ -498,8 +552,8 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 		case BRP_ERR_NO_MEMORY: 
 			fprintf(fd, "memory allocation failure ");
 			break;
-		case BRP_ERR_FILE_NOT_FOUND: 
-			fprintf(fd, "could not open provided file (reason: %s) ", strerror(obj->sys_errno));
+		case BRP_ERR_FILE_NOT_FOUND:
+			fprintf(fd, "could not open file `%.*s` (reason: %s) ", unpack(obj->error_symbol), strerror(errno));
 			break;
 		case BRP_ERR_SYMBOL_CONFLICT:
 			fprintf(
@@ -507,6 +561,12 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 				"symbol conflict: symbol `%.*s` will be incorrectly parsed; to solve this, place it before the symbol that has a common start ",
 				unpack(obj->error_symbol)
 			);
+			break;
+		case BRP_ERR_INVALID_CMD_SYNTAX:
+			fprintf(fd, "invalid BRP directive syntax ");
+			break;
+		case BRP_ERR_UNKNOWN_CMD:
+			fprintf(fd, "unknown BRP directive `%.*s` ", unpack(obj->error_symbol));
 			break;
 		default: fprintf(fd, "unreachable");
 	}
@@ -521,13 +581,30 @@ void printBRPError(FILE* fd, BRP* obj)
 	}
 }
 
+BRP* initBRP(BRP* obj, BRPErrorHandler handler)
+{
+	*obj = (BRP){0};
+	obj->pending = TokenQueue_new(0);
+	obj->error_loc = (TokenLoc){0};
+	obj->handler = handler;
+	obj->cur_input = NULL;
+
+	return obj;
+}
+
 void delBRP(BRP* obj)
 {
 	free(obj->keywords);
 	free(obj->symbols);
 	free(obj->hidden_symbols);
 	TokenQueue_delete(&obj->pending);
-	InputCtxArray_clear(&obj->sources);
+
+	InputCtx* ctx = obj->cur_input;
+	while (ctx) {
+		InputCtx* prev = ctx->prev;
+		free(ctx);
+		ctx = prev;
+	}
 }
 
 #endif // _BRP_

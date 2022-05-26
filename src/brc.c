@@ -322,30 +322,30 @@ static char expr_order_table[] = {
 };
 static_assert(N_EXPR_TYPES == 53, "not all expression types have their arity and order set");
 
-static void initExpr(Expr* expr)
+static inline void initExpr(Expr* expr)
 {
     *(ExprChain*)expr = ExprChain_new(0);
 }
 
-static ExprChain* getSubexprs(Expr* expr)
+static inline ExprChain* getSubexprs(Expr* expr)
 {
     assert(expr_arity_table[expr->type] == VARIADIC);
     return (ExprChain*)expr;
 }
 
-static Expr* addSubexpr(Expr* expr, Expr new)
+static inline Expr* addSubexpr(Expr* expr, Expr new)
 {
     assert(expr_arity_table[expr->type] == VARIADIC);
     return ExprChain_append(getSubexprs(expr), new);
 }
 
-static Expr* getSubexpr(Expr* expr, int id)
+static inline Expr* getSubexpr(Expr* expr, int id)
 {
     assert(expr_arity_table[expr->type] == VARIADIC);
     return ExprChain_getref(*getSubexprs(expr), id);
 }
 
-static int getSubexprsCount(Expr* expr)
+static inline int getSubexprsCount(Expr* expr)
 {
     assert(expr_arity_table[expr->type] == VARIADIC);
     return ExprChain_length(*getSubexprs(expr));
@@ -529,16 +529,16 @@ void _raiseUnexpectedTokenError(AST* ast, Token actual, const char* msg, ...)
     va_end(args);
 
     fprintTokenLoc(stderr, actual.loc);
-    eputs("error: expected");
+    eputs("error: expected ");
     va_start(args, msg);
     for (int n = 0; n < n_tokens; n++) {
         Token iter = va_arg(args, Token);
 
         if (iter.type == TOKEN_WORD) {
-            eputs(" a word");
+            eputs("a word");
         } else if (iter.type == TOKEN_INT) {
-            eputs(" an integer");
-        } else fprintTokenStr(stderr, va_arg(args, Token), ast->prep);
+            eputs("an integer");
+        } else fprintTokenStr(stderr, iter, ast->prep);
         if (n == n_tokens - 2) {
             eputs(" or ");
         } else if (n != n_tokens - 1) eputs(", ");
@@ -1564,7 +1564,7 @@ typedef bool (*KwParser) (AST*, Token, Expr*, Expr*, FuncDecl*, int);
 bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
 {
     dst->loc = token.loc;
-    if (setExprType(ast, dst, parent_expr,EXPR_SYSCALL)) {
+    if (setExprType(ast, dst, parent_expr, EXPR_SYSCALL)) {
         unfetchToken(ast->prep, token);
         return true;
     }
@@ -1584,7 +1584,7 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
         .type = EXPR_NAME,
         .name = token.word,
         .block = dst->block,
-        .loc = dst->loc
+        .loc = token.loc
     });
 
     token = fetchToken(ast->prep);
@@ -3795,9 +3795,9 @@ bool compileAST(AST* src, FILE* dst)
 void handleBRPError(BRP* obj)
 {
     fprintTokenLoc(stderr, obj->error_loc);
-    eprintf("preprocessor error: \"");
+    eprintf("preprocessor error: ");
     printBRPErrorStr(stderr, obj);
-    eputs("\"\n");
+    eputc('\n');
     exit(1);
 }
 
@@ -3824,7 +3824,6 @@ void printUsageMsg(FILE* dst, char* program_name)
 
 int main(int argc, char* argv[])
 {
-    initBREnv();
     startTimer();
     TYPE_STR_LITERAL.kind = KIND_PTR;
     TypeDef str_lit_base = (TypeDef){ .kind = KIND_INT, .size = 1 };
@@ -3908,7 +3907,7 @@ int main(int argc, char* argv[])
         vbrb_visual_output_path = tostr(fromcstr("~"), setFileExt_s(fromstr(input_path), fromcstr(VBRB_EXT)));
 
     BRP prep;
-    if (!initBRP(&prep, &handleBRPError)) {
+    if (!initBRP(&prep, handleBRPError)) {
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
         return 1;
     }
@@ -3951,7 +3950,8 @@ int main(int argc, char* argv[])
         BRP_SYMBOL("["),
         BRP_SYMBOL("]"),
         BRP_HIDDEN_SYMBOL(" "),
-        BRP_HIDDEN_SYMBOL("\t")
+        BRP_HIDDEN_SYMBOL("\t"),
+        BRP_HIDDEN_SYMBOL("\n")
     );
     static_assert(N_KWS == 17, "not all keywords are handled");
     setKeywords(
@@ -3974,7 +3974,7 @@ int main(int argc, char* argv[])
         BRP_KEYWORD("while"),
         BRP_KEYWORD("for")
     );
-	setInput(&prep, input_path);
+	appendInput(&prep, input_path, fopen(input_path, "r"));
 
     AST ast;
     parseSourceCode(&prep, &ast);

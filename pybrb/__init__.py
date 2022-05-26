@@ -449,5 +449,3 @@ lib.initExecEnv.restype = None
 
 lib.execModule.argtypes = [ctypes.POINTER(ExecEnv), ctypes.POINTER(Module), ctypes.POINTER(ctypes.c_bool)]
 lib.execModule.restype = None
-
-lib.initBREnv()

@@ -16,8 +16,16 @@
 #include "time.h"
 
 #define UINT48_MAX 0xFFFFFFFFFFFFULL
-extern bool IS_BIG_ENDIAN;
-extern bool IS_LITTLE_ENDIAN;
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && defined(__ORDER_LITTLE_ENDIAN__)
+#define IS_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define IS_LITTLE_ENDIAN (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#elif defined(IS_BIG_ENDIAN) && IS_BIG_ENDIAN == 1
+#define IS_LITTLE_ENDIAN 0
+#elif defined(IS_LITTLE_ENDIAN) && IS_LITTLE_ENDIAN == 1
+#define IS_BIG_ENDIAN 0
+#else
+#error "could not automatically detect system endianness; if your system is big-endian, put `#define IS_BIG_ENDIAN 1` before importing `br.h`, if your system is little-endian, put `#define IS_LITTLE_ENDIAN 1` before importing `br.h`"
+#endif
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 #define eputc(ch) fputc(ch, stderr)
@@ -34,8 +42,11 @@ extern bool IS_LITTLE_ENDIAN;
 #define VBRB_EXT ".vbrb"
 #define BR_EXT ".br"
 
-void initBREnv(void);
+#if IS_LITTLE_ENDIAN
 void* BRByteOrder(void* src, long length);
+#else
+#define BRByteOrder(src, length) (src)
+#endif
 
 static struct timespec TIME;
 bool startTimerAt(struct timespec* dst);

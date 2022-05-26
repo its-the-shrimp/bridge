@@ -12,7 +12,7 @@
 - ~Complex assignment expressions (`+=`, `&=`, etc.)~
 - ~Array variables~
 - ~Pointer arithmetic~
-- BRP: includes
+- ~BRP: includes~
 - BRP: macros
 - BRB: encapsulation
 - `public` functions and globals

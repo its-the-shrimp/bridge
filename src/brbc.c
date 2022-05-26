@@ -375,7 +375,7 @@ void compileOpAndNative(Module* module, int index, CompCtx* ctx)
 
 	if ((uint64_t)op.value < 4096) {
 		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tand %hhd, %hhd, %llu\n", op.dst_reg, op.src_reg, op.value);
+		fprintf(ctx->dst, "\tand x%hhd, x%hhd, %llu\n", op.dst_reg, op.src_reg, op.value);
 	} else {
 		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
 		compileNativeImmSet(ctx->dst, 8, op.value);
@@ -678,15 +678,10 @@ void compileOpMulrNative(Module* module, int index, CompCtx* ctx)
 void compileOpDivNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
-	if ((uint64_t)op.value < 4096) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tudiv x%hhd, x%hhd, %llu\n", op.dst_reg, op.src_reg, op.value);
-	} else {
-		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-		compileNativeImmSet(ctx->dst, 8, op.value);
-		fprintf(ctx->dst, "\tudiv x%hhd, x%hhd, x8\n", op.dst_reg, op.src_reg);
-		endConditionalOp(ctx->dst, cond_ctx);
-	}
+	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
+	compileNativeImmSet(ctx->dst, 8, op.value);
+	fprintf(ctx->dst, "\tudiv x%hhd, x%hhd, x8\n", op.dst_reg, op.src_reg);
+	endConditionalOp(ctx->dst, cond_ctx);
 }
 
 void compileOpDivrNative(Module* module, int index, CompCtx* ctx)
@@ -699,15 +694,10 @@ void compileOpDivrNative(Module* module, int index, CompCtx* ctx)
 void compileOpDivsNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
-	if ((uint64_t)op.value < 4096) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tsdiv x%hhd, x%hhd, %llu\n", op.dst_reg, op.src_reg, op.value);
-	} else {
-		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-		compileNativeImmSet(ctx->dst, 8, op.value);
-		fprintf(ctx->dst, "\tsdiv x%hhd, x%hhd, x8\n", op.dst_reg, op.src_reg);
-		endConditionalOp(ctx->dst, cond_ctx);
-	}
+	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
+	compileNativeImmSet(ctx->dst, 8, op.value);
+	fprintf(ctx->dst, "\tsdiv x%hhd, x%hhd, x8\n", op.dst_reg, op.src_reg);
+	endConditionalOp(ctx->dst, cond_ctx);
 }
 
 void compileOpDivsrNative(Module* module, int index, CompCtx* ctx)
@@ -1017,45 +1007,24 @@ void compileOpModNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 	if (op.dst_reg == op.src_reg) {
-		if (op.value < 4096) {
-			fprintf(
-				ctx->dst,
-				"\tmov x8, x%1$hhd\n"
-				"\tudiv x%1$hhd, x%1$hhd, %2$lld\n"
-				"\tmul x%1$hhd, x%1$hhd, %2$lld\n"
-				"\tsub x%1$hhd, x8, x%1$hhd\n",
-				op.dst_reg, op.value
-			);
-		} else {
-			compileNativeImmSet(ctx->dst, 9, op.value);
-			fprintf(
-				ctx->dst,
-				"\tmov x8, x%1$hhd\n"
-				"\tudiv x%1$hhd, x%1$hhd, x9\n"
-				"\tmul x%1$hhd, x%1$hhd, x9\n"
-				"\tsub x%1$hhd, x8, x%1$hhd\n",
-				op.dst_reg
-			);
-		}
+		compileNativeImmSet(ctx->dst, 9, op.value);
+		fprintf(
+			ctx->dst,
+			"\tmov x8, x%1$hhd\n"
+			"\tudiv x%1$hhd, x%1$hhd, x9\n"
+			"\tmul x%1$hhd, x%1$hhd, x9\n"
+			"\tsub x%1$hhd, x8, x%1$hhd\n",
+			op.dst_reg
+		);
 	} else {
-		if (op.value < 4096) {
-			fprintf(
-				ctx->dst,
-				"\tudiv x%1$hhd, x%1$hhd, %2$lld\n"
-				"\tmul x%1$hhd, x%1$hhd, %2$lld\n"
-				"\tsub x%1$hhd, x%3$hhd, x%1$hhd\n",
-				op.dst_reg, op.value, op.src_reg
-			);
-		} else {
-			compileNativeImmSet(ctx->dst, 8, op.value);
-			fprintf(
-				ctx->dst,
-				"\tudiv x%1$hhd, x%1$hhd, x9\n"
-				"\tmul x%1$hhd, x%1$hhd, x9\n"
-				"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
-				op.dst_reg, op.src_reg
-			);
-		}
+		compileNativeImmSet(ctx->dst, 8, op.value);
+		fprintf(
+			ctx->dst,
+			"\tudiv x%1$hhd, x%1$hhd, x8\n"
+			"\tmul x%1$hhd, x%1$hhd, x8\n"
+			"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
+			op.dst_reg, op.src_reg
+		);
 	}
 }
 
@@ -1063,45 +1032,24 @@ void compileOpModsNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 	if (op.dst_reg == op.src_reg) {
-		if (op.value < 4096) {
-			fprintf(
-				ctx->dst,
-				"\tmov x8, x%1$hhd\n"
-				"\tsdiv x%1$hhd, x%1$hhd, %2$lld\n"
-				"\tmul x%1$hhd, x%1$hhd, %2$lld\n"
-				"\tsub x%1$hhd, x8, x%1$hhd\n",
-				op.dst_reg, op.value
-			);
-		} else {
-			compileNativeImmSet(ctx->dst, 9, op.value);
-			fprintf(
-				ctx->dst,
-				"\tmov x8, x%1$hhd\n"
-				"\tsdiv x%1$hhd, x%1$hhd, x9\n"
-				"\tmul x%1$hhd, x%1$hhd, x9\n"
-				"\tsub x%1$hhd, x8, x%1$hhd\n",
-				op.dst_reg
-			);
-		}
+		compileNativeImmSet(ctx->dst, 9, op.value);
+		fprintf(
+			ctx->dst,
+			"\tmov x8, x%1$hhd\n"
+			"\tsdiv x%1$hhd, x%1$hhd, x9\n"
+			"\tmul x%1$hhd, x%1$hhd, x9\n"
+			"\tsub x%1$hhd, x8, x%1$hhd\n",
+			op.dst_reg
+		);
 	} else {
-		if (op.value < 4096) {
-			fprintf(
-				ctx->dst,
-				"\tsdiv x%1$hhd, x%1$hhd, %2$lld\n"
-				"\tmul x%1$hhd, x%1$hhd, %2$lld\n"
-				"\tsub x%1$hhd, x%3$hhd, x%1$hhd\n",
-				op.dst_reg, op.value, op.src_reg
-			);
-		} else {
-			compileNativeImmSet(ctx->dst, 8, op.value);
-			fprintf(
-				ctx->dst,
-				"\tsdiv x%1$hhd, x%1$hhd, x9\n"
-				"\tmul x%1$hhd, x%1$hhd, x9\n"
-				"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
-				op.dst_reg, op.src_reg
-			);
-		}
+		compileNativeImmSet(ctx->dst, 8, op.value);
+		fprintf(
+			ctx->dst,
+			"\tsdiv x%1$hhd, x%1$hhd, x8\n"
+			"\tmul x%1$hhd, x%1$hhd, x8\n"
+			"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
+			op.dst_reg, op.src_reg
+		);
 	}
 }
 
@@ -1129,8 +1077,8 @@ void compileOpModrNative(Module* module, int index, CompCtx* ctx)
 	} else {
 		fprintf(
 			ctx->dst,
-			"\tudiv x%1$hhd, x%2$hhd, %3$hhd\n"
-			"\tmul x%1$hhd, x%1$hhd, %3$hhd\n"
+			"\tudiv x%1$hhd, x%2$hhd, x%3$hhd\n"
+			"\tmul x%1$hhd, x%1$hhd, x%3$hhd\n"
 			"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
 			op.dst_reg, op.src_reg, op.src2_reg
 		);
@@ -1161,8 +1109,8 @@ void compileOpModsrNative(Module* module, int index, CompCtx* ctx)
 	} else {
 		fprintf(
 			ctx->dst,
-			"\tsdiv x%1$hhd, x%2$hhd, %3$hhd\n"
-			"\tmul x%1$hhd, x%1$hhd, %3$hhd\n"
+			"\tsdiv x%1$hhd, x%2$hhd, x%3$hhd\n"
+			"\tmul x%1$hhd, x%1$hhd, x%3$hhd\n"
 			"\tsub x%1$hhd, x%2$hhd, x%1$hhd\n",
 			op.dst_reg, op.src_reg, op.src2_reg
 		);
@@ -1276,6 +1224,7 @@ void compileByteCode(Module* src, FILE* dst)
 			DEFAULT_ENTRY_NAME":\n"
 			"\tmov x28, x0\n"
 			"\tmov x27, x1\n"
+			"\tmov x26, 0\n"
 			"\tmov x0, 0\n"
 			"\tmov x1, 0\n"
 			"\tmov x2, 0\n"
@@ -1284,7 +1233,6 @@ void compileByteCode(Module* src, FILE* dst)
 			"\tmov x5, 0\n"
 			"\tmov x6, 0\n"
 			"\tmov x7, 0\n"
-			"\tmov x8, 0\n"
 			"\tbl main\n"
 			"\tmov x0, 0\n"
 			"\tmov x16, 1\n"
@@ -1320,7 +1268,6 @@ void printUsageMsg(FILE* fd, char* execname)
 
 int main(int argc, char* argv[])
 {
-    initBREnv();
 	startTimer();
 
     char *input_path = NULL, *exec_output_path = NULL, *asm_output_path = NULL, *obj_output_path = NULL;

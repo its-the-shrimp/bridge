@@ -18,7 +18,6 @@ void printUsageMsg(FILE* fd, char* execname)
 
 int main(int argc, char* argv[])
 {
-	initBREnv();
 	startTimer();
 
 	char *input_path = NULL, *output_path = NULL;

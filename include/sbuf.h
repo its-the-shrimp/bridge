@@ -15,7 +15,27 @@
 #define sbufshift(obj, offset) obj.length -= offset; obj.data += offset;
 #define sbufpshift(obj, offset) obj->length -= offset; obj->data += offset;
 
+static char _CHARSET[UINT8_MAX + 1] = {
+	0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,
+	16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
+	32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
+	48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,
+	64,  65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,
+	80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
+	96,  97,  98,  99,  100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+	112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127,
+	128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+	144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+	160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
+	176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+	192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
+	208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+	224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
+	240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255
+};
+
 #define fromcstr(src) ((sbuf){ .data = src, .length = sizeof(src) - 1 })
+#define fromchar(src) ((sbuf){ .data = &_CHARSET[src], .length = 1 })
 #define fromstr(src) ((sbuf){ .data = src, .length = strlen(src) })
 #define sbufslice(obj, start, end) ((sbuf){ .data = (obj).data + start, .length = (end < 0 ? (obj).length : end) - start })
 
@@ -37,70 +57,90 @@ typedef struct sbuf {
 
 #define CSTRTERM ((sbuf){ .data = "\0", .length = 1 })
 
-sbuf _sbufconcat(int _, ...);
 sbuf filecontent(FILE* fd);
-char lowerchar(char src);
-sbuf _sbufsplitesc(sbuf* src, sbuf* dst, ...);
-int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[]);
-sbuf _sbufsplit(sbuf* src, sbuf* dst, ...);
-sbuf _sbufsplitr(sbuf* src, sbuf* dst, ...);
-int sbufsplitv(sbuf* src, sbuf* dst, sbuf delims[]);
 sbuf sbufunesc(sbuf src);
 sbuf_size_t sbufutf8len(sbuf obj);
 bool sbufascii(sbuf obj);
-bool sbufspace(sbuf obj);
 bool sbufstartswith(sbuf obj, sbuf sub);
 bool sbufendswith(sbuf obj, sbuf sub);
-bool sbufeq(sbuf item1, sbuf item2);
-bool sbufint(sbuf src);
-long sbuftoint(sbuf obj);
-sbuf_size_t sbufstriplv(sbuf* src, sbuf items[]);
-sbuf_size_t _sbufstripl(sbuf* src, ...);
-sbuf_size_t sbufstriprv(sbuf* src, sbuf items[]);
-sbuf_size_t _sbufstripr(sbuf* src, ...);
-char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
-sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format);
-sbuf_size_t sbufindex(sbuf obj, sbuf sub);
-sbuf_size_t sbufcount(sbuf obj, sbuf items);
-sbuf sbufcopy(sbuf obj);
-sbuf sbufcutv(sbuf* src, sbuf items[]);
-sbuf sbufcutva(sbuf* src, va_list args);
-sbuf _sbufcut(sbuf* src, ...);
-sbuf sbufcutrv(sbuf* src, sbuf items[]);
-sbuf sbufcutrva(sbuf* src, va_list args);
-sbuf _sbufcutr(sbuf* src, ...);
-sbuf sbufwrite(sbuf dst, sbuf src, sbuf_size_t offset);
+bool sbufspace(sbuf obj);
 
-sbuf smalloc(sbuf_size_t size);
-bool srealloc(sbuf* obj, sbuf_size_t size);
-void sfree(sbuf* obj);
-
-#define streq(str1, str2) sbufeq(fromstr(str1), fromstr(str2))
-
+sbuf _sbufconcat(int _, ...);
 #define sbufconcat(...) _sbufconcat(0, __VA_ARGS__, (sbuf){0})
 #define tostr(...) (sbufconcat(__VA_ARGS__, CSTRTERM).data)
 #define strcopy(ptr) (sbufconcat(fromstr(ptr), CSTRTERM).data)
 
-#define sbufsplit(src, dst, ...) _sbufsplit(src, dst, __VA_ARGS__, (sbuf){0})
-#define sbufsplitr(src, dst, ...) _sbufsplitr(src, dst, __VA_ARGS__, (sbuf){0})
+int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[]);
+sbuf _sbufsplitesc(sbuf* src, sbuf* dst, ...);
 #define sbufsplitesc(src, dst, ...) _sbufsplitesc(src, dst, __VA_ARGS__, (sbuf){0})
-#define sbufcut(src, ...) _sbufcut(src, __VA_ARGS__, (sbuf){0})
-#define sbufcutr(src, ...) _sbufcutr(src, __VA_ARGS__, (sbuf){0})
 
+int sbufsplitv(sbuf* src, sbuf* dst, sbuf delims[]);
+sbuf _sbufsplit(sbuf* src, sbuf* dst, ...);
+#define sbufsplit(src, dst, ...) _sbufsplit(src, dst, __VA_ARGS__, (sbuf){0})
+
+int sbufsplitrv(sbuf* src, sbuf* dst, sbuf delims[]);
+sbuf _sbufsplitr(sbuf* src, sbuf* dst, ...);
+#define sbufsplitr(src, dst, ...) _sbufsplitr(src, dst, __VA_ARGS__, (sbuf){0})
+
+bool sbufeq(sbuf item1, sbuf item2);
+#define streq(str1, str2) sbufeq(fromstr(str1), fromstr(str2))
+
+bool sbufint(sbuf src);
+long sbuftoint(sbuf obj);
+
+sbuf sbufstriplc(sbuf* src, sbuf set);
+sbuf sbufstriplv(sbuf* src, sbuf items[]);
+sbuf sbufstriplva(sbuf* src, va_list args);
+sbuf _sbufstripl(sbuf* src, ...);
 #define sbufstripl(src, ...) _sbufstripl(src, __VA_ARGS__, (sbuf){0})
+
+sbuf sbufstriprc(sbuf* src, sbuf set);
+sbuf sbufstriprv(sbuf* src, sbuf items[]);
+sbuf sbufstriprva(sbuf* src, va_list args);
+sbuf _sbufstripr(sbuf* src, ...);
 #define sbufstripr(src, ...) _sbufstripr(src, __VA_ARGS__, (sbuf){0})
 
-#define fputsbuflnesc(fd, obj, format) fputsbufesc(fd, obj, format); fputc('\n', fd)
-#define putsbufesc(obj, format) fputsbufesc(stdout, obj, format)
-#define putsbuflnesc(obj, format) putsbufesc(obj, format); putchar('\n')
+sbuf_size_t sbufstripc(sbuf* src, sbuf* ldst, sbuf* rdst, sbuf set);
+sbuf_size_t sbufstripv(sbuf* src, sbuf* ldst, sbuf* rdst, sbuf items[]);
+sbuf_size_t _sbufstrip(sbuf* src, sbuf* ldst, sbuf* rdst, ...);
+#define sbufstrip(src, ldst, rdst, ...) _sbufstrip(src, ldst, rdst, __VA_ARGS__, (sbuf){0})
+
+char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 #define putcharesc(obj, format) fputcesc(stdout, obj, format)
 
+sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format);
+#define fputsbuflnesc(fd, obj, format) fputsbufesc(fd, obj, format); fputc('\n', fd)
 #define fputsbuf(fd, obj) fputsbufesc(fd, obj, BYTEFMT_RAW)
-#define putsbuf(obj) fputsbuf(stdout, obj)
 #define fputsbufln(fd, obj) fputsbuf(fd, obj); fputc('\n', fd)
+#define putsbufesc(obj, format) fputsbufesc(stdout, obj, format)
+#define putsbuflnesc(obj, format) putsbufesc(obj, format); putchar('\n')
+#define putsbuf(obj) fputsbuf(stdout, obj)
 #define putsbufln(obj) fputsbufln(stdout, obj)
 
-#define lowerchar(ch) ( ch >= 'A' ? ch | 32 : ch )
+sbuf_size_t sbufindex(sbuf obj, sbuf sub);
+sbuf sbufcopy(sbuf obj);
+
+sbuf_size_t sbufcount_c(sbuf obj, sbuf set);
+sbuf_size_t sbufcount_v(sbuf obj, sbuf items[]);
+sbuf_size_t sbufcount_va(sbuf obj, va_list);
+sbuf_size_t _sbufcount(sbuf obj, ...);
+#define sbufcount(src, ...) _sbufcount(src, __VA_ARGS__, (sbuf){0})
+
+char sbufcutc(sbuf* src, sbuf set);
+int sbufcutv(sbuf* src, sbuf items[]);
+sbuf sbufcutva(sbuf* src, va_list args);
+sbuf _sbufcut(sbuf* src, ...);
+#define sbufcut(src, ...) _sbufcut(src, __VA_ARGS__, (sbuf){0})
+
+char sbufcutrc(sbuf* src, sbuf set);
+int sbufcutrv(sbuf* src, sbuf items[]);
+sbuf sbufcutrva(sbuf* src, va_list args);
+sbuf _sbufcutr(sbuf* src, ...);
+#define sbufcutr(src, ...) _sbufcutr(src, __VA_ARGS__, (sbuf){0})
+
+sbuf smalloc(sbuf_size_t size);
+bool srealloc(sbuf* obj, sbuf_size_t size);
+void sfree(sbuf* obj);
 
 #endif  // _SBUF_
 
@@ -129,15 +169,11 @@ sbuf _sbufconcat(int _, ...)
 // if an error occures, a zero-initialized sized string is returned.
 sbuf filecontent(FILE* fd)
 {
-	if (fd == NULL || ferror(fd) || feof(fd)) { 
-		return (sbuf){0}; 
-	}
+	if (fd == NULL || ferror(fd) || feof(fd)) return (sbuf){0};
 	char temp[1024];
 	sbuf res = smalloc(0);
-	int chunk_size;
 
-	while (feof(fd) == 0 && ferror(fd) == 0)
-	{
+	while (feof(fd) == 0 && ferror(fd) == 0) {
 		int chunk_size = fread(temp, 1, sizeof(temp), fd);
 		if (!srealloc(&res, res.length + chunk_size)) {
 			sfree(&res);
@@ -152,9 +188,8 @@ sbuf filecontent(FILE* fd)
 // returns a bool, indicating whether `item` is in sbuf object `src`
 bool sbufcontains(sbuf src, char item)
 {
-	for (int i = 0; i < src.length; i++)
-	{
-		if (src.data[i] == item) { return true; }
+	for (int i = 0; i < src.length; i++) {
+		if (src.data[i] == item) return true;
 	}
 	return false;
 }
@@ -164,19 +199,11 @@ sbuf _sbufsplit(sbuf* src, sbuf* dst, ...)
 	va_list args;
 	dst->length = 0;
 	dst->data = src->data;
-	while (src->length > 0)
-	{
+	while (src->length > 0) {
 		va_start(args, dst);
-		for (sbuf delim = va_arg(args, sbuf); delim.data != NULL; delim = va_arg(args, sbuf))
-		{
-			if (sbufstartswith(*src, delim))
-			{
-				sbufpshift(src, delim.length);
-				va_end(args);
-				return (sbuf){ .data = src->data - delim.length, .length = delim.length };
-			}
-		}
+		sbuf delim = sbufcutva(src, args);
 		va_end(args);
+		if (delim.data) return delim;
 		sbufpshift(src, 1);
 		dst->length++;
 	}
@@ -186,23 +213,16 @@ sbuf _sbufsplit(sbuf* src, sbuf* dst, ...)
 sbuf _sbufsplitr(sbuf* src, sbuf* dst, ...)
 {
 	va_list args;
-	dst->length = 0;
-	dst->data = src->data + src->length;
-	while (src->length > 0) {
+	*dst = *src;
+	src->data += src->length;
+	src->length = 0;
+	while (dst->length > 0) {
 		va_start(args, dst);
-		for (sbuf delim = va_arg(args, sbuf); delim.data != NULL; delim = va_arg(args, sbuf)) {
-			if (sbufendswith(*src, delim)) {
-				src->length -= delim.length;
-				va_end(args);
-				sbuf swp = *dst;
-				*dst = *src;
-				*src = swp;
-				return (sbuf){ .data = dst->data + dst->length, .length = delim.length };
-			}
-		}
+		sbuf delim = sbufcutrva(dst, args);
 		va_end(args);
-		src->length--;
-		sbufpshift(dst, -1);
+		if (delim.data) return delim;
+		sbufpshift(src, -1);
+		dst->length--;
 	}
 	return (sbuf){0};
 }
@@ -211,18 +231,25 @@ int sbufsplitv(sbuf* src, sbuf* dst, sbuf delims[])
 {
 	dst->length = 0;
 	dst->data = src->data;
-	while (src->length > 0)
-	{
-		for (int i = 0; delims[i].data; i++)
-		{
-			if (sbufstartswith(*src, delims[i]))
-			{
-				sbufpshift(src, delims[i].length);
-				return i;
-			}
-		}
+	while (src->length > 0) {
+		int delim_id = sbufcutv(src, delims);
+		if (delim_id >= 0) return delim_id;
 		sbufpshift(src, 1);
 		dst->length++;
+	}
+	return -1;
+}
+
+int sbufsplitrv(sbuf* src, sbuf* dst, sbuf delims[])
+{
+	*dst = *src;
+	src->data += src->length;
+	src->length = 0;
+	while (dst->length > 0) {
+		int delim_id = sbufcutrv(dst, delims);
+		if (delim_id >= 0) return delim_id;
+		sbufpshift(src, -1);
+		dst->length--;
 	}
 	return -1;
 }
@@ -237,10 +264,8 @@ sbuf _sbufsplitesc(sbuf* src, sbuf* dst, ...)
 	while (src->length > 0)
 	{
 		va_start(args, dst);
-		for (sbuf delim = va_arg(args, sbuf); delim.data != NULL; delim = va_arg(args, sbuf))
-		{
-			if (sbufstartswith(*src, delim) && prevchar != '\\')
-			{
+		for (sbuf delim = va_arg(args, sbuf); delim.data != NULL; delim = va_arg(args, sbuf)) {
+			if (sbufstartswith(*src, delim) && prevchar != '\\') {
 				sbufpshift(src, delim.length);
 				va_end(args);
 				return (sbuf){ .data = src->data - delim.length, .length = delim.length };
@@ -259,12 +284,9 @@ int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[])
 	dst->length = 0;
 	dst->data = src->data;
 	char prevchar = '\0';
-	while (src->length > 0)
-	{
-		for (int i = 0; delims[i].data; i++)
-		{
-			if (sbufstartswith(*src, delims[i]) && prevchar != '\\')
-			{
+	while (src->length > 0) {
+		for (int i = 0; delims[i].data; i++) {
+			if (sbufstartswith(*src, delims[i]) && prevchar != '\\') {
 				sbufpshift(src, delims[i].length);
 				return i;
 			}
@@ -276,6 +298,7 @@ int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[])
 	return -1;
 }
 
+#define lowerchar(ch) ( ch >= 'A' ? ch | 32 : ch )
 // returns a newly allocated string with data from the sized string `src` unescaped.
 sbuf sbufunesc(sbuf src)
 {
@@ -329,16 +352,6 @@ bool sbufascii(sbuf obj)
 	return true;
 }
 
-// returns `true` if the sized string `obj` only consists of tabs, newlines, spaces or other control characters,
-// otherwise returns `false` 
-bool sbufspace(sbuf obj)
-{
-	for (size_t i = 0; i < obj.length; i++) {
-		if (obj.data[i] > 32) return false;
-	}
-	return true;
-}
-
 // returns `true` if the sized string `obj` starts with the sequence, equal to the sequence in the sized string `sub`,
 // otherwise returns `false`
 bool sbufstartswith(sbuf obj, sbuf sub)
@@ -358,6 +371,16 @@ bool sbufendswith(sbuf obj, sbuf sub)
 	if (sub.length > obj.length) return false;
 	for (sbuf_size_t i = offset; i < obj.length; i++) {
 		if (obj.data[i] != sub.data[i - offset]) return false;
+	}
+	return true;
+}
+
+// returns `true` if the sized string `obj` only consists of tabs, newlines, spaces or other control characters,
+// otherwise returns `false` 
+bool sbufspace(sbuf obj)
+{
+	for (size_t i = 0; i < obj.length; i++) {
+		if (obj.data[i] > 32) return false;
 	}
 	return true;
 }
@@ -428,55 +451,124 @@ long sbuftoint(sbuf obj)
 	return res;
 }
 
-sbuf_size_t sbufstriplv(sbuf* src, sbuf items[])
+sbuf sbufstriplc(sbuf* src, sbuf set)
 {
-	sbuf_size_t n_stripped = 0;
+	sbuf res = { .data = src->data, .length = 0 };
 	while (true) {
-		sbuf item = sbufcutv(src, items);
-		if (!item.length) break;
-		n_stripped += item.length;
+		char item = sbufcutc(src, set);
+		if (!item) break;
+		res.length++;
 	}
-	return n_stripped;
+	return res;
 }
-// strips the sbuf object `src` of the characters in an sbuf object `items` from the left, 
-// and returns the number of characters stripped
-sbuf_size_t _sbufstripl(sbuf* src, ...)
+// strips buffers in `items` from `src`, returns the stripped buffer
+sbuf sbufstriplv(sbuf* src, sbuf items[])
 {
-	sbuf_size_t n_stripped = 0;
-	va_list args;
+	sbuf res = { .data = src->data, .length = 0 };
 	while (true) {
-		va_start(args, src);
-		sbuf item = sbufcutva(src, args);
-		va_end(args);
-		if (!item.length) break;
-		n_stripped += item.length;
+		int item = sbufcutv(src, items);
+		if (item < 0) break;
+		res.length += items[item].length;
 	}
-	return n_stripped;
+	return res;
 }
 
-sbuf_size_t sbufstriprv(sbuf* src, sbuf items[])
+sbuf sbufstriplva(sbuf* src, va_list args)
 {
-	sbuf_size_t n_stripped = 0;
+	sbuf res = { .data = src->data, .length = 0 };
+	va_list args_l;
 	while (true) {
-		sbuf item = sbufcutrv(src, items);
-		if (!item.length) break;
-		n_stripped += item.length;
-	}
-	return n_stripped;
-}
-
-sbuf_size_t _sbufstripr(sbuf* src, ...)
-{
-	sbuf_size_t n_stripped = 0;
-	va_list args;
-	while (true) {
-		va_start(args, src);
-		sbuf item = sbufcutrva(src, args);
+		va_copy(args_l, args);
+		sbuf item = sbufcutva(src, args_l);
 		va_end(args);
 		if (!item.length) break;
-		n_stripped += item.length;
+		res.length += item.length;
 	}
-	return n_stripped;
+	return res;
+}
+
+sbuf _sbufstripl(sbuf* src, ...)
+{
+	va_list args;
+	va_start(args, src);
+	sbuf res = sbufstriplva(src, args);
+	va_end(args);
+	return res;
+}
+
+sbuf sbufstriprc(sbuf* src, sbuf set)
+{
+	sbuf res = { .data = src->data, .length = 0 };
+	while (true) {
+		char item = sbufcutrc(src, set);
+		if (!item) break;
+		res.length++;
+	}
+	return res;
+}
+
+sbuf sbufstriprv(sbuf* src, sbuf items[])
+{
+	sbuf res = { .data = src->data + src->length, .length = 0 };
+	while (true) {
+		int item = sbufcutrv(src, items);
+		if (item < 0) break;
+		sbufshift(res, -items[item].length);
+	}
+	return res;
+}
+
+sbuf sbufstriprva(sbuf* src, va_list args)
+{
+	sbuf res = { .data = src->data + src->length, .length = 0 };
+	va_list args_l;
+	while (true) {
+		va_copy(args_l, args);
+		sbuf item = sbufcutrva(src, args_l);
+		va_end(args);
+		if (!item.length) break;
+		sbufshift(res, -item.length);
+	}
+	return res;
+}
+
+sbuf _sbufstripr(sbuf* src, ...)
+{
+	va_list args;
+	va_start(args, src);
+	sbuf res = sbufstriprva(src, args);
+	va_end(args);
+	return res;
+}
+
+sbuf_size_t sbufstripc(sbuf* src, sbuf* ldst, sbuf* rdst, sbuf set)
+{
+	sbuf ldst_l = sbufstriplc(src, set);
+	if (ldst) *ldst = ldst_l;
+	sbuf rdst_l = sbufstriprc(src, set);
+	if (ldst) *rdst = rdst_l;
+
+	return rdst_l.length + ldst_l.length;
+}
+
+sbuf_size_t sbufstripv(sbuf* src, sbuf* ldst, sbuf* rdst, sbuf items[])
+{
+	sbuf ldst_l = sbufstriplv(src, items);
+	if (ldst) *ldst = ldst_l;
+	sbuf rdst_l = sbufstriprv(src, items);
+	if (ldst) *rdst = rdst_l;
+
+	return rdst_l.length + ldst_l.length;
+}
+
+sbuf_size_t sbufstripva(sbuf* src, sbuf* ldst, sbuf* rdst, va_list args)
+{
+	sbuf ldst_l = sbufstriplva(src, args);
+	if (ldst) *ldst = ldst_l;
+	sbuf rdst_l = sbufstriprva(src, args);
+	if (ldst) *rdst = rdst_l;
+
+	return rdst_l.length + ldst_l.length;
 }
 
 // writes the character `obj` with escaping specified by a set of flags `format` to the file descriptor `fd`
@@ -544,14 +636,53 @@ sbuf_size_t sbufindex(sbuf obj, sbuf sub)
 	return -1;
 }
 
-// returns the amount of occurences of characters from sized string `items` in sized string `obj`
-sbuf_size_t sbufcount(sbuf obj, sbuf items)
+sbuf_size_t sbufcount_c(sbuf obj, sbuf set)
 {
 	sbuf_size_t res = 0;
 	while (obj.length > 0) {
-		if (memmem(items.data, items.length, obj.data, 1) != NULL) res++;
-		sbufshift(obj, 1);
+		if (memchr(set.data, *obj.data, set.length) != NULL) {
+			res++;
+		} else {
+			sbufshift(obj, 1);
+		}
 	}
+	return res;
+}
+
+sbuf_size_t sbufcount_v(sbuf obj, sbuf items[])
+{
+	sbuf_size_t res = 0;
+	while (obj.length > 0) {
+		if (sbufcutv(&obj, items) >= 0) {
+			res++;
+		} else {
+			sbufshift(obj, 1);
+		}
+	}
+
+	return res;
+}
+
+sbuf_size_t sbufcount_va(sbuf obj, va_list args)
+{
+	sbuf_size_t res = 0;
+	while (obj.length > 0) {
+		if (sbufcutva(&obj, args).data) {
+			res++;
+		} else {
+			sbufshift(obj, 1);
+		}
+	}
+
+	return res;
+}
+
+sbuf_size_t _sbufcount(sbuf obj, ...)
+{
+	va_list args;
+	va_start(args, obj);
+	sbuf_size_t res = sbufcount_va(obj, args);
+	va_end(args);
 	return res;
 }
 
@@ -563,15 +694,28 @@ sbuf sbufcopy(sbuf obj)
 	return res;
 }
 
-sbuf sbufcutv(sbuf* src, sbuf items[])
+char sbufcutc(sbuf* src, sbuf set)
+{
+	if (src->length == 0) return '\0';
+	for (int i = 0; i < set.length; i++) {
+		if (*src->data == set.data[i]) {
+			sbufpshift(src, 1);
+			return set.data[i];
+		}
+	}
+
+	return '\0';
+}
+
+int sbufcutv(sbuf* src, sbuf items[])
 {
 	for (int i = 0; items[i].data; i++) {
 		if (sbufstartswith(*src, items[i])) {
 			sbufpshift(src, items[i].length);
-			return items[i];
+			return i;
 		}
 	}
-	return (sbuf){0};
+	return -1;
 }
 
 sbuf sbufcutva(sbuf* src, va_list args)
@@ -595,15 +739,26 @@ sbuf _sbufcut(sbuf* src, ...)
 	return res;
 }
 
-sbuf sbufcutrv(sbuf* src, sbuf items[])
+char sbufcutrc(sbuf* src, sbuf set)
+{
+	if (src->length == 0) return '\0';
+	char src_chr = src->data[src->length - 1];
+	for (int i = 0; i < set.length; i++) {
+		if (src_chr == set.data[i]) return src->data[--src->length];
+	}
+
+	return '\0';
+}
+
+int sbufcutrv(sbuf* src, sbuf items[])
 {
 	for (int i = 0; items[i].data; i++) {
 		if (sbufendswith(*src, items[i])) {
 			src->length -= items[i].length;
-			return items[i];
+			return i;
 		}
 	}
-	return (sbuf){0};
+	return -1;
 }
 sbuf sbufcutrva(sbuf* src, va_list args)
 {
@@ -624,15 +779,6 @@ sbuf _sbufcutr(sbuf* src, ...)
 	sbuf res = sbufcutrva(src, args);
 	va_end(args);
 	return res;
-}
-
-sbuf sbufwrite(sbuf dst, sbuf src, sbuf_size_t offset)
-{
-	if (dst.data && src.data && dst.length - offset >= src.length) {
-		memcpy(dst.data + offset, src.data, src.length);
-		sbufshift(dst, offset + src.length);
-	}
-	return dst;
 }
 
 sbuf smalloc(long length)

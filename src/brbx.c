@@ -19,7 +19,6 @@ void printUsageMsg(FILE* fd, char* exec_name)
 }
 
 int main(int argc, char* argv[]) {
-	initBREnv();
 	char *input_name = NULL, **module_argv = NULL;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
@@ -60,8 +59,8 @@ int main(int argc, char* argv[]) {
 
 	signal(SIGINT, &handleExecInt);
 	ExecEnv env;
-	startTimer();
 	initExecEnv(&env, &module, module_argv);
+	startTimer();
 	execModule(&env, &module, &interrupt);
 	printf("executed in %.3f ms\n", endTimer());
 	signal(SIGINT, SIG_DFL);

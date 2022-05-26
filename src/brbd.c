@@ -267,7 +267,6 @@ void printUsageMsg(FILE* dst, char* exec_name)
 
 int main(int argc, char* argv[])
 {
-	initBREnv();
     char **module_argv, *input_name;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {

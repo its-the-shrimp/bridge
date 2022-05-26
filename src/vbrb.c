@@ -989,7 +989,8 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 		BRP_SYMBOL("}"),
 		BRP_SYMBOL(":"),
 		BRP_HIDDEN_SYMBOL(" "),
-		BRP_HIDDEN_SYMBOL("\t")
+		BRP_HIDDEN_SYMBOL("\t"),
+		BRP_HIDDEN_SYMBOL("\n")
 	);
 	setKeywords(
 		obj,
@@ -1003,12 +1004,8 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 		BRP_KEYWORD("memory"),
 		BRP_KEYWORD("load")
 	);
+	appendInput(obj, src_name, src);
 	
-	if (!setInputFrom(obj, src_name, src)) return (VBRBError){
-        .prep = obj,
-        .code = VBRB_ERR_PREPROCESSOR_FAILURE,
-    };
-
 	dst->entry_opid = -1;
 	dst->execblock = OpArray_new(0);
 	dst->memblocks = MemBlockArray_new(0);

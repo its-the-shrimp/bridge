@@ -1,4 +1,4 @@
-LIB = build/lib
+LIB = $(PWD)/build/lib
 BIN = build/bin
 SRC = src
 UTILFLAGS = -I include -L $(LIB) -lbrb
