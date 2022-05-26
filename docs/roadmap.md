@@ -13,6 +13,6 @@
 - ~Array variables~
 - ~Pointer arithmetic~
 - ~BRP: includes~
-- BRP: macros
-- BRB: encapsulation
+- ~BRP: macros~
+- BRP: conditional compilation
 - `public` functions and globals

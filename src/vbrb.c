@@ -1004,7 +1004,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 		BRP_KEYWORD("memory"),
 		BRP_KEYWORD("load")
 	);
-	appendInput(obj, src_name, src);
+	setInput(obj, src_name, src);
 	
 	dst->entry_opid = -1;
 	dst->execblock = OpArray_new(0);

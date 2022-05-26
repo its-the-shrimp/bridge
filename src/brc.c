@@ -2300,7 +2300,7 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
                 if (isPtrType(arg1_type)) {
                     if (expr->arg2->type == EXPR_INT) {
                         expr->arg2->int_literal *= getTypeSize(*arg1_type.base);
-                    } else {
+                    } else if (getTypeSize(*arg1_type.base) != 1) {
                         Expr* new_subexpr = expr->arg2;
                         expr->arg2 = malloc(sizeof(Expr));
                         *expr->arg2 = (Expr){
@@ -2320,7 +2320,7 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
                 } else if (isPtrType(arg2_type)) {
                     if (expr->arg1->type == EXPR_INT) {
                         expr->arg1->int_literal *= getTypeSize(*arg2_type.base);
-                    } else {
+                    } else if (getTypeSize(*arg1_type.base) != 1) {
                         Expr* new_subexpr = expr->arg1;
                         expr->arg1 = malloc(sizeof(Expr));
                         *expr->arg1 = (Expr){
@@ -3822,6 +3822,10 @@ void printUsageMsg(FILE* dst, char* program_name)
     );
 }
 
+#define DEBUG_OPT_TOKENS 0x1
+#define DEBUG_OPT_MACROS 0x2
+#define DEBUG_OPT_EXPRS 0x4
+
 int main(int argc, char* argv[])
 {
     startTimer();
@@ -3829,7 +3833,8 @@ int main(int argc, char* argv[])
     TypeDef str_lit_base = (TypeDef){ .kind = KIND_INT, .size = 1 };
     TYPE_STR_LITERAL.base = &str_lit_base;
 
-    bool print_ast = false, run_program = false, silent = false;
+    bool run_program = false, silent = false;
+    int debug_opts = 0;
     char *input_path = NULL, *brb_output_path = NULL, *vbrb_output_path = NULL;
     for (int i = 1; i < argc; i++) {
         bool go_on = false;
@@ -3841,7 +3846,17 @@ int main(int argc, char* argv[])
                         printUsageMsg(stdout, argv[0]);
                         return 0;
                     case 'd':
-                        print_ast = true;
+                        while (*(++argv[i])) {
+                            char debug_opt = *argv[i];
+                            if (debug_opt == 'T') {
+                                debug_opts |= DEBUG_OPT_TOKENS;
+                            } else if (debug_opt == 'M') {
+                                debug_opts |= DEBUG_OPT_MACROS;
+                            } else if (debug_opt == 'E') {
+                                debug_opts |= DEBUG_OPT_EXPRS;
+                            }
+                        }
+                        argv[i]--;
                         break;
                     case 'r':
                         run_program = true;
@@ -3974,15 +3989,33 @@ int main(int argc, char* argv[])
         BRP_KEYWORD("while"),
         BRP_KEYWORD("for")
     );
-	appendInput(&prep, input_path, fopen(input_path, "r"));
+	setInput(&prep, input_path, fopen(input_path, "r"));
+
+    if (debug_opts & DEBUG_OPT_TOKENS) {
+        while (true) {
+            Token token = fetchToken(&prep);
+            if (token.type == TOKEN_NONE) return 0;
+            printToken(token, &prep);
+        }
+    }
+
+    if (debug_opts & DEBUG_OPT_MACROS) {
+        while (true) {
+            Token token = fetchToken(&prep);
+            if (token.type == TOKEN_NONE) {
+                array_foreach(Macro, macro, prep.macros, 
+                    printTokenLoc(macro.def_loc);
+                    printf("#define %s %.*s\n", macro.name, unpack(macro.def));
+                );
+                return 0;
+            } 
+        }
+    }
 
     AST ast;
     parseSourceCode(&prep, &ast);
 
-    if (print_ast) {
-        printAST(&ast);
-        return 0;
-    }
+    if (debug_opts & DEBUG_OPT_EXPRS) printAST(&ast);
 
     FILE *vbrb_output;
     sbuf temp_vbrb_buffer = {0};

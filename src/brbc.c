@@ -93,7 +93,7 @@ uint64_t getNativeStackOffset(CompCtx* ctx, uint64_t offset)
 
 uint64_t getNativeStackSize(int size)
 {
-	return size ? (uint64_t)ceil((double)size / (double)ARM64_STACK_ALIGNMENT) * 16 : 16;
+	return (uint64_t)ceil((double)size / (double)ARM64_STACK_ALIGNMENT) * 16;
 }
 
 typedef void (*OpNativeCompiler) (Module*, int, CompCtx*);
@@ -643,11 +643,12 @@ void compileOpStr8Native(Module* module, int index, CompCtx* ctx)
 void compileOpVarNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
+	uint64_t old_stack_size = getNativeStackSize(ctx->cur_frame_size),
+		new_stack_size = getNativeStackSize(ctx->cur_frame_size + op.new_var_size);
 
-	if (getNativeStackSize(ctx->cur_frame_size) < getNativeStackSize(ctx->cur_frame_size + op.var_size) || !ctx->cur_frame_size) {
-		fprintf(ctx->dst, "\tsub sp, sp, 16\n");
-	}
-	ctx->cur_frame_size += op.var_size;
+	if (old_stack_size < new_stack_size)
+		fprintf(ctx->dst, "\tsub sp, sp, %llu\n", new_stack_size - old_stack_size);
+	ctx->cur_frame_size += op.new_var_size;
 }
 
 void compileOpSetvNative(Module* module, int index, CompCtx* ctx)
@@ -845,7 +846,7 @@ void compileOpPushvNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
 
-	if (getNativeStackSize(ctx->cur_frame_size) < getNativeStackSize(ctx->cur_frame_size + op.var_size) || !ctx->cur_frame_size) {
+	if (getNativeStackSize(ctx->cur_frame_size) < getNativeStackSize(ctx->cur_frame_size + op.var_size)) {
 		fprintf(ctx->dst, "\tsub sp, sp, 16\n");
 	}
 	ctx->cur_frame_size += op.var_size;

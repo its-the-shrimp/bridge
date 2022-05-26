@@ -959,10 +959,9 @@ void initExecEnv(ExecEnv* env, Module* module, char** args)
 	env->registers = calloc(N_REGS, sizeof(uint64_t)),
 	env->prev_stack_head = env->stack_head = env->stack_brk + module->stack_size;
 
-	sbuf* newblock;
+	env->memblocks = sbufArray_new(-module->memblocks.length);
 	array_foreach(MemBlock, block, module->memblocks,
-		newblock = sbufArray_append(&env->memblocks, smalloc(block.size));
-		memset(newblock->data, 0, newblock->length);
+		env->memblocks.data[_block] = scalloc(block.size);
 	);
 
 	env->exec_argc = 0;

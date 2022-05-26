@@ -77,6 +77,13 @@ typedef struct input_ctx {
 	TokenLoc cur_loc;
 } InputCtx;
 
+typedef struct macro {
+	char* name;
+	sbuf def;
+	TokenLoc def_loc;
+} Macro;
+declArray(Macro);
+
 declQueue(Token);
 typedef struct brp {
 	sbuf* keywords;
@@ -93,6 +100,7 @@ typedef struct brp {
 	InputCtx* cur_input;
 	TokenQueue pending;
 	TokenLoc last_loc;
+	MacroArray macros;
 } BRP;
 #define BRP_KEYWORD(spec) fromcstr(spec)
 #define BRP_SYMBOL(spec) fromcstr(spec)
@@ -115,19 +123,19 @@ bool _setKeywords(BRP* obj, ...);
 bool _setSymbols(BRP* obj, ...);
 #define setKeywords(obj, ...) _setKeywords(obj, __VA_ARGS__, (sbuf){0})
 #define setSymbols(obj, ...) _setSymbols(obj, __VA_ARGS__, (sbuf){0})
-bool appendInputFrom(BRP *obj, char *path, FILE* input_fd, TokenLoc include_loc);
-#define appendInput(obj, path, input_fd) appendInputFrom(obj, path, input_fd, (TokenLoc){0})
+bool appendInput(BRP *obj, FILE* input_fd, TokenLoc initial_loc, TokenLoc include_loc);
+#define setInput(obj, path, input_fd) appendInput(obj, input_fd, (TokenLoc){ .src_name = path, .colno = 1, .lineno = 1, .included_from = NULL }, (TokenLoc){0})
 Token fetchToken(BRP* obj);
 Token peekToken(BRP* obj);
 bool unfetchToken(BRP* obj, Token token);
 
-int fprintTokenLoc(FILE* fd, TokenLoc loc);
+void fprintTokenLoc(FILE* fd, TokenLoc loc);
 #define printTokenLoc(loc) fprintTokenLoc(stdout, loc)
 
-int fprintTokenStr(FILE* fd, Token token, BRP* obj);
+void fprintTokenStr(FILE* fd, Token token, BRP* obj);
 #define printTokenStr(token, parser) fprintTokenStr(stdout, token, parser)
 
-int fprintToken(FILE* fd, Token token, BRP* obj);
+void fprintToken(FILE* fd, Token token, BRP* obj);
 #define printToken(token, parser) fprintToken(stdout, token, parser)
 
 char* getTokenTypeName(TokenType type);
@@ -140,6 +148,7 @@ void printBRPError(FILE* fd, BRP* obj);
 #ifdef BRP_IMPLEMENTATION
 #undef BRP_IMPLEMENTATION
 
+defArray(Macro);
 defArray(sbuf);
 defQueue(Token);
 
@@ -246,24 +255,18 @@ bool _setSymbols(BRP* obj, ...)
 	return true;
 }
 
-bool appendInputFrom(BRP *obj, char* path, FILE* input_fd, TokenLoc include_loc)
+bool appendInput(BRP *obj, FILE* input_fd, TokenLoc initial_loc, TokenLoc include_loc)
 {
-	path = getNormPath(path);
 	if (!input_fd) {
 		obj->error_code = BRP_ERR_FILE_NOT_FOUND;
 		obj->error_loc = include_loc;
-		obj->error_symbol = fromstr(path);
+		obj->error_symbol = fromstr(initial_loc.src_name);
 		if (obj->handler) obj->handler(obj);
 		return false;
 	}
 	InputCtx* init_ctx = malloc(sizeof(InputCtx));
 	*init_ctx = (InputCtx){
-		.cur_loc = {
-			.src_name = path,
-			.lineno = 1,
-			.colno = 1,
-			.included_from = NULL
-		},
+		.cur_loc = initial_loc,
 		.buffer = filecontent(input_fd),
 		.prev = obj->cur_input
 	};
@@ -274,6 +277,7 @@ bool appendInputFrom(BRP *obj, char* path, FILE* input_fd, TokenLoc include_loc)
 		fclose(input_fd);
 		return false;
 	}
+	init_ctx->orig_data = init_ctx->buffer.data;
 	if (include_loc.src_name) {
 		init_ctx->cur_loc.included_from = malloc(sizeof(TokenLoc));
 		*init_ctx->cur_loc.included_from = include_loc;
@@ -287,7 +291,7 @@ bool appendInputFrom(BRP *obj, char* path, FILE* input_fd, TokenLoc include_loc)
 
 void delInput(BRP* obj)
 {
-	free(obj->cur_input->orig_data);
+	if (obj->cur_input) free(obj->cur_input->orig_data);
 	InputCtx* to_free = obj->cur_input;
 	obj->cur_input = to_free->prev;
 	free(to_free);
@@ -307,58 +311,134 @@ void cleanInput(BRP* obj, InputCtx* ctx)
 	} else ctx->cur_loc.colno += stripped.length;
 }
 
-#define BRP_INCLUDE fromcstr("include")
-#define BRP_DEFINE fromcstr("define")
+typedef enum {
+	BRP_INCLUDE,
+	BRP_DEFINE,
+	BRP_COMMENT,
+	N_BRP_CMDS
+} BRPDirectiveCode;
+
+static const sbuf brp_directives[N_BRP_CMDS + 1] = {
+	[BRP_INCLUDE] = fromcstr("include"),
+	[BRP_DEFINE] = fromcstr("define"),
+	[BRP_COMMENT] = fromchar('!')
+};
 
 void preprocessInput(BRP* obj)
 {
 	if (!obj->cur_input) return;
-	if (!obj->cur_input->buffer.length) {
-		delInput(obj);
-		return;
-	}
+	if (!obj->cur_input->buffer.length) delInput(obj);
+	if (!obj->cur_input) return;
 // stripping unwanted symbols from the start of the buffer
 	cleanInput(obj, obj->cur_input);
 // processing directives
-	while (sbufcutc(&obj->cur_input->buffer, fromcstr("#"))) {
+	while (sbufcutc(&obj->cur_input->buffer, fromchar('#'))) {
 		obj->cur_input->cur_loc.colno++;
-		if (sbufcutc(&obj->cur_input->buffer, fromcstr("!"))) {
-			sbuf stub;
-			sbufsplitv(&obj->cur_input->buffer, &stub, nl_arg);
-			obj->cur_input->cur_loc.lineno++;
-			obj->cur_input->cur_loc.colno = 1;
-		} else if (sbufcut(&obj->cur_input->buffer, BRP_INCLUDE).data) {
-			obj->cur_input->cur_loc.colno += BRP_INCLUDE.length + sbufstripl(&obj->cur_input->buffer, SPACE, TAB).length;
-			char path_start = sbufcutc(&obj->cur_input->buffer, fromcstr("<\""));
-			if (!path_start) {
-				obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
+		BRPDirectiveCode directive_id = sbufcutv(&obj->cur_input->buffer, brp_directives);
+		switch (directive_id) {
+			case BRP_COMMENT: {
+				sbuf stub;
+				sbufsplitv(&obj->cur_input->buffer, &stub, nl_arg);
+				obj->cur_input->cur_loc.lineno++;
+				obj->cur_input->cur_loc.colno = 1;
+				break;
+			}
+			case BRP_INCLUDE: {
+				obj->cur_input->cur_loc.colno += brp_directives[BRP_INCLUDE].length + sbufstripl(&obj->cur_input->buffer, SPACE, TAB).length;
+				char path_start = sbufcutc(&obj->cur_input->buffer, fromcstr("<\""));
+				if (!path_start) {
+					obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
+					obj->error_loc = obj->cur_input->cur_loc;
+					if (obj->handler) obj->handler(obj);
+					return;
+				}
+				sbuf path_spec;
+				sbufsplit(&obj->cur_input->buffer, &path_spec, path_start == '"' ? DQUOTE : fromchar('>'));
+				obj->cur_input->cur_loc.colno += path_spec.length + 2;
+				char path_spec_c[path_spec.length + 1];
+				memcpy(path_spec_c, path_spec.data, path_spec.length);
+				path_spec_c[path_spec.length] = '\0';
+
+				for (InputCtx* ctx = obj->cur_input; ctx; ctx = ctx->prev) {
+					if (pathEquals(path_spec_c, ctx->cur_loc.src_name)) path_spec.length = 0;
+				}
+
+				if (path_spec.length) {
+					InputCtx* prev_ctx = obj->cur_input;
+					appendInput(
+						obj,
+						fopen(path_spec_c, "r"),
+						(TokenLoc){ .src_name = tostr(path_spec), .lineno = 1, .colno = 1, .included_from = NULL },
+						obj->cur_input->cur_loc
+					);
+					cleanInput(obj, prev_ctx);
+				}
+				break;
+			}
+			case BRP_DEFINE:
+				obj->cur_input->cur_loc.colno += brp_directives[BRP_DEFINE].length + sbufstripl(&obj->cur_input->buffer, SPACE, TAB).length;
+				Macro macro = {0};
+				sbuf macro_name;
+				sbuf delim = obj->hidden_symbols[sbufsplitv(&obj->cur_input->buffer, &macro_name, obj->hidden_symbols)];
+				
+				obj->cur_input->cur_loc.colno += delim.length + macro_name.length;
+				macro.def_loc = obj->cur_input->cur_loc;
+				macro.name = tostr(macro_name);
+
+				if (!sbufeq(delim, NEWLINE)) {
+					if (sbufsplitv(&obj->cur_input->buffer, &macro.def, nl_arg) >= 0) obj->cur_input->cur_loc.lineno++;
+					obj->cur_input->cur_loc.colno = 1;
+					sbufstripv(&macro.def, NULL, NULL, obj->hidden_symbols);
+				}
+
+				macro.def = sbufcopy(macro.def);
+				array_foreach(Macro, prev_macro, obj->macros, 
+					if (streq(macro.name, prev_macro.name)) {
+						free(macro.name);
+						macro.name = NULL;
+						free(prev_macro.def.data);
+						prev_macro.def = macro.def;
+					}
+				);
+				if (macro.name) MacroArray_append(&obj->macros, macro);
+				break;
+			default:
+				obj->error_code = BRP_ERR_UNKNOWN_CMD;
 				obj->error_loc = obj->cur_input->cur_loc;
+				sbufsplitv(&obj->cur_input->buffer, &obj->error_symbol, nl_arg);
 				if (obj->handler) obj->handler(obj);
 				return;
-			}
-			sbuf path_spec;
-			sbufsplit(&obj->cur_input->buffer, &path_spec, path_start == '"' ? DQUOTE : fromchar('>'));
-			obj->cur_input->cur_loc.colno += path_spec.length + 2;
-			char path_spec_c[path_spec.length + 1];
-			memcpy(path_spec_c, path_spec.data, path_spec.length);
-			path_spec_c[path_spec.length] = '\0';
-
-			for (InputCtx* ctx = obj->cur_input; ctx; ctx = ctx->prev) {
-				if (pathEquals(path_spec_c, ctx->cur_loc.src_name)) path_spec.length = 0;
-			}
-
-			if (path_spec.length) {
-				obj->error_loc = obj->cur_input->cur_loc;
-				cleanInput(obj, obj->cur_input);
-				appendInputFrom(obj, path_spec_c, fopen(path_spec_c, "r"), obj->error_loc);
-			}
-		} else {
-			obj->error_code = BRP_ERR_UNKNOWN_CMD;
-			sbufsplitv(&obj->cur_input->buffer, &obj->error_symbol, nl_arg);
-			return;
 		}
 		cleanInput(obj, obj->cur_input);
 	}
+// replacing a macro name with its definition if one is found
+	sbuf macro_name, buffer_view = obj->cur_input->buffer;
+	sbuf delim = obj->symbols[sbufsplitv(&buffer_view, &macro_name, obj->symbols)];
+	
+	InputCtx* prev_ctx = NULL;
+	for (int i = 0; i < obj->macros.length; i++) {
+		Macro macro = obj->macros.data[i];
+		if (sbufeq(macro_name, fromstr(macro.name)) && macro.def.length > 0) {
+			InputCtx* new_ctx = malloc(sizeof(InputCtx));
+			*new_ctx = (InputCtx){
+				.buffer = macro.def,
+				.orig_data = NULL,
+				.cur_loc = macro.def_loc,
+				.prev = obj->cur_input
+			};
+			new_ctx->cur_loc.included_from = malloc(sizeof(TokenLoc));
+			*new_ctx->cur_loc.included_from = obj->cur_input->cur_loc;
+			prev_ctx = obj->cur_input;
+			obj->cur_input = new_ctx;
+			break;
+		}
+	}
+	if (prev_ctx) { // this means that a macro was found and inserted
+	 	sbufshift(buffer_view, -delim.length);
+		prev_ctx->buffer = buffer_view;
+		prev_ctx->cur_loc.colno += macro_name.length;
+	}
+
 
 	if (!obj->cur_input->buffer.length) delInput(obj);
 }
@@ -446,11 +526,13 @@ Token fetchToken(BRP* obj)
 			res.symbol_id = delim_id;
 		}
 
-		if (obj->symbols[delim_id].data[0] == '\n') {
-			obj->cur_input->cur_loc.lineno++;
-			obj->cur_input->cur_loc.colno = 1;
-		} else {
-			obj->cur_input->cur_loc.colno += obj->symbols[delim_id].length;
+		if (delim_id >= 0) {
+			if (obj->symbols[delim_id].data[0] == '\n') {
+				obj->cur_input->cur_loc.lineno++;
+				obj->cur_input->cur_loc.colno = 1;
+			} else {
+				obj->cur_input->cur_loc.colno += obj->symbols[delim_id].length;
+			}
 		}
 
 		obj->last_loc = res.loc;
@@ -482,37 +564,38 @@ bool unfetchToken(BRP* obj, Token token)
 	return TokenQueue_unfetch(&obj->pending, token);
 }
 
-int fprintTokenLoc(FILE* fd, TokenLoc loc)
+void fprintTokenLoc(FILE* fd, TokenLoc loc)
 {
 	if (loc.src_name) {
 		if (loc.included_from) {
 			fprintTokenLoc(fd, *loc.included_from);
 			fputs("-> ", fd);
 		}
-		return fprintf(fd, "[%s:%d:%d] ", loc.src_name, loc.lineno, loc.colno);
-	} else { return fprintf(fd, " "); }
-}
-
-int fprintTokenStr(FILE* fd, Token token, BRP* obj)
-{
-	switch (token.type) {
-		case TOKEN_WORD: return fprintf(fd, "word `%s`", token.word);
-		case TOKEN_INT: return fprintf(fd, "integer %lld", token.value);
-		case TOKEN_STRING: 
-			return fprintf(fd, "string \"") + fputsbufesc(fd, fromstr(token.word), BYTEFMT_HEX) + fputc('"', fd);
-		case TOKEN_KEYWORD: return fprintf(fd, "keyword `"sbuf_format"`", unpack(obj->keywords[token.keyword_id]));
-		case TOKEN_SYMBOL: return fprintf(fd, "symbol `"sbuf_format"`", unpack(obj->symbols[token.symbol_id]));
-		default:
-			return fprintf(fd, "nothing");
+		fprintf(fd, "[%s:%d:%d] ", loc.src_name, loc.lineno, loc.colno);
 	}
 }
 
-int fprintToken(FILE* fd, Token token, BRP* obj)
+void fprintTokenStr(FILE* fd, Token token, BRP* obj)
 {
-	int res = fprintTokenLoc(fd, token.loc);
-	res += fprintTokenStr(fd, token, obj);
-	res += fputc('\n', fd);
-	return res;
+	switch (token.type) {
+		case TOKEN_WORD: fprintf(fd, "word `%s`", token.word); break;
+		case TOKEN_INT: fprintf(fd, "integer %lld", token.value); break;
+		case TOKEN_STRING: 
+			fprintf(fd, "string \"");
+			fputsbufesc(fd, fromstr(token.word), BYTEFMT_HEX);
+			fputc('"', fd);
+			break;
+		case TOKEN_KEYWORD: fprintf(fd, "keyword `"sbuf_format"`", unpack(obj->keywords[token.keyword_id])); break;
+		case TOKEN_SYMBOL: fprintf(fd, "symbol `"sbuf_format"`", unpack(obj->symbols[token.symbol_id])); break;
+		default: fprintf(fd, "nothing");
+	}
+}
+
+void fprintToken(FILE* fd, Token token, BRP* obj)
+{
+	fprintTokenLoc(fd, token.loc);
+	fprintTokenStr(fd, token, obj);
+	fputc('\n', fd);
 }
 
 char* TokenTypeNames[N_TOKEN_TYPES] = {
@@ -588,6 +671,23 @@ BRP* initBRP(BRP* obj, BRPErrorHandler handler)
 	obj->error_loc = (TokenLoc){0};
 	obj->handler = handler;
 	obj->cur_input = NULL;
+	obj->macros = MacroArray_new(
+		3,
+		(Macro){ .name = "__BRP__", .def = {0}, .def_loc = {0} },
+		(Macro){0}, // OS indicator macro placeholder
+		(Macro){0} // platform (POSIX | NT) indicator macro placeholder
+	);
+
+#if defined(__APPLE__) || defined(__MACH__)
+	obj->macros.data[1] = (Macro){ .name = "__APPLE__", .def = {0}, .def_loc = {0} };
+	obj->macros.data[2] = (Macro){ .name = "__POSIX__", .def = {0}, .def_loc = {0} };
+#elif defined(_WIN32)
+	obj->macros.data[1] = (Macro){ .name = "_WIN32", .def = {0}, .def_loc = {0} };
+	obj->macros.data[2] = (Macro){ .name = "__NT__", .def = {0}, .def_loc = {0} };
+#elif defined(__linux__)
+	obj->macros.data[1] = (Macro){ .name = "__linux__", .def = {0}, .def_loc = {0} };
+	obj->macros.data[2] = (Macro){ .name = "__POSIX__", .def = {0}, .def_loc = {0} };
+#endif
 
 	return obj;
 }

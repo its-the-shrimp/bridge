@@ -136,23 +136,15 @@ char* fileBaseName(char* path)
 {
 	sbuf src = fromstr(path);
 	sbuf res;
-	sbufsplit(&src, &res, fromcstr("."));
-	for (char* ptr = res.data + res.length - 1; ptr >= res.data; ptr--) {
-		if (*ptr == '/') {
-			res.data = ptr;
-			break;
-		}
-	}
-	return tostr(res);
+	sbufsplitr(&src, &res, fromcstr("."), PATHSEP);
+    sbufsplitr(&res, &src, fromchar('/'));
+	return tostr((res.length ? res : src));
 }
 
 sbuf fileBaseName_s(sbuf path)
 {
 	sbuf res;
-	sbuf delim = sbufsplitr(&path, &res, fromcstr("."), PATHSEP);
-	if (!sbufeq(delim, PATHSEP)) { 
-		delim = sbufsplitr(&res, &path, PATHSEP);
-		return delim.data ? res : path;
-	}
-	return path;
+	sbufsplitr(&path, &res, fromcstr("."), PATHSEP);
+    sbufsplitr(&res, &path, fromchar('/'));
+	return res.length ? res : path;
 }
