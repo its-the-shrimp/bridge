@@ -3792,15 +3792,6 @@ bool compileAST(AST* src, FILE* dst)
     return true;
 }
 
-void handleBRPError(BRP* obj)
-{
-    fprintTokenLoc(stderr, obj->error_loc);
-    eprintf("preprocessor error: ");
-    printBRPErrorStr(stderr, obj);
-    eputc('\n');
-    exit(1);
-}
-
 void printUsageMsg(FILE* dst, char* program_name)
 {
     fprintf(
@@ -3922,7 +3913,7 @@ int main(int argc, char* argv[])
         vbrb_visual_output_path = tostr(fromcstr("~"), setFileExt_s(fromstr(input_path), fromcstr(VBRB_EXT)));
 
     BRP prep;
-    if (!initBRP(&prep, handleBRPError)) {
+    if (!initBRP(&prep, NULL)) {
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
         return 1;
     }

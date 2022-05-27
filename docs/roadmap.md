@@ -15,8 +15,9 @@
 - ~BRP: includes~
 - ~BRP: macros~
 - ~BRP: multiline macros~
-- BRP: conditional compilation
+- ~BRP: conditional compilation~
 - BRP: character literals
 - BRP: function-like macros
 - Array initializers
+- Proper documentation
 - `public` functions and globals

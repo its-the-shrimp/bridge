@@ -15,13 +15,13 @@
 #define NEWLINE POSIX_NEWLINE
 #endif
 
-#define DQUOTE fromcstr("\"")
-#define NT_PATHSEP fromcstr("\\")
-#define POSIX_PATHSEP fromcstr("/")
+#define DQUOTE fromchar('"')
+#define NT_PATHSEP fromchar('\\')
+#define POSIX_PATHSEP fromchar('/')
 #define NT_NEWLINE fromcstr("\r\n")
-#define POSIX_NEWLINE fromcstr("\n")
-#define SPACE fromcstr(" ")
-#define TAB fromcstr("\t")
+#define POSIX_NEWLINE fromchar('\n')
+#define SPACE fromchar(' ')
+#define TAB fromchar('\t')
 
 typedef enum token_type {
 	TOKEN_NONE,
@@ -40,6 +40,7 @@ typedef struct token_loc {
 	char* src_name;
 	struct token_loc* included_from;
 } TokenLoc;
+declArray(TokenLoc);
 
 typedef struct token {
 	int8_t type;
@@ -67,7 +68,11 @@ typedef enum {
 	BRP_ERR_INVALID_CMD_SYNTAX,
 	BRP_ERR_UNKNOWN_CMD,
 	BRP_ERR_UNCLOSED_MACRO,
-	N_PARSER_ERRORS
+	BRP_ERR_EXCESS_ENDIF,
+	BRP_ERR_EXCESS_ENDMACRO,
+	BRP_ERR_UNCLOSED_CONDITION,
+	BRP_ERR_EXCESS_ELSE,
+	N_BRP_ERRORS
 } BRPError;
 
 declArray(sbuf);
@@ -102,6 +107,7 @@ typedef struct brp {
 	TokenQueue pending;
 	TokenLoc last_loc;
 	MacroArray macros;
+	TokenLocArray conditional_blocks;
 } BRP;
 #define BRP_KEYWORD(spec) fromcstr(spec)
 #define BRP_SYMBOL(spec) fromcstr(spec)
@@ -142,13 +148,14 @@ void fprintToken(FILE* fd, Token token, BRP* obj);
 char* getTokenTypeName(TokenType type);
 char* getTokenWord(BRP* obj, Token token);
 void printBRPErrorStr(FILE* fd, BRP* obj);
-void printBRPError(FILE* fd, BRP* obj);
+void printBRPError(BRP* obj);
 
 #endif // _BRP_
 
 #ifdef BRP_IMPLEMENTATION
 #undef BRP_IMPLEMENTATION
 
+defArray(TokenLoc);
 defArray(Macro);
 defArray(sbuf);
 defQueue(Token);
@@ -247,7 +254,7 @@ bool _setSymbols(BRP* obj, ...)
 			if (sbufstartswith(obj->symbols[i], obj->symbols[i1])) {
 				obj->error_code = BRP_ERR_SYMBOL_CONFLICT;
 				obj->error_symbol = obj->symbols[i];
-				if (obj->handler) obj->handler(obj);
+				obj->handler(obj);
 				return false;
 			}
 		}
@@ -262,7 +269,7 @@ bool appendInput(BRP *obj, FILE* input_fd, TokenLoc initial_loc, TokenLoc includ
 		obj->error_code = BRP_ERR_FILE_NOT_FOUND;
 		obj->error_loc = include_loc;
 		obj->error_symbol = fromstr(initial_loc.src_name);
-		if (obj->handler) obj->handler(obj);
+		obj->handler(obj);
 		return false;
 	}
 	InputCtx* init_ctx = malloc(sizeof(InputCtx));
@@ -274,7 +281,7 @@ bool appendInput(BRP *obj, FILE* input_fd, TokenLoc initial_loc, TokenLoc includ
 	if (!init_ctx->buffer.data) {
 		obj->error_code = BRP_ERR_NO_MEMORY;
 		obj->error_loc = include_loc;
-		if (obj->handler) obj->handler(obj);
+		obj->handler(obj);
 		fclose(input_fd);
 		return false;
 	}
@@ -296,6 +303,12 @@ void delInput(BRP* obj)
 	InputCtx* to_free = obj->cur_input;
 	obj->cur_input = to_free->prev;
 	free(to_free);
+
+	if (!obj->cur_input && obj->conditional_blocks.length) {
+		obj->error_code = BRP_ERR_UNCLOSED_CONDITION;
+		obj->error_loc = TokenLocArray_pop(&obj->conditional_blocks, -1);
+		obj->handler(obj);
+	}
 }
 
 static sbuf nl_arg[2] = { NEWLINE };
@@ -317,6 +330,11 @@ typedef enum {
 	BRP_DEFINE,
 	BRP_MACRO,
 	BRP_COMMENT,
+	BRP_IFDEF,
+	BRP_ENDIF,
+	BRP_ENDMACRO,
+	BRP_IFNDEF,
+	BRP_ELSE,
 	N_BRP_CMDS
 } BRPDirectiveCode;
 
@@ -324,7 +342,12 @@ static const sbuf brp_directives[N_BRP_CMDS + 1] = {
 	[BRP_INCLUDE] = fromcstr("include"),
 	[BRP_DEFINE] = fromcstr("define"),
 	[BRP_MACRO] = fromcstr("macro"),
-	[BRP_COMMENT] = fromchar('!')
+	[BRP_COMMENT] = fromchar('!'),
+	[BRP_IFDEF] = fromcstr("ifdef"),
+	[BRP_ENDIF] = fromcstr("endif"),
+	[BRP_ENDMACRO] = fromcstr("endmacro"),
+	[BRP_IFNDEF] = fromcstr("ifndef"),
+	[BRP_ELSE] = fromcstr("else")
 };
 
 void preprocessInput(BRP* obj)
@@ -338,6 +361,8 @@ void preprocessInput(BRP* obj)
 	while (sbufcutc(&obj->cur_input->buffer, fromchar('#'))) {
 		obj->cur_input->cur_loc.colno++;
 		BRPDirectiveCode directive_id = sbufcutv(&obj->cur_input->buffer, brp_directives);
+
+		static_assert(N_BRP_CMDS == 9, "not all BRP directives are handled in preprocessInput");
 		switch (directive_id) {
 			case BRP_COMMENT: {
 				sbuf stub;
@@ -352,7 +377,7 @@ void preprocessInput(BRP* obj)
 				if (!path_start) {
 					obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 					obj->error_loc = obj->cur_input->cur_loc;
-					if (obj->handler) obj->handler(obj);
+					obj->handler(obj);
 					return;
 				}
 				sbuf path_spec;
@@ -375,6 +400,7 @@ void preprocessInput(BRP* obj)
 						obj->cur_input->cur_loc
 					);
 					cleanInput(obj, prev_ctx);
+					preprocessInput(obj);
 				}
 				break;
 			}
@@ -418,10 +444,10 @@ void preprocessInput(BRP* obj)
 				macro.def_loc = obj->cur_input->cur_loc;
 				macro.name = tostr(macro_name);
 
-				if (!sbufsplit(&obj->cur_input->buffer, &macro.def, fromcstr("\n#end")).data) {
+				if (!sbufsplit(&obj->cur_input->buffer, &macro.def, fromcstr("\n#endmacro")).data) {
 					obj->error_code = BRP_ERR_UNCLOSED_MACRO;
 					obj->error_loc = obj->cur_input->cur_loc;
-					if (obj->handler) obj->handler(obj);
+					obj->handler(obj);
 					free(macro.name);
 					return;
 				}
@@ -441,11 +467,119 @@ void preprocessInput(BRP* obj)
 				obj->cur_input->cur_loc.lineno += sbufcount_v(macro.def, nl_arg) + 1;
 				break;
 			}
+			case BRP_IFNDEF:
+			case BRP_IFDEF: {
+				obj->cur_input->cur_loc.colno += brp_directives[directive_id].length + sbufstripl(&obj->cur_input->buffer, SPACE, TAB).length;
+				sbuf macro_name;
+				sbufsplitv(&obj->cur_input->buffer, &macro_name, nl_arg);
+				sbufstripl(&macro_name, SPACE, TAB);
+				if (!macro_name.length) {
+					obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
+					obj->error_loc = obj->cur_input->cur_loc;
+					obj->handler(obj);
+					return;
+				}
+
+				bool defined = false;
+				for (int i = 0; i < obj->macros.length; i++) {
+					if (sbufeq(macro_name, fromstr(obj->macros.data[i].name))) {
+						defined = true;
+						break;
+					}
+				}
+				if (directive_id == BRP_IFNDEF) defined = !defined;
+
+				if (defined) {
+					TokenLocArray_append(&obj->conditional_blocks, obj->cur_input->cur_loc);
+					obj->cur_input->cur_loc.lineno++;
+					obj->cur_input->cur_loc.colno = 1;
+				} else {
+					TokenLoc cond_loc = obj->cur_input->cur_loc;
+					obj->cur_input->cur_loc.lineno++;
+					obj->cur_input->cur_loc.colno = 1;
+					int block_level = 0;
+					while (true) {
+						sbuf line;
+						if (sbufsplitv(&obj->cur_input->buffer, &line, nl_arg) < 0) {
+							obj->error_code = BRP_ERR_UNCLOSED_CONDITION;
+							obj->error_loc = cond_loc;
+							obj->handler(obj);
+							return;
+						}
+
+						obj->cur_input->cur_loc.lineno++;
+						sbufshift(line, 1);
+						if (sbufstartswith(line, brp_directives[BRP_IFDEF])) {
+							block_level++;
+						} else if (sbufstartswith(line, brp_directives[BRP_ENDIF])) {
+							if (block_level == 0) break;
+							block_level--;
+						} else if (!block_level ? sbufstartswith(line, brp_directives[BRP_ELSE]) : false) {
+							TokenLocArray_append(&obj->conditional_blocks, obj->cur_input->cur_loc);
+							break;
+						}
+					}
+				}
+				break;
+			}
+			case BRP_ENDIF: {
+				if (obj->conditional_blocks.length == 0) {
+					obj->error_code = BRP_ERR_EXCESS_ENDIF;
+					obj->error_loc = obj->cur_input->cur_loc;
+					obj->handler(obj);
+					return;
+				}
+				TokenLocArray_pop(&obj->conditional_blocks, -1);
+				sbuf stub;
+				sbufsplitv(&obj->cur_input->buffer, &stub, nl_arg);
+				obj->cur_input->cur_loc.lineno++;
+				break;
+			}
+			case BRP_ENDMACRO:
+				obj->error_code = BRP_ERR_EXCESS_ENDMACRO;
+				obj->error_loc = obj->cur_input->cur_loc;
+				obj->handler(obj);
+				return;
+			case BRP_ELSE:
+				if (obj->conditional_blocks.length == 0) {
+					obj->error_code = BRP_ERR_EXCESS_ELSE;
+					obj->error_loc = obj->cur_input->cur_loc;
+					obj->handler(obj);
+					return;
+				}
+				TokenLocArray_pop(&obj->conditional_blocks, -1);
+				TokenLoc cond_loc = obj->cur_input->cur_loc;
+				obj->cur_input->cur_loc.colno = 1;
+				int block_level = 0;
+				while (true) {
+					sbuf line;
+					if (sbufsplitv(&obj->cur_input->buffer, &line, nl_arg) < 0) {
+						obj->error_code = BRP_ERR_UNCLOSED_CONDITION;
+						obj->error_loc = cond_loc;
+						obj->handler(obj);
+						return;
+					}
+
+					obj->cur_input->cur_loc.lineno++;
+					sbufshift(line, 1);
+					if (sbufstartswith(line, brp_directives[BRP_IFDEF])) {
+						block_level++;
+					} else if (sbufstartswith(line, brp_directives[BRP_ENDIF])) {
+						if (block_level == 0) break;
+						block_level--;
+					} else if (!block_level ? sbufstartswith(line, brp_directives[BRP_ELSE]) : false) {
+						obj->error_code = BRP_ERR_EXCESS_ELSE;
+						obj->error_loc = obj->cur_input->cur_loc;
+						obj->handler(obj);
+						return;
+					}
+				}
+				break;
 			default:
 				obj->error_code = BRP_ERR_UNKNOWN_CMD;
 				obj->error_loc = obj->cur_input->cur_loc;
 				sbufsplitv(&obj->cur_input->buffer, &obj->error_symbol, nl_arg);
-				if (obj->handler) obj->handler(obj);
+				obj->handler(obj);
 				return;
 		}
 		cleanInput(obj, obj->cur_input);
@@ -469,6 +603,7 @@ void preprocessInput(BRP* obj)
 			*new_ctx->cur_loc.included_from = obj->cur_input->cur_loc;
 			prev_ctx = obj->cur_input;
 			obj->cur_input = new_ctx;
+			preprocessInput(obj);
 			break;
 		}
 	}
@@ -507,7 +642,7 @@ Token fetchToken(BRP* obj)
 		if (!sbufeq(delim, DQUOTE)) {
 			obj->error_code = BRP_ERR_UNCLOSED_STR;
 			obj->error_loc = obj->cur_input->cur_loc;
-			if (obj->handler) obj->handler(obj);
+			obj->handler(obj);
 			return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
 		}
 
@@ -666,6 +801,7 @@ char* getTokenWord(BRP* obj, Token token)
 }
 
 void printBRPErrorStr(FILE* fd, BRP* obj) {
+	static_assert(N_BRP_ERRORS == 12, "not all BRP errors are handled in printBRPErrorStr");
 	switch (obj->error_code) {
 		case BRP_ERR_OK: break;
 		case BRP_ERR_UNCLOSED_STR: 
@@ -693,16 +829,30 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 		case BRP_ERR_UNCLOSED_MACRO:
 			fprintf(fd, "macros defined with `#macro` must be closed with the `#end` directive ");
 			break;
+		case BRP_ERR_EXCESS_ENDIF:
+			fprintf(fd, "excess `#endif` directive ");
+			break;
+		case BRP_ERR_EXCESS_ENDMACRO:
+			fprintf(fd, "excess `#endmacro` directive ");
+			break;
+		case BRP_ERR_UNCLOSED_CONDITION:
+			fprintf(fd, "unclosed conditional block; to close it, use the `#endif` dirrective ");
+			break;
+		case BRP_ERR_EXCESS_ELSE:
+			fprintf(fd, "excess `#else` directive ");
+			break;
 		default: fprintf(fd, "unreachable");
 	}
 }
 
-void printBRPError(FILE* fd, BRP* obj)
+void printBRPError(BRP* obj)
 {
 	if (obj->error_code) {
-		fprintTokenLoc(fd, obj->error_loc);
-		printBRPErrorStr(fd, obj);
-		fputc('\n', fd);
+		fprintTokenLoc(stderr, obj->error_loc);
+		fputs("preprocessing error: ", stderr);
+		printBRPErrorStr(stderr, obj);
+		fputc('\n', stderr);
+		exit(1);
 	}
 }
 
@@ -711,11 +861,11 @@ BRP* initBRP(BRP* obj, BRPErrorHandler handler)
 	*obj = (BRP){0};
 	obj->pending = TokenQueue_new(0);
 	obj->error_loc = (TokenLoc){0};
-	obj->handler = handler;
+	obj->handler = handler ? handler : printBRPError;
 	obj->cur_input = NULL;
 	obj->macros = MacroArray_new(
 		3,
-		(Macro){ .name = "__BRP__", .def = {0}, .def_loc = {0} },
+		(Macro){ .name = "__BRC__", .def = {0}, .def_loc = {0} },
 		(Macro){0}, // OS indicator macro placeholder
 		(Macro){0} // platform (POSIX | NT) indicator macro placeholder
 	);
@@ -740,6 +890,8 @@ void delBRP(BRP* obj)
 	free(obj->symbols);
 	free(obj->hidden_symbols);
 	TokenQueue_delete(&obj->pending);
+	MacroArray_clear(&obj->macros);
+	TokenLocArray_clear(&obj->conditional_blocks);
 
 	InputCtx* ctx = obj->cur_input;
 	while (ctx) {

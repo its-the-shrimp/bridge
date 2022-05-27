@@ -970,19 +970,10 @@ OpCompiler op_compilers[] = {
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 
-void handleBRPError(BRP* obj)
-{
-    fprintTokenLoc(stderr, obj->error_loc);
-    eprintf("preprocessor error: \"");
-    printBRPErrorStr(stderr, obj);
-	eputs("\"\n");
-    exit(1);
-}
-
 VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags)
 {
     BRP* obj = malloc(sizeof(BRP));
-    initBRP(obj, &handleBRPError);
+    initBRP(obj, NULL);
 	setSymbols(
 		obj,
 		BRP_SYMBOL("{"),
