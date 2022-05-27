@@ -66,6 +66,7 @@ typedef enum {
 	BRP_ERR_SYMBOL_CONFLICT,
 	BRP_ERR_INVALID_CMD_SYNTAX,
 	BRP_ERR_UNKNOWN_CMD,
+	BRP_ERR_UNCLOSED_MACRO,
 	N_PARSER_ERRORS
 } BRPError;
 
@@ -314,6 +315,7 @@ void cleanInput(BRP* obj, InputCtx* ctx)
 typedef enum {
 	BRP_INCLUDE,
 	BRP_DEFINE,
+	BRP_MACRO,
 	BRP_COMMENT,
 	N_BRP_CMDS
 } BRPDirectiveCode;
@@ -321,6 +323,7 @@ typedef enum {
 static const sbuf brp_directives[N_BRP_CMDS + 1] = {
 	[BRP_INCLUDE] = fromcstr("include"),
 	[BRP_DEFINE] = fromcstr("define"),
+	[BRP_MACRO] = fromcstr("macro"),
 	[BRP_COMMENT] = fromchar('!')
 };
 
@@ -375,7 +378,7 @@ void preprocessInput(BRP* obj)
 				}
 				break;
 			}
-			case BRP_DEFINE:
+			case BRP_DEFINE: {
 				obj->cur_input->cur_loc.colno += brp_directives[BRP_DEFINE].length + sbufstripl(&obj->cur_input->buffer, SPACE, TAB).length;
 				Macro macro = {0};
 				sbuf macro_name;
@@ -386,12 +389,14 @@ void preprocessInput(BRP* obj)
 				macro.name = tostr(macro_name);
 
 				if (!sbufeq(delim, NEWLINE)) {
-					if (sbufsplitv(&obj->cur_input->buffer, &macro.def, nl_arg) >= 0) obj->cur_input->cur_loc.lineno++;
+					if (sbufsplitescv(&obj->cur_input->buffer, &macro.def, nl_arg) >= 0) obj->cur_input->cur_loc.lineno++;
 					obj->cur_input->cur_loc.colno = 1;
+					obj->cur_input->cur_loc.lineno += sbufcount_v(macro.def, nl_arg);
 					sbufstripv(&macro.def, NULL, NULL, obj->hidden_symbols);
+					sbuf macro_def = macro.def;
+					sbufsub(macro_def, &macro.def, fromcstr("\\\n"), NEWLINE);
 				}
 
-				macro.def = sbufcopy(macro.def);
 				array_foreach(Macro, prev_macro, obj->macros, 
 					if (streq(macro.name, prev_macro.name)) {
 						free(macro.name);
@@ -402,6 +407,40 @@ void preprocessInput(BRP* obj)
 				);
 				if (macro.name) MacroArray_append(&obj->macros, macro);
 				break;
+			}
+			case BRP_MACRO: {
+				obj->cur_input->cur_loc.colno += brp_directives[BRP_MACRO].length + sbufstripl(&obj->cur_input->buffer, SPACE, TAB).length;
+				Macro macro = {0};
+				sbuf macro_name;
+				sbuf delim = obj->hidden_symbols[sbufsplitv(&obj->cur_input->buffer, &macro_name, obj->hidden_symbols)];
+				
+				obj->cur_input->cur_loc.colno += delim.length + macro_name.length;
+				macro.def_loc = obj->cur_input->cur_loc;
+				macro.name = tostr(macro_name);
+
+				if (!sbufsplit(&obj->cur_input->buffer, &macro.def, fromcstr("\n#end")).data) {
+					obj->error_code = BRP_ERR_UNCLOSED_MACRO;
+					obj->error_loc = obj->cur_input->cur_loc;
+					if (obj->handler) obj->handler(obj);
+					free(macro.name);
+					return;
+				}
+				macro.def = sbufcopy(macro.def);
+
+				array_foreach(Macro, prev_macro, obj->macros, 
+					if (streq(macro.name, prev_macro.name)) {
+						free(macro.name);
+						macro.name = NULL;
+						free(prev_macro.def.data);
+						prev_macro.def = macro.def;
+					}
+				);
+				if (macro.name) MacroArray_append(&obj->macros, macro);
+
+				obj->cur_input->cur_loc.colno = 5;
+				obj->cur_input->cur_loc.lineno += sbufcount_v(macro.def, nl_arg) + 1;
+				break;
+			}
 			default:
 				obj->error_code = BRP_ERR_UNKNOWN_CMD;
 				obj->error_loc = obj->cur_input->cur_loc;
@@ -650,6 +689,9 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 			break;
 		case BRP_ERR_UNKNOWN_CMD:
 			fprintf(fd, "unknown BRP directive `%.*s` ", unpack(obj->error_symbol));
+			break;
+		case BRP_ERR_UNCLOSED_MACRO:
+			fprintf(fd, "macros defined with `#macro` must be closed with the `#end` directive ");
 			break;
 		default: fprintf(fd, "unreachable");
 	}

@@ -64,6 +64,9 @@ bool sbufascii(sbuf obj);
 bool sbufstartswith(sbuf obj, sbuf sub);
 bool sbufendswith(sbuf obj, sbuf sub);
 bool sbufspace(sbuf obj);
+int sbufsub(sbuf src, sbuf* dst, sbuf sub_src, sbuf sub_dst);
+int sbufsub_i(sbuf* src, sbuf sub_src, sbuf sub_dst);
+
 
 sbuf _sbufconcat(int _, ...);
 #define sbufconcat(...) _sbufconcat(0, __VA_ARGS__, (sbuf){0})
@@ -104,6 +107,7 @@ sbuf_size_t sbufstripc(sbuf* src, sbuf* ldst, sbuf* rdst, const sbuf set);
 sbuf_size_t sbufstripv(sbuf* src, sbuf* ldst, sbuf* rdst, const sbuf items[]);
 sbuf_size_t _sbufstrip(sbuf* src, sbuf* ldst, sbuf* rdst, ...);
 #define sbufstrip(src, ldst, rdst, ...) _sbufstrip(src, ldst, rdst, __VA_ARGS__, (sbuf){0})
+
 
 char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 #define putcharesc(obj, format) fputcesc(stdout, obj, format)
@@ -148,6 +152,7 @@ void sfree(sbuf* obj);
 #ifdef SBUF_IMPLEMENTATION
 #undef SBUF_IMPLEMENTATION
 
+// concatenates the buffers provided as variadic arguments in a newly allocated buffer, returns the resulting buffer
 sbuf _sbufconcat(int _, ...)
 {
 	va_list args;
@@ -167,7 +172,7 @@ sbuf _sbufconcat(int _, ...)
 
 
 //returns a sized buffer created containing output fetched from the file descriptor `fd`.
-// if an error occures, a zero-initialized sized string is returned.
+// if an error occures, a zero-initialized sized buffer is returned.
 sbuf filecontent(FILE* fd)
 {
 	if (fd == NULL || ferror(fd) || feof(fd)) return (sbuf){0};
@@ -386,6 +391,34 @@ bool sbufspace(sbuf obj)
 		if (obj.data[i] > 32) return false;
 	}
 	return true;
+}
+
+// inserts buffer `sub_dst` in place of every occurence of `sub_src` in buffer `src`. Allocates a new buffer with the substituted contents and writes it to `dst`
+// returns the number of substitutions made
+int sbufsub(sbuf src, sbuf* dst, sbuf sub_src, sbuf sub_dst)
+{
+	sbuf sub_src_array[2] = { sub_src };
+	int src_count = sbufcount_v(src, sub_src_array);
+	if (src_count == 0) {
+		*dst = smalloc(src.length);
+		memcpy(dst->data, src.data, src.length);
+		return 0;
+	}
+
+	*dst = smalloc(src.length + src_count * (sub_dst.length - sub_src.length));
+	sbuf_size_t offset = 0;
+	while (true) {
+		sbuf piece;
+		if (sbufsplitv(&src, &piece, sub_src_array) < 0) {
+			memcpy(dst->data + offset, piece.data, piece.length);
+			return src_count;
+		}
+		memcpy(dst->data + offset, piece.data, piece.length);
+		offset += piece.length;
+		memcpy(dst->data + offset, sub_dst.data, sub_dst.length);
+		offset += sub_dst.length;
+	}
+
 }
 
 // returns `true` if the sized strings `item1` and `item2` are equal byte-by-byte, otherwise returns `false`

@@ -1721,9 +1721,24 @@ void execOp(ExecEnv* env, Module* module)
 	if (op_handlers[op->type](env, module)) return;
 }
 
-void execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
+void _execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
 {
-	while (true) {
+	while (interruptor ? !(*interruptor) : true) {
+		register Op* op = module->execblock.data + env->op_id;
+		if (op->cond_id) {
+			if (!handleCondition(env, op->cond_id)) {
+				env->op_id++;
+				continue;
+			}
+		}
+
+		if (op_handlers[op->type](env, module)) break;
+	}
+}
+
+void _execModuleWithCallbacks(ExecEnv* env, Module* module, volatile bool* interruptor)
+{
+	while (interruptor ? !(*interruptor) : true) {
 		Op* op = module->execblock.data + env->op_id;
 		if (op->cond_id) {
 			if (!handleCondition(env, op->cond_id)) {
@@ -1732,15 +1747,21 @@ void execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
 			}
 		}
 
-		if (env->exec_callbacks)
-			if (env->exec_callbacks[op->type])
-				if (env->exec_callbacks[op->type](env, module, op)) break;
+		if (env->exec_callbacks[op->type])
+			if (env->exec_callbacks[op->type](env, module, op)) break;
 
 		if (op_handlers[op->type](env, module)) break;
 
-		if (env->exec_callbacks)
-			if (env->exec_callbacks[N_OPS + op->type])
-				if (env->exec_callbacks[N_OPS + op->type](env, module, op)) break;
-		if (interruptor ? *interruptor : false) break;
+		if (env->exec_callbacks[N_OPS + op->type])
+			if (env->exec_callbacks[N_OPS + op->type](env, module, op)) break;
+	}
+}
+
+void execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
+{
+	if (env->exec_callbacks) {
+		_execModuleWithCallbacks(env, module, interruptor);
+	} else {
+		_execModule(env, module, interruptor);
 	}
 }

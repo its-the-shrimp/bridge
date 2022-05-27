@@ -150,8 +150,9 @@
 		void* res = realloc(array->data, (array->length + sub.length - 1) * sizeof(t)); \
 		if (!res) { return false; } \
 		array->data = res; \
-		for (int i = array->length - sub.length - 1; i > index; i--) { \
-			array->data[i + sub.length - 1] = array->data[i]; \
+		array->length += sub.length; \
+		for (int i = array->length - sub.length - 1; i >= index; i--) { \
+			array->data[i + sub.length] = array->data[i]; \
 		} \
 		for (int i = index; i < index + sub.length; i++) { \
 			array->data[i] = sub.data[i - index]; \
