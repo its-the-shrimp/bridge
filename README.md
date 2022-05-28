@@ -4,10 +4,9 @@ BRidge is a procedural and object-oriented statically typed language with the ab
 
 ## Getting started
 
-To build all of the BRidge toolchain, run the following command:
+To build all of the BRidge toolchain, simply run the following command:
 ```console
-$ cc -o nobuild nobuild.c
-$ ./nobuild
+$ make
 ```
 
 ## Tools
@@ -15,6 +14,7 @@ $ ./nobuild
 - [brbc](src/brbc.c) - BRidge Bytecode Compiler, compiles `.brb` files to native assembly, code object or executable file.
 - [brs](src/brs.c) - BRidge aSsembler, translates BRidge assembly `.vbrb` files to executable bytecode `.brb` files.
 - [brc](src/brc.c) - BRidge source code Compiler, compiles BRidge Source Code `.br` files to executable bytecode `.brb` files.
+- [brbd](src/brbd.c) - BRidge Bytecode Debugger, a tool for debugging BRB modules
 
 ## Documentation
 
@@ -40,9 +40,10 @@ $ examples/hello_world
 'Hello World' program in BRidge is [there](examples/hello_world.br) and can be compiled and executed using the following commands:
 To execute in the BRidge runtime, run:
 ```
-$ brc examples/hello_world.br
-$ brbx examples/hello_world.brb
+$ brc -r examples/hello_world.br
 ```
+P.S.: the `-r` flag makes the compiler execute the compiled program with `brbx` immediately after it's compiled
+
 To compile the program to a native executable, run:
 ```
 $ brc examples/hello_world.br
