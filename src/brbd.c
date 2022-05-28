@@ -1,5 +1,5 @@
-#include "brb.h"
-#include "errno.h"
+#include <brb.h>
+#include <errno.h>
 
 typedef void (*OpPrinter) (Module*, Op*, FILE*);
 

@@ -1,4 +1,4 @@
-#include "brb.h"
+#include <brb.h>
 
 declArray(Var);
 defArray(Var);
@@ -973,7 +973,7 @@ static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB
 VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags)
 {
     BRP* obj = malloc(sizeof(BRP));
-    initBRP(obj, NULL);
+    initBRP(obj, NULL, BRP_ESC_STR_LITERALS);
 	setSymbols(
 		obj,
 		BRP_SYMBOL("{"),
@@ -1071,7 +1071,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 						&dst->datablocks,
 						(DataBlock){
 							.name = getTokenWord(obj, block_name),
-							.spec = sbufunesc(fromstr(block_spec.word))
+							.spec = fromstr(block_spec.word)
 						}
 					)) {
 						delCompilerCtx(&compctx);

@@ -1,7 +1,7 @@
 #ifndef _BRB_
 #define _BRB_
 
-#include "br.h"
+#include <br.h>
 
 typedef enum {
 	OP_NONE,

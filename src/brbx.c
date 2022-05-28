@@ -1,7 +1,7 @@
-#include "brb.h"
-#include "stdio.h"
-#include "errno.h"
-#include "signal.h"
+#include <brb.h>
+#include <stdio.h>
+#include <errno.h>
+#include <signal.h>
 
 bool interrupt = false;
 

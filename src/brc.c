@@ -1,5 +1,5 @@
-#include "brb.h"
-#include "errno.h"
+#include <brb.h>
+#include <errno.h>
 
 declArray(int);
 defArray(int);
@@ -3913,7 +3913,7 @@ int main(int argc, char* argv[])
         vbrb_visual_output_path = tostr(fromcstr("~"), setFileExt_s(fromstr(input_path), fromcstr(VBRB_EXT)));
 
     BRP prep;
-    if (!initBRP(&prep, NULL)) {
+    if (!initBRP(&prep, NULL, BRP_ESC_STR_LITERALS)) {
         eprintf("error: could not initialize the preprocessor due to memory shortage\n");
         return 1;
     }

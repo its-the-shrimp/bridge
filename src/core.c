@@ -1,27 +1,15 @@
 #define BRIDGE_IMPLEMENTATION
-#include "br.h"
-#include "unistd.h"
-#include "sys/param.h"
-#include "math.h"
-#include "time.h"
-#include "errno.h"
-#include "fcntl.h"
-#include "spawn.h"
-#include "sys/stat.h"
-#include "sys/wait.h"
+#include <br.h>
+#include <unistd.h>
+#include <sys/param.h>
+#include <math.h>
+#include <time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 extern char** environ;
-
-#if IS_LITTLE_ENDIAN
-void* BRByteOrder(void* src, long length) {
-	char* _src = src;
-	for (long i = 0; i < length / 2; i++) {
-		char tmp = _src[i];
-		_src[i] = _src[length - i - 1];
-		_src[length - i - 1] = tmp;
-	}
-	return src;
-}
-#endif
 
 bool startTimerAt(struct timespec* dst)
 {

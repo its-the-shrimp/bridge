@@ -1,5 +1,5 @@
-#include "brb.h"
-#include "errno.h"
+#include <brb.h>
+#include <errno.h>
 
 void printUsageMsg(FILE* fd, char* execname)
 {

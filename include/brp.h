@@ -2,10 +2,11 @@
 #ifndef _BRP_
 #define _BRP_
 
-#include "sbuf.h"
-#include "datasets.h"
-#include "errno.h"
-#include "assert.h"
+#include <br_byteorder.h>
+#include <sbuf.h>
+#include <datasets.h>
+#include <errno.h>
+#include <assert.h>
 
 #ifdef _WIN32_
 #define PATHSEP NT_PATHSEP
@@ -16,6 +17,7 @@
 #endif
 
 #define DQUOTE fromchar('"')
+#define QUOTE fromchar('\'')
 #define NT_PATHSEP fromchar('\\')
 #define POSIX_PATHSEP fromchar('/')
 #define NT_NEWLINE fromcstr("\r\n")
@@ -72,6 +74,7 @@ typedef enum {
 	BRP_ERR_EXCESS_ENDMACRO,
 	BRP_ERR_UNCLOSED_CONDITION,
 	BRP_ERR_EXCESS_ELSE,
+	BRP_ERR_UNCLOSED_CHAR,
 	N_BRP_ERRORS
 } BRPError;
 
@@ -95,6 +98,9 @@ typedef struct brp {
 	sbuf* keywords;
 	sbuf* symbols;
 	sbuf* hidden_symbols;
+	short _dquote_symbol_id;
+	short _quote_symbol_id;
+	char flags;
 	BRPError error_code;
 	TokenLoc error_loc;
 	union {
@@ -111,19 +117,21 @@ typedef struct brp {
 } BRP;
 #define BRP_KEYWORD(spec) fromcstr(spec)
 #define BRP_SYMBOL(spec) fromcstr(spec)
-#define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
 // hidden symbols are delimiters that are not returned as generated tokens
+#define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
 
 #define BRPempty(prep) ((prep)->cur_input == NULL)
 #define getTokenKeywordId(token) ( (token).type == TOKEN_KEYWORD ? (token).keyword_id : -1 )
 #define getTokenSymbolId(token) ( (token).type == TOKEN_SYMBOL ? (token).symbol_id : -1 )
 #define isWordToken(token) ( (token).type == TOKEN_WORD || (token).type == TOKEN_KEYWORD )
-#define isSymbolSpecHidden(spec) (spec.data[spec.length] > 0)
+#define isSymbolSpecHidden(spec) ((spec).data[(spec).length] > 0)
 
 typedef void (*BRPErrorHandler) (BRP*);
 
 char* getNormPath(char* src);
-BRP* initBRP(BRP* obj, BRPErrorHandler handler);
+BRP* initBRP(BRP* obj, BRPErrorHandler handler, char flags);
+// flags for initBRP function
+#define BRP_ESC_STR_LITERALS 0x1
 void delBRP(BRP* obj);
 
 bool _setKeywords(BRP* obj, ...);
@@ -152,8 +160,13 @@ void printBRPError(BRP* obj);
 
 #endif // _BRP_
 
-#ifdef BRP_IMPLEMENTATION
-#undef BRP_IMPLEMENTATION
+#if defined(BRP_IMPLEMENTATION) && !defined(_BRP_IMPL_LOCK)
+#define _BRP_IMPL_LOCK
+
+#define BR_BYTEORDER_IMPLEMENTATION
+#include <br_byteorder.h>
+#define SBUF_IMPLEMENTATION
+#include <sbuf.h>
 
 defArray(TokenLoc);
 defArray(Macro);
@@ -237,17 +250,22 @@ bool _setSymbols(BRP* obj, ...)
 	va_end(args);
 // copying the symbols array
 	va_start(args, obj);
-	obj->symbols = malloc(n_symbols * sizeof(sbuf));
+	obj->symbols = malloc((n_symbols + 2) * sizeof(sbuf));
 	obj->hidden_symbols = malloc(n_hidden_symbols * sizeof(sbuf));
 	if (!obj->symbols || !obj->hidden_symbols) return false;
 
-
 	n_hidden_symbols = 0;
-	for (int i = 0; i < n_symbols; i++) {
+	for (int i = 0; i < n_symbols - 1; i++) {
 		obj->symbols[i] = va_arg(args, sbuf);
-		if (obj->symbols[i].data ? isSymbolSpecHidden(obj->symbols[i]) : true) obj->hidden_symbols[n_hidden_symbols++] = obj->symbols[i];
+		if (isSymbolSpecHidden(obj->symbols[i])) obj->hidden_symbols[n_hidden_symbols++] = obj->symbols[i];
 	}
 	va_end(args);
+
+	obj->_dquote_symbol_id = n_symbols - 1;
+	obj->symbols[n_symbols - 1] = DQUOTE;
+	obj->_quote_symbol_id = n_symbols;
+	obj->symbols[n_symbols] = QUOTE;
+	obj->symbols[n_symbols + 1] = obj->hidden_symbols[n_hidden_symbols] = (sbuf){0};
 
 	for (int i = 0; i < n_symbols; i++) {
 		for (int i1 = 0; i1 < i; i1++) {
@@ -636,82 +654,155 @@ Token fetchToken(BRP* obj)
 	preprocessInput(obj);
 	if (obj->cur_input == NULL) return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
 
-	if (sbufcut(&obj->cur_input->buffer, DQUOTE).data) {
-		sbuf new;
-		sbuf delim = sbufsplitesc(&obj->cur_input->buffer, &new, DQUOTE);
-		if (!sbufeq(delim, DQUOTE)) {
-			obj->error_code = BRP_ERR_UNCLOSED_STR;
-			obj->error_loc = obj->cur_input->cur_loc;
-			obj->handler(obj);
-			return (Token){ .type = TOKEN_NONE, .loc = obj->last_loc };
-		}
-
-		res.type = TOKEN_STRING;
-		res.loc = obj->cur_input->cur_loc;
-		res.word = tostr(new);
-
-		obj->cur_input->cur_loc.colno += sbufutf8len(new) + 2;
-		obj->last_loc = res.loc;
-		return res;
+	res.type = TOKEN_WORD;
+	sbuf new;
+	int delim_id;
+	if (obj->cur_input->buffer.data[0] == '-' && (obj->cur_input->buffer.length > 1 ? (obj->cur_input->buffer.data[1] >= '0' && obj->cur_input->buffer.data[1] <= '9') : false)) {
+		sbufshift(obj->cur_input->buffer, 1);
+		delim_id = sbufsplitv(&obj->cur_input->buffer, &new, obj->symbols);
+		sbufshift(new, -1);
 	} else {
-		res.type = TOKEN_WORD;
-		sbuf new;
-		int delim_id;
-		if (obj->cur_input->buffer.data[0] == '-' && (obj->cur_input->buffer.length > 1 ? (obj->cur_input->buffer.data[1] >= '0' && obj->cur_input->buffer.data[1] <= '9') : false)) {
-			sbufshift(obj->cur_input->buffer, 1);
-			delim_id = sbufsplitv(&obj->cur_input->buffer, &new, obj->symbols);
-			sbufshift(new, -1);
-		} else {
-			delim_id = sbufsplitv(&obj->cur_input->buffer, &new, obj->symbols);
-		}
+		delim_id = sbufsplitv(&obj->cur_input->buffer, &new, obj->symbols);
+	}
 
-		if (new.length) {
-			for (int i = 0; obj->keywords[i].data; i++) {
-				if (sbufeq(obj->keywords[i], new)) {
-					res.type = TOKEN_KEYWORD;
-					res.keyword_id = i;
-					break;
-				}
+	if (new.length) {
+		for (int i = 0; obj->keywords[i].data; i++) {
+			if (sbufeq(obj->keywords[i], new)) {
+				res.type = TOKEN_KEYWORD;
+				res.keyword_id = i;
+				break;
 			}
-			if (res.type == TOKEN_WORD) {
-				if (sbufint(new)) {
-					res.type = TOKEN_INT;
-					res.value = sbuftoint(new);
-				}
-			}
-			if (res.type == TOKEN_WORD) res.word = tostr(new);
-
-			res.loc = obj->cur_input->cur_loc;
-			obj->cur_input->cur_loc.colno += new.length;
-
-            if (delim_id >= 0 ? !isSymbolSpecHidden(obj->symbols[delim_id]) : false) {
-                TokenQueue_add(
-                    &obj->pending,
-                    (Token){
-                        .type = TOKEN_SYMBOL,
-                        .loc = obj->cur_input->cur_loc,
-                        .symbol_id = delim_id
-                    }
-                );
-            } 
-		} else {
-			res.type = delim_id == -1 ? TOKEN_NONE : TOKEN_SYMBOL;
-			res.loc = obj->cur_input->cur_loc;
-			res.symbol_id = delim_id;
 		}
+		if (res.type == TOKEN_WORD) {
+			if (sbufint(new)) {
+				res.type = TOKEN_INT;
+				res.value = sbuftoint(new);
+			}
+		}
+		if (res.type == TOKEN_WORD) res.word = tostr(new);
+
+		res.loc = obj->cur_input->cur_loc;
+		obj->cur_input->cur_loc.colno += new.length;
 
 		if (delim_id >= 0) {
-			if (obj->symbols[delim_id].data[0] == '\n') {
-				obj->cur_input->cur_loc.lineno++;
-				obj->cur_input->cur_loc.colno = 1;
-			} else {
-				obj->cur_input->cur_loc.colno += obj->symbols[delim_id].length;
-			}
-		}
+			if (delim_id == obj->_dquote_symbol_id) {
+				sbuf str_literal;
+				sbuf delim = sbufsplitesc(&obj->cur_input->buffer, &str_literal, DQUOTE, NEWLINE);
+				if (sbufeq(delim, NEWLINE)) {
+					obj->error_code = BRP_ERR_UNCLOSED_STR;
+					obj->error_loc = obj->cur_input->cur_loc;
+					obj->handler(obj);
+					return (Token){0};
+				}
 
-		obj->last_loc = res.loc;
-		return res;
+				char* str_literal_c;
+				if (obj->flags & BRP_ESC_STR_LITERALS) {
+					sbuf temp = scalloc(str_literal.length + 1);
+					sbufunesc(str_literal, &temp);
+					str_literal_c = temp.data;
+				} else str_literal_c = tostr(str_literal);
+
+				TokenQueue_add(
+					&obj->pending,
+					(Token){
+						.type = TOKEN_STRING,
+						.loc = obj->cur_input->cur_loc,
+						.word = str_literal_c
+					}
+				);
+				obj->cur_input->cur_loc.colno += sbufutf8len(str_literal) + DQUOTE.length;
+			} else if (delim_id == obj->_quote_symbol_id) {
+				sbuf char_literal;
+				sbuf delim = sbufsplitesc(&obj->cur_input->buffer, &char_literal, QUOTE, NEWLINE);
+				if (sbufeq(delim, NEWLINE)) {
+					obj->error_code = BRP_ERR_UNCLOSED_CHAR;
+					obj->error_loc = obj->cur_input->cur_loc;
+					obj->handler(obj);
+					return (Token){0};
+				}
+				char unesc_buffer[sizeof(res.value)];
+				sbuf unesc = { .data = unesc_buffer, .length = sizeof(unesc_buffer) };
+				sbufunesc(char_literal, &unesc);
+				if (IS_BIG_ENDIAN) reverseByteOrder(unesc.data, unesc.length);
+
+				TokenQueue_add(
+					&obj->pending,
+					(Token){
+						.type = TOKEN_INT,
+						.loc = obj->cur_input->cur_loc,
+						.value = *(int64_t*)unesc_buffer
+					}
+				);
+				obj->cur_input->cur_loc.colno += sbufutf8len(char_literal) + QUOTE.length;
+			} else if (!isSymbolSpecHidden(obj->symbols[delim_id])) {
+				TokenQueue_add(
+					&obj->pending,
+					(Token){
+						.type = TOKEN_SYMBOL,
+						.loc = obj->cur_input->cur_loc,
+						.symbol_id = delim_id
+					}
+				);
+			} 
+		}
+	} else if (delim_id >= 0) {
+		if (delim_id == obj->_dquote_symbol_id) {
+			sbuf str_literal;
+			sbuf delim = sbufsplitesc(&obj->cur_input->buffer, &str_literal, DQUOTE, NEWLINE);
+			if (sbufeq(delim, NEWLINE)) {
+				obj->error_code = BRP_ERR_UNCLOSED_STR;
+				obj->error_loc = obj->cur_input->cur_loc;
+				obj->handler(obj);
+				return (Token){0};
+			}
+
+			char* str_literal_c;
+			if (obj->flags & BRP_ESC_STR_LITERALS) {
+				sbuf temp = scalloc(str_literal.length + 1);
+				sbufunesc(str_literal, &temp);
+				str_literal_c = temp.data;
+			} else str_literal_c = tostr(str_literal);
+
+			res.type = TOKEN_STRING;
+			res.loc = obj->cur_input->cur_loc;
+			res.word = str_literal_c;
+			obj->cur_input->cur_loc.colno += sbufutf8len(str_literal) + DQUOTE.length;
+		} else if (delim_id == obj->_quote_symbol_id) {
+			sbuf char_literal;
+			sbuf delim = sbufsplitesc(&obj->cur_input->buffer, &char_literal, QUOTE, NEWLINE);
+			if (sbufeq(delim, NEWLINE)) {
+				obj->error_code = BRP_ERR_UNCLOSED_CHAR;
+				obj->error_loc = obj->cur_input->cur_loc;
+				obj->handler(obj);
+				return (Token){0};
+			}
+			char unesc_buffer[sizeof(res.value)];
+			sbuf unesc = { .data = unesc_buffer, .length = sizeof(unesc_buffer) };
+			sbufunesc(char_literal, &unesc);
+			if (IS_BIG_ENDIAN) reverseByteOrder(unesc.data, unesc.length);
+
+			res.type = TOKEN_INT;
+			res.loc = obj->cur_input->cur_loc;
+			res.value = *(int64_t*)unesc_buffer;
+			obj->cur_input->cur_loc.colno += sbufutf8len(char_literal) + QUOTE.length;
+		} else {
+			res.type = TOKEN_SYMBOL;
+			res.symbol_id = delim_id;
+			res.loc = obj->cur_input->cur_loc;
+		}
+	} else return (Token){ .type = TOKEN_NONE, .loc = obj->cur_input->cur_loc };
+
+	if (delim_id >= 0) {
+		if (obj->symbols[delim_id].data[0] == '\n') {
+			obj->cur_input->cur_loc.lineno++;
+			obj->cur_input->cur_loc.colno = 1;
+		} else {
+			obj->cur_input->cur_loc.colno += obj->symbols[delim_id].length;
+		}
 	}
+
+	obj->last_loc = res.loc;
+	return res;
 }
 
 Token peekToken(BRP* obj)
@@ -801,7 +892,7 @@ char* getTokenWord(BRP* obj, Token token)
 }
 
 void printBRPErrorStr(FILE* fd, BRP* obj) {
-	static_assert(N_BRP_ERRORS == 12, "not all BRP errors are handled in printBRPErrorStr");
+	static_assert(N_BRP_ERRORS == 13, "not all BRP errors are handled in printBRPErrorStr");
 	switch (obj->error_code) {
 		case BRP_ERR_OK: break;
 		case BRP_ERR_UNCLOSED_STR: 
@@ -841,6 +932,9 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 		case BRP_ERR_EXCESS_ELSE:
 			fprintf(fd, "excess `#else` directive ");
 			break;
+		case BRP_ERR_UNCLOSED_CHAR:
+			fprintf(fd, "unclosed character literal ");
+			break;
 		default: fprintf(fd, "unreachable");
 	}
 }
@@ -856,13 +950,14 @@ void printBRPError(BRP* obj)
 	}
 }
 
-BRP* initBRP(BRP* obj, BRPErrorHandler handler)
+BRP* initBRP(BRP* obj, BRPErrorHandler handler, char flags)
 {
 	*obj = (BRP){0};
 	obj->pending = TokenQueue_new(0);
 	obj->error_loc = (TokenLoc){0};
 	obj->handler = handler ? handler : printBRPError;
 	obj->cur_input = NULL;
+	obj->flags = flags;
 	obj->macros = MacroArray_new(
 		3,
 		(Macro){ .name = "__BRC__", .def = {0}, .def_loc = {0} },

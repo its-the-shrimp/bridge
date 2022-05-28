@@ -3,11 +3,11 @@
 #ifndef _SBUF_
 #define _SBUF_
 
-#include "stdio.h"
-#include "string.h"
-#include "stdbool.h"
-#include "stdarg.h"
-#include "stdlib.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdbool.h>
+#include <stdarg.h>
+#include <stdlib.h>
 
 #define sbuf_format "%.*s"
 #define unpack(array) (int)array.length, array.data
@@ -58,7 +58,7 @@ typedef struct sbuf {
 #define CSTRTERM ((sbuf){ .data = "\0", .length = 1 })
 
 sbuf filecontent(FILE* fd);
-sbuf sbufunesc(sbuf src);
+sbuf sbufunesc(sbuf src, sbuf* dst);
 sbuf_size_t sbufutf8len(sbuf obj);
 bool sbufascii(sbuf obj);
 bool sbufstartswith(sbuf obj, sbuf sub);
@@ -149,8 +149,8 @@ void sfree(sbuf* obj);
 
 #endif  // _SBUF_
 
-#ifdef SBUF_IMPLEMENTATION
-#undef SBUF_IMPLEMENTATION
+#if defined(SBUF_IMPLEMENTATION) && !defined(_SBUF_IMPL_LOCK)
+#define _SBUF_IMPL_LOCK
 
 // concatenates the buffers provided as variadic arguments in a newly allocated buffer, returns the resulting buffer
 sbuf _sbufconcat(int _, ...)
@@ -307,38 +307,43 @@ int sbufsplitescv(sbuf* src, sbuf* dst, sbuf delims[])
 }
 
 #define lowerchar(ch) ( ch >= 'A' ? ch | 32 : ch )
-// returns a newly allocated string with data from the sized string `src` unescaped.
-sbuf sbufunesc(sbuf src)
+// unescapes the characters in `src` and writes them to `dst`; if `dst` is NULL, a new buffer is allocated and returned
+// `dst` buffer must be at least the size of `src`; the function guarantees that the output will not be larger than the input
+sbuf sbufunesc(sbuf src, sbuf* dst)
 {
-	sbuf res = smalloc(src.length);
-	res.length = 0;
+	sbuf stub_dst;
+	if (!dst) {
+		stub_dst = smalloc(src.length);
+		dst = &stub_dst;
+	}
+	dst->length = 0;
 
 	for (int i = 0; src.length > 0; i++) {
 		if (*src.data == '\\') {
 			sbufshift(src, 1);
 			switch (*src.data) {
-				case '0':  res.data[i] = '\0'; sbufshift(src, 1); break;
-				case 'n':  res.data[i] = '\n'; sbufshift(src, 1); break;
-				case 'r':  res.data[i] = '\r'; sbufshift(src, 1); break;
-				case 't':  res.data[i] = '\t'; sbufshift(src, 1); break;
-				case '\\': res.data[i] = '\\'; sbufshift(src, 1); break;
+				case '0':  dst->data[i] = '\0'; sbufshift(src, 1); break;
+				case 'n':  dst->data[i] = '\n'; sbufshift(src, 1); break;
+				case 'r':  dst->data[i] = '\r'; sbufshift(src, 1); break;
+				case 't':  dst->data[i] = '\t'; sbufshift(src, 1); break;
+				case '\\': dst->data[i] = '\\'; sbufshift(src, 1); break;
 				case 'x':
 					sbufshift(src, 1);
-					if (*src.data == '\0') { res.data[i] = 'x'; break; }
-					res.data[i] = (*src.data >= 65 ? lowerchar(*src.data) - 87 : *src.data - 48) << 4;
+					if (*src.data == '\0') { dst->data[i] = 'x'; break; }
+					dst->data[i] = (*src.data >= 65 ? lowerchar(*src.data) - 87 : *src.data - 48) << 4;
 
 					sbufshift(src, 1);
-					if (*src.data == '\0') { res.data[i] = (unsigned char)res.data[i] >> 4; break; }
-					res.data[i] |= *src.data >= 65 ? lowerchar(*src.data) - 87 : *src.data - 48;
+					if (*src.data == '\0') { dst->data[i] = (unsigned char)dst->data[i] >> 4; break; }
+					dst->data[i] |= *src.data >= 65 ? lowerchar(*src.data) - 87 : *src.data - 48;
 
 					sbufshift(src, 1);
 					break;
-				default: res.data[i] = *src.data; break;
+				default: dst->data[i] = *src.data; break;
 			}
-		} else { res.data[i] = *src.data; sbufshift(src, 1); }
-		res.length++;
+		} else { dst->data[i] = *src.data; sbufshift(src, 1); }
+		dst->length++;
 	}
-	return res;
+	return *dst;
 }
 
 // returns amounts of UTF-8 characters in the sized string.
