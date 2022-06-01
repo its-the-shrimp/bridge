@@ -8,9 +8,9 @@
 
 defArray(str);
 
-sbuf ASM_EXT = fromcstr(".S");
-sbuf EXEC_EXT = fromcstr("");
-sbuf OBJ_EXT = fromcstr(".o");
+sbuf ASM_EXT = CSBUF(".S");
+sbuf EXEC_EXT = CSBUF("");
+sbuf OBJ_EXT = CSBUF(".o");
 
 char* conditionNames_arm64[] = {
 	[COND_NON] = "",
@@ -1289,14 +1289,14 @@ int main(int argc, char* argv[])
 						break;
                     case '-':
                         argv[i]++;
-                        if (streq(argv[i], "asm-output")) {
+                        if (sbufeq(argv[i], "asm-output")) {
                             if (!argv[++i]) {
                                 eprintf("error: `--asm-output` option specified but no path is provided\n");
                                 return 1;
                             }
                             asm_output_path = argv[i];
                             go_on = true;
-                        } else if (streq(argv[i], "obj-output")) {
+                        } else if (sbufeq(argv[i], "obj-output")) {
                             if (!argv[++i]) {
                                 eprintf("error: `--obj-output` option specified but no path is provided\n");
                                 return 1;
@@ -1324,13 +1324,13 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	sbuf input_path_sbuf = fromstr(input_path), basepath = {0};
-	sbufsplitr(&input_path_sbuf, &basepath, fromcstr("."));
+	sbuf input_path_sbuf = SBUF(input_path), basepath = {0};
+	sbufsplitr(&input_path_sbuf, &basepath, CSBUF("."));
 	sbuf basename = fileBaseName_s(basepath);
 
 	if (exec_output_path) {
 		if (isPathDir(exec_output_path)) {
-			exec_output_path = tostr(fromstr(exec_output_path), PATHSEP, basename);
+			exec_output_path = tostr(SBUF(exec_output_path), PATHSEP, basename);
 		}
 	} else {
 		exec_output_path = tostr(basepath);
@@ -1338,22 +1338,22 @@ int main(int argc, char* argv[])
 
 	if (asm_output_path) {
 		if (isPathDir(asm_output_path)) {
-			asm_output_path = tostr(fromstr(asm_output_path), PATHSEP, basename, ASM_EXT);
+			asm_output_path = tostr(SBUF(asm_output_path), PATHSEP, basename, ASM_EXT);
 		}
 	} else {
-		asm_output_path = mktemp(tostr(fromstr("/tmp/asmXXXXXX"))); // string is copied to dynamic memory
+		asm_output_path = mktemp(tostr(SBUF("/tmp/asmXXXXXX"))); // string is copied to dynamic memory
 	}
 
 	if (obj_output_path) {
 		if (isPathDir(obj_output_path)) {
-			obj_output_path = tostr(fromstr(obj_output_path), PATHSEP, basename, OBJ_EXT);
+			obj_output_path = tostr(SBUF(obj_output_path), PATHSEP, basename, OBJ_EXT);
 		}
 	} else {
-		obj_output_path = mktemp(tostr(fromstr("/tmp/objXXXXXX")));
+		obj_output_path = mktemp(tostr(SBUF("/tmp/objXXXXXX")));
 	}
 
-	char* asm_visual_output_path = isTempPath(asm_output_path) ? tostr(fromcstr("~"), basepath, ASM_EXT) : asm_output_path;
-	char* obj_visual_output_path = isTempPath(obj_output_path) ? tostr(fromcstr("~"), basepath, OBJ_EXT) : obj_output_path;
+	char* asm_visual_output_path = isTempPath(asm_output_path) ? tostr(CSBUF("~"), basepath, ASM_EXT) : asm_output_path;
+	char* obj_visual_output_path = isTempPath(obj_output_path) ? tostr(CSBUF("~"), basepath, OBJ_EXT) : obj_output_path;
 
 
 

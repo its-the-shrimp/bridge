@@ -107,32 +107,32 @@ bool isPathDir_s(sbuf path)
 
 char* setFileExt(char* path, char* ext)
 {
-	sbuf src = fromstr(path);
+	sbuf src = SBUF(path);
 	sbuf noext;
-	sbufsplitr(&src, &noext, fromcstr("."));
-	return tostr(noext, fromstr(ext));
+	sbufsplitr(&src, &noext, CSBUF("."));
+	return tostr(noext, SBUF(ext));
 }
 
 sbuf setFileExt_s(sbuf path, sbuf ext)
 {
 	sbuf noext;
-	sbufsplitr(&path, &noext, fromcstr("."));
+	sbufsplitr(&path, &noext, CSBUF("."));
 	return sbufconcat(noext, ext);
 }
 
 char* fileBaseName(char* path)
 {
-	sbuf src = fromstr(path);
+	sbuf src = SBUF(path);
 	sbuf res;
-	sbufsplitr(&src, &res, fromcstr("."), PATHSEP);
-    sbufsplitr(&res, &src, fromchar('/'));
+	sbufsplitr(&src, &res, CSBUF("."), PATHSEP);
+    sbufsplitr(&res, &src, CSBUF('/'));
 	return tostr((res.length ? res : src));
 }
 
 sbuf fileBaseName_s(sbuf path)
 {
 	sbuf res;
-	sbufsplitr(&path, &res, fromcstr("."), PATHSEP);
-    sbufsplitr(&res, &path, fromchar('/'));
+	sbufsplitr(&path, &res, CSBUF("."), PATHSEP);
+    sbufsplitr(&res, &path, CSBUF('/'));
 	return res.length ? res : path;
 }

@@ -270,7 +270,7 @@ void printVBRBError(FILE* dst, VBRBError err) {
 int64_t getBRBuiltinValue(char* name)
 {
 	for (int64_t i = 0; i < N_BUILTINS; i++) {
-		if (streq(builtins[i].name, name)) return i;
+		if (sbufeq(builtins[i].name, name)) return i;
 	}
 	return -1;
 } 
@@ -357,9 +357,9 @@ VBRBError getVarArg(CompilerCtx* ctx, Token src, int64_t* offset_p, uint8_t* var
 	};
 	
 	*offset_p = 0;
-	sbuf var_name = fromstr(getTokenWord(ctx->prep, src));
+	sbuf var_name = SBUF(getTokenWord(ctx->prep, src));
 	for (int i = ctx->vars.length - 1; i >= 0; i--) {
-		if (sbufeq(fromstr(ctx->vars.data[i].name), var_name)) { 
+		if (sbufeq(ctx->vars.data[i].name, var_name)) { 
 			var_name.data = NULL;
 			*var_size_p = ctx->vars.data[i].size;
 			break;
@@ -650,7 +650,7 @@ VBRBError compileOpEndproc(CompilerCtx* ctx, Module* dst)
 		ExecMark* dst_mark = ctx->proc_gotos.data + goto_index;
 		for (int mark_index = 0; mark_index < ctx->proc_marks.length; mark_index++) {
 			ExecMark* src_mark = ctx->proc_marks.data + mark_index;
-			if (streq(getTokenWord(ctx->prep, src_mark->name), getTokenWord(ctx->prep, dst_mark->name))) {
+			if (sbufeq(getTokenWord(ctx->prep, src_mark->name), getTokenWord(ctx->prep, dst_mark->name))) {
 				dst->execblock.data[dst_mark->id].op_offset = src_mark->id - dst_mark->id;
 				dst_mark = NULL;
 				break;
@@ -1071,7 +1071,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 						&dst->datablocks,
 						(DataBlock){
 							.name = getTokenWord(obj, block_name),
-							.spec = fromstr(block_spec.word)
+							.spec = SBUF(block_spec.word)
 						}
 					)) {
 						delCompilerCtx(&compctx);

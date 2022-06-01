@@ -4,10 +4,10 @@
 #ifdef BRIDGE_IMPLEMENTATION
 #define SBUF_IMPLEMENTATION
 #define BRP_IMPLEMENTATION
-#define BR_BYTEORDER_IMPLEMENTATION
+#define BR_UTILS_IMPLEMENTATION
 #endif
 
-#include <br_byteorder.h>
+#include <br_utils.h>
 #include <datasets.h>
 #include <sbuf.h>
 #include <assert.h>
@@ -34,9 +34,11 @@
 #define BR_EXT ".br"
 
 static struct timespec TIME;
+
 bool startTimerAt(struct timespec* dst);
-float endTimerAt(struct timespec* src);
 #define startTimer() startTimerAt(&TIME)
+
+float endTimerAt(struct timespec* src);
 #define endTimer() endTimerAt(&TIME)
 
 typedef struct {
@@ -67,9 +69,7 @@ char* fileBaseName(char* path);
 // same as fileBaseName, but operates on and returns a sized buffer
 sbuf fileBaseName_s(sbuf path);
 
-bool fpipe(FILE** readable_end_ptr, FILE** writable_end_ptr);
-
-#define isTempPath(path) sbufstartswith(fromstr(path), fromcstr("/tmp")) 
+#define isTempPath(path) sbufstartswith(path, CSBUF("/tmp")) 
 #define inRange(x, start, end) ( (int64_t)(x) >= (int64_t)(start) && (int64_t)(x) < (int64_t)(end) )
 #define isSlice(sub_start, sub_size, start, size) \
 	( (int64_t)(sub_start) >= (int64_t)(start) && ((int64_t)(sub_start) + (int64_t)(sub_size)) <= ((int64_t)(start) + (int64_t)(size)) ) 

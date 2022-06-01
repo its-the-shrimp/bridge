@@ -1,5 +1,6 @@
-#ifndef _BR_BYTEORDER_H
-#define _BR_BYTEORDER_H
+// compatibility definitions and declarations
+#ifndef _BR_UTILS_H
+#define _BR_UTILS_H
 
 #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && defined(__ORDER_LITTLE_ENDIAN__)
 #define IS_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
@@ -19,10 +20,13 @@ void* reverseByteOrder(void* src, long length);
 #define BRByteOrder(src, length) (src)
 #endif
 
-#endif // _BR_BYTEORDER_H
+// DEF_WITH_ATTRS macro creates a function definition with attributes, which is normally prohibited by the C standard
+#define DEF_WITH_ATTRS(prototype, attrs) prototype attrs; prototype
 
-#if defined(BR_BYTEORDER_IMPLEMENTATION) && !defined(_BR_BYTEORDER_IMPL_LOCK)
-#define _BR_BYTEORDER_IMPL_LOCK
+#endif // _BR_UTILS_H
+
+#if defined(BR_UTILS_IMPLEMENTATION) && !defined(_BR_UTILS_IMPL_LOCK)
+#define _BR_UTILS_IMPL_LOCK
 
 void* reverseByteOrder(void* src, long length) {
 	char* _src = src;
@@ -34,4 +38,4 @@ void* reverseByteOrder(void* src, long length) {
 	return src;
 }
 
-#endif // BR_BYTEORDER_IMPLEMENTATION
+#endif // BR_UTILS_IMPLEMENTATION

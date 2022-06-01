@@ -52,7 +52,7 @@ void writeInt(FILE* fd, int64_t x)
 void writeName(ModuleWriter* writer, char* name)
 {
 	for (long i = 0; i < writer->consts.length; i++) {
-		if (streq(name, writer->consts.data[i])) {
+		if (sbufeq(name, writer->consts.data[i])) {
 			writeInt(writer->dst, i);
 			return;
 		}
@@ -770,14 +770,14 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		.code = BRB_ERR_NO_LOAD_SEGMENT
 	};
 	for (int64_t i = 0; i < n; i++) {
-		char* name;
-		size_t name_length;
+		char* name = NULL;
+		size_t name_length = 0;
 
-		name = fgetln(src, &name_length);
+		name_length = getline(&name, &name_length, src);
 		if (!name_length || !name) return (BRBLoadError){
 			.code = BRB_ERR_NO_NAME_SPEC
 		};
-		name = tostr((sbuf){ .data = name, .length = name_length - 1 });
+		name[--name_length] = '\0';
 
 		FILE* module_fd = findModule(name, module_paths);
 		if (!module_fd) return (BRBLoadError){
@@ -869,14 +869,14 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		.code = BRB_ERR_NO_NAME_SEGMENT
 	};
 	for (int64_t i = 0; i < n; i++) {
-		char* name;
-		size_t name_length;
+		char* name = NULL;
+		size_t name_length = 0;
 
-		name = fgetln(src, (size_t*)&name_length);
+		name_length = getline(&name, &name_length, src);
 		if (!name_length || !name) return (BRBLoadError){
 			.code = BRB_ERR_NO_NAME_SPEC
 		};
-		name = tostr((sbuf){ .data = name, .length = name_length - 1 });
+		name[--name_length] = '\0';
 
 		for (int64_t i1 = 0; i1 < loader.unresolved.length; i1++) {
 			if (*loader.unresolved.data[i1] == (char*)i) {
@@ -896,7 +896,7 @@ void resolveModule(Module* dst, bool for_exec)
 		switch (op->type) {
 			case OP_SETD:
 				for (int64_t db_i = 0; db_i < dst->datablocks.length; db_i++) {
-					if (streq(op->mark_name, dst->datablocks.data[db_i].name)) {
+					if (sbufeq(op->mark_name, dst->datablocks.data[db_i].name)) {
 						op->symbol_id = db_i;
 						break;
 					}
@@ -904,7 +904,7 @@ void resolveModule(Module* dst, bool for_exec)
 				break;
 			case OP_SETM:
 				for (int64_t mb_i = 0; mb_i < dst->memblocks.length; mb_i++) {
-					if (streq(op->mark_name, dst->memblocks.data[mb_i].name)) {
+					if (sbufeq(op->mark_name, dst->memblocks.data[mb_i].name)) {
 						op->symbol_id = mb_i;
 						break;
 					}
@@ -915,7 +915,7 @@ void resolveModule(Module* dst, bool for_exec)
 					Op* proc = dst->execblock.data + proc_index;
 
 					if (proc->type == OP_PROC || proc->type == OP_EXTPROC) {
-						if (streq(proc->mark_name, op->mark_name)) {
+						if (sbufeq(proc->mark_name, op->mark_name)) {
 							op->symbol_id = proc_index;
 							break;
 						}
@@ -932,7 +932,7 @@ void resolveModule(Module* dst, bool for_exec)
 		for (int i = dst->_root_eb_start; i < dst->execblock.length; i++) {
 			Op* op = dst->execblock.data + i;
 			if (op->type == OP_PROC || op->type == OP_EXTPROC) {
-				if (sbufeq(fromstr(op->mark_name), fromcstr("main"))) {
+				if (sbufeq(op->mark_name, "main")) {
 					dst->entry_opid = i;
 					break;
 				}
@@ -968,7 +968,7 @@ void initExecEnv(ExecEnv* env, Module* module, char** args)
 	while (args[++env->exec_argc]) {}
 	env->exec_argv = malloc(env->exec_argc * sizeof(sbuf));
 	for (int i = 0; i < env->exec_argc; i++) {
-		env->exec_argv[i] = fromstr(args[i]);
+		env->exec_argv[i] = SBUF(args[i]);
 		env->exec_argv[i].length++;
 	}
 }
@@ -1738,7 +1738,7 @@ void _execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
 
 void _execModuleWithCallbacks(ExecEnv* env, Module* module, volatile bool* interruptor)
 {
-	while (interruptor ? !(*interruptor) : true) {
+	while (!(*interruptor)) {
 		Op* op = module->execblock.data + env->op_id;
 		if (op->cond_id) {
 			if (!handleCondition(env, op->cond_id)) {

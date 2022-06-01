@@ -1,5 +1,5 @@
-#ifndef _DATASETS_
-#define _DATASETS_
+#ifndef _DATASETS_H
+#define _DATASETS_H
 
 #include <stdlib.h>
 #include <string.h>
@@ -297,69 +297,4 @@
 		return true; \
 	} \
 
-#define declQueue(t) \
-	typedef struct { int input_end, output_end; long length; } t##Queue; \
-	t##Queue t##Queue_new(int n, ...); \
-	bool t##Queue_add(t##Queue* queue, t obj); \
-	bool t##Queue_fetch(t##Queue* queue, t* dst); \
-	bool t##Queue_peek(t##Queue* queue, t* dst); \
-	bool t##Queue_unfetch(t##Queue* queue, t item); \
-	bool t##Queue_delete(t##Queue* queue) \
-
-#define defQueue(t) \
-	t##Queue t##Queue_new(int n, ...) { \
-		int fds[2]; \
-		pipe(fds); \
-		t##Queue res = { .length = n, .input_end = fds[1], .output_end = fds[0] }; \
-		if (!n) return res; \
-		va_list args; \
-		va_start(args, n); \
-		for (int i = 0; i < n; i++) { \
-			t obj = va_arg(args, t); \
-			if (write(res.input_end, &obj, sizeof(t)) <= 0) { \
-				va_end(args); \
-				return (t##Queue){0}; \
-			} \
-		} \
-		va_end(args); \
-		return res; \
-	} \
-	bool t##Queue_add(t##Queue* queue, t obj) { \
-		if (write(queue->input_end, &obj, sizeof(t)) <= 0) return false; \
-		queue->length++; \
-		return true; \
-	} \
-	bool t##Queue_fetch(t##Queue* queue, t* dst) { \
-	 	if (!queue->length) return false; \
-		if (read(queue->output_end, dst, sizeof(t)) < 0) return false; \
-		queue->length--; \
-		return true; \
-	} \
-	bool t##Queue_peek(t##Queue* queue, t* dst) { \
-		if (!queue->length) return false; \
-		t temp; \
-		if (read(queue->output_end, &temp, sizeof(t)) < 0) return false; \
-		*dst = temp; \
-		if (write(queue->input_end, &temp, sizeof(t)) <= 0) return false; \
-		for (int i = 0; i < queue->length - 1; i++) { \
-			if (read(queue->output_end, &temp, sizeof(t)) < 0) return false; \
-			if (write(queue->input_end, &temp, sizeof(t)) <= 0) return false; \
-		} \
-		return true; \
-	} \
-	bool t##Queue_unfetch(t##Queue* queue, t item) { \
-		if (write(queue->input_end, &item, sizeof(t)) <= 0) return false; \
-		queue->length++; \
-		for (int i = 0; i < queue->length - 1; i++) { \
-			if (read(queue->output_end, &item, sizeof(t)) < 0) return false; \
-			if (write(queue->input_end, &item, sizeof(t)) <= 0) return false; \
-		} \
-		return false; \
-	} \
-	bool t##Queue_delete(t##Queue* queue) { \
-		if (close(queue->input_end) < 0) return false; \
-		if (close(queue->output_end) < 0) return false; \
-		return true; \
-	} \
-
-#endif
+#endif // _DATASETS_H

@@ -54,7 +54,7 @@ int main(int argc, char* argv[])
 
 	if (output_path) {
 		if (isPathDir(output_path)) {
-			output_path = tostr(fromstr(output_path), PATHSEP, fileBaseName_s(fromstr(input_path)), fromstr(BRB_EXT));
+			output_path = tostr(SBUF(output_path), PATHSEP, fileBaseName_s(SBUF(input_path)), SBUF(BRB_EXT));
 		}
 	} else {
 		output_path = setFileExt(input_path, BRB_EXT);
