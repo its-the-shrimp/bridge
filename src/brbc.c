@@ -1204,10 +1204,32 @@ void compileByteCode(Module* src, FILE* dst)
 	CompCtx ctx = {.dst = dst};
 
 	if (src->datablocks.length) {
-		fprintf(dst, ".data\n");
-		array_foreach(DataBlock, block, src->datablocks, 
+		fprintf(dst, ".rodata\n");
+		array_foreach(DataBlock, block, src->datablocks,
 			fprintf(dst, "\t%s: .ascii \"", block.name);
-			fputsbufesc(dst, block.spec, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
+			array_foreach(DataPiece, piece, block.pieces,
+				switch (piece.type) {
+					case PIECE_LITERAL:
+						fputsbufesc(dst, piece.data, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
+						break;
+					case PIECE_INT16: {
+						int16_t x = (int16_t)piece.integer;
+						fputsbufesc(dst, (sbuf){ .data = (char*)&x, .length = sizeof(x) }, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
+						break;
+					} case PIECE_INT32: {
+						int32_t x = (int32_t)piece.integer;
+						fputsbufesc(dst, (sbuf){ .data = (char*)&x, .length = sizeof(x) }, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
+						break;
+					} case PIECE_INT64:
+						fputsbufesc(dst, (sbuf){ .data = (char*)&piece.integer, .length = sizeof(piece.integer) }, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
+						break;
+					case PIECE_NONE:
+					case N_PIECE_TYPES:
+					default:
+						eprintf("internal compiler bug: invalid block piece type %d\n", piece.type);
+						abort();
+				}
+			);
 			fprintf(dst, "\"\n");
 		);
 	}

@@ -333,6 +333,7 @@ int main(int argc, char* argv[])
 				printf("interrupt: program exited\n");
 			}
 			printExecCtx(&env, &module);
+			continue;
 		}
 
 		if (sbufcut(&cmd, CSBUF("b")).data) {
@@ -405,22 +406,29 @@ int main(int argc, char* argv[])
 				if (proc_name.data)
 					printf("error: procedure `%.*s` could not be found\n", unpack(proc_name));
 			}
+			continue;
 		}
 
-		if (sbufeq(cmd, "ei"))
+		if (sbufeq(cmd, "ei")) {
 			printf("0x%08x\n", env.op_id);
+			continue;
+		}
 
 		if (sbufeq(cmd, "n")) {
 			execOp(&env, &module);
 			printf("interrupt: single operation executed\n");
 			printExecCtx(&env, &module);
+			continue;
 		}
 
-		if (sbufeq(cmd, "ctx"))
+		if (sbufeq(cmd, "ctx")) {
 			printExecCtx(&env, &module);
+			continue;
+		}
 
-		if (sbufcut(&cmd, "rr").data) {
+		if (sbufcut(&cmd, CSBUF("rr")).data) {
 			sbufstripl(&cmd, CSBUF(" "), CSBUF("\t"));
+			printf("shit\n");
 			if (cmd.length > 0) {
 				if (cmd.length == 2) {
 					if (cmd.data[0] == 'r' && cmd.data[1] >= '0' && cmd.data[1] <= '7') {
@@ -435,9 +443,10 @@ int main(int argc, char* argv[])
 				printf("  .sp:\t0x%p\n", env.stack_head);
 				printf("  .ei:\t0x%08x\n", env.op_id);
 			}
+			continue;
 		}
 
-		if (sbufcut(&cmd, "rm").data) {
+		if (sbufcut(&cmd, CSBUF("rm")).data) {
 			sbufstripl(&cmd, CSBUF(" "), CSBUF("\t"));
 			if (cmd.length == 0) {
 				printf("memory address to read not provided\n");
@@ -465,7 +474,11 @@ int main(int argc, char* argv[])
 			sbuf span = (sbuf){ .data = (char*)sbuftoint(address), .length = sbuftoint(n_bytes) };
 			printf("  %p: ", span.data);
 			putsbuflnesc(span, BYTEFMT_HEX);
+			continue;
 		}
+
+		if (cmd.length > 0)
+			printf("invalid command `%.*s`\n", unpack(cmd));
     }
 
     return env.exitcode;

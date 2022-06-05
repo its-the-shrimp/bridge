@@ -106,6 +106,9 @@ typedef enum {
 	KW_DATA,
 	KW_MEMORY,
 	KW_LOAD,
+	KW_INT16,
+	KW_INT32,
+	KW_INT64,
 	N_VBRB_KWS
 } VBRBKeyword;
 static_assert(N_OPS == 70, "Some BRB operations have unmatched keywords");
@@ -284,6 +287,39 @@ typedef struct {
 	BRP* prep;
 } CompilerCtx;
 typedef VBRBError (*OpCompiler) (CompilerCtx*, Module*);
+
+VBRBError getDataPiece(CompilerCtx* ctx, DataPiece* piece)
+{
+	Token spec = fetchToken(ctx->prep);
+	if (spec.type == TOKEN_STRING) {
+		piece->type = PIECE_LITERAL;
+		piece->data = SBUF(spec.word);
+		return (VBRBError){ .prep = ctx->prep };
+	}
+
+	Token arg;
+	switch (getTokenKeywordId(spec)) {
+		case KW_INT16:
+		case KW_INT32:
+		case KW_INT64:
+			arg = fetchToken(ctx->prep);
+			if (arg.type != TOKEN_INT) return (VBRBError){
+				.prep = ctx->prep,
+				.code = VBRB_ERR_BLOCK_SPEC_EXPECTED,
+				.loc = arg
+			};
+			piece->type = spec.keyword_id - KW_INT16 + PIECE_INT16;
+			piece->integer = arg.value;
+			break;
+		default:
+			return (VBRBError){
+				.prep = ctx->prep,
+				.code = VBRB_ERR_BLOCK_SPEC_EXPECTED,
+				.loc = spec
+			};
+	}
+	return (VBRBError){ .prep = ctx->prep };
+}
 
 VBRBError getRegIdArg(CompilerCtx* ctx, Token src, int8_t* dst, char op_type, char arg_id)
 {
@@ -993,7 +1029,10 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 		BRP_KEYWORD("exec"),
 		BRP_KEYWORD("data"),
 		BRP_KEYWORD("memory"),
-		BRP_KEYWORD("load")
+		BRP_KEYWORD("load"),
+		BRP_KEYWORD(".int16"),
+		BRP_KEYWORD(".int32"),
+		BRP_KEYWORD(".int64")
 	);
 	setInput(obj, src_name, src);
 	
@@ -1044,7 +1083,8 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 				}
 
 				Token block_name, block_spec;
-				while (!BRPempty(obj)) {
+				DataBlock* block;
+				while (true) {
 					block_name = fetchToken(obj);
 					if (getTokenSymbolId(block_name) == SYMBOL_SEGMENT_END) {
 						break;
@@ -1057,29 +1097,43 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 						};
 					}
 
-					block_spec = fetchToken(obj);
-					if (block_spec.type != TOKEN_STRING) {
+					if (!(block = DataBlockArray_append(&dst->datablocks, (DataBlock){0}))) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                            .prep = obj,
-							.code = VBRB_ERR_BLOCK_SPEC_EXPECTED,
-							.loc = block_spec
+							.prep = obj,
+							.code = VBRB_ERR_NO_MEMORY
 						};
 					}
 
-					if (!DataBlockArray_append(
-						&dst->datablocks,
-						(DataBlock){
-							.name = getTokenWord(obj, block_name),
-							.spec = SBUF(block_spec.word)
+					block->name = block_name.word;
+
+					block_spec = peekToken(obj);
+					if (getTokenSymbolId(block_spec) == SYMBOL_SEGMENT_START) {
+						fetchToken(obj);
+						while (getTokenSymbolId(peekToken(obj)) != SYMBOL_SEGMENT_END) {
+							DataPiece* piece = DataPieceArray_resize(&block->pieces, 1);
+							if (!piece) {
+								delCompilerCtx(&compctx);
+								return (VBRBError){
+									.prep = obj,
+									.code = VBRB_ERR_NO_MEMORY
+								};
+							}
+							VBRBError err = getDataPiece(&compctx, piece);
+							if (err.code) return err;
 						}
-					)) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-                            .prep = obj,
-							.code = VBRB_ERR_NO_MEMORY,
-							.loc = block_spec
-						};
+						fetchToken(obj);
+					} else {
+						DataPiece* piece = DataPieceArray_resize(&block->pieces, 1);
+						if (!piece) {
+							delCompilerCtx(&compctx);
+							return (VBRBError){
+								.prep = obj,
+								.code = VBRB_ERR_NO_MEMORY
+							};
+						}
+						VBRBError err = getDataPiece(&compctx, piece);
+						if (err.code) return err;
 					}
 				}
 

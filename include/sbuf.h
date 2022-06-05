@@ -138,11 +138,6 @@ sbuf _sbufstripr(sbuf* src, ...);
 sbuf_size_t _sbufstripc(sbuf* src, sbuf* ldst, sbuf* rdst, const sbuf set);
 #define sbufstripc(src, ldst, rdst, set) _sbufstripc(src, ldst, rdst, SBUF(set))
 
-sbuf_size_t sbufstripv(sbuf* src, sbuf* ldst, sbuf* rdst, const sbuf items[]);
-sbuf_size_t _sbufstrip(sbuf* src, sbuf* ldst, sbuf* rdst, ...);
-#define sbufstrip(src, ldst, rdst, ...) _sbufstrip(src, ldst, rdst, __VA_ARGS__, (sbuf){0})
-
-
 char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 #define putcharesc(obj, format) fputcesc(stdout, obj, format)
 

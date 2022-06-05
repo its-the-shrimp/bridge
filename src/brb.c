@@ -9,6 +9,7 @@ defArray(Op);
 defArray(DataBlock);
 defArray(MemBlock);
 defArray(str);
+defArray(DataPiece);
 
 typedef struct {
 	Module* src;
@@ -23,26 +24,27 @@ typedef struct {
 	Module* dst;
 	FILE* src;
 	fieldArray unresolved;
+	long* n_fetched;
 } ModuleLoader;
 
 void writeInt(FILE* fd, int64_t x)
 {
 	if (x) {
-		if (x == (int8_t)(x & 0xFF)) {
-			fputc(1, fd);
-			int8_t x8 = (int8_t)x;
-			fputc(x8, fd);
-		} else if (x == (int16_t)(x & 0xFFFF)) {
+		if (x == (int64_t)(x & 0xFF)) {
+			if (inRange(x, 1, 5)) fputc(1, fd);
+			fputc((char)x, fd);
+		} else if (x == (int64_t)(x & 0xFFFF)) {
 			fputc(2, fd);
 			int16_t x16 = (int16_t)x;
 			fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
-		} else if (x == (int32_t)(x & 0xFFFFFFFFLL)) {
-			fputc(4, fd);
+		} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
+			fputc(3, fd);
 			int32_t x32 = (int32_t)x;
 			fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 		} else {
-			fputc(8, fd);
-			fwrite(BRByteOrder(&x, 8), 8, 1, fd);
+			fputc(4, fd);
+			int64_t x64 = x;
+			fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 		}
 	} else {
 		fputc(0, fd);
@@ -61,11 +63,29 @@ void writeName(ModuleWriter* writer, char* name)
 	strArray_append(&writer->consts, name);
 }
 
-void writeDataBlock(ModuleWriter* writer, char* name, sbuf obj)
+void writeDataBlock(ModuleWriter* writer, DataBlock block)
 {
-	writeName(writer, name);
-	writeInt(writer->dst, obj.length);
-	fputsbuf(writer->dst, obj);
+	writeName(writer, block.name);
+	writeInt(writer->dst, block.pieces.length);
+	for (int i = 0; i < block.pieces.length; ++i) {
+		DataPiece* piece = block.pieces.data + i;
+		fputc(piece->type, writer->dst);
+		switch (piece->type) {
+			case PIECE_LITERAL:
+				writeInt(writer->dst, piece->data.length);
+				fputsbuf(writer->dst, piece->data);
+				break;
+			case PIECE_INT16:
+			case PIECE_INT32:
+			case PIECE_INT64:
+				writeInt(writer->dst, piece->integer);
+				break;
+			case PIECE_NONE:
+			case N_PIECE_TYPES:
+			default:
+				abort();
+		}
+	}
 }
 
 void writeMemoryBlock(ModuleWriter* writer, char* name, int32_t size)
@@ -301,7 +321,7 @@ void writeModule(Module* src, FILE* dst)
 //  dumping data blocks
 	writeInt(dst, src->datablocks.length - src->_root_db_start); 
 	for (int i = src->_root_db_start; i < src->datablocks.length; i++) {
-		writeDataBlock(&writer, src->datablocks.data[i].name, src->datablocks.data[i].spec);
+		writeDataBlock(&writer, src->datablocks.data[i]);
 	}
 //  dumping memory blocks
 	writeInt(dst, src->memblocks.length - src->_root_mb_start);
@@ -325,70 +345,101 @@ void writeModule(Module* src, FILE* dst)
 
 int8_t loadInt8(FILE* fd, long* n_fetched)
 {
-	if (feof(fd) || ferror(fd)) { *n_fetched = 0; return 0; }
-	*n_fetched = 1;
-	return fgetc(fd);
+	char res;
+	if (!fread(&res, 1, 1, fd)) return (*n_fetched = -1);
+	*n_fetched += 1;
+	return res;
 }
 
 int16_t loadInt16(FILE* fd, long* n_fetched)
 {
 	char res[2];
-	if (fread(&res, 1, 2, fd) != 2) { *n_fetched = 0; return 0; };
-	*n_fetched = 2;
+	if (!fread(res, 2, 1, fd)) return (*n_fetched = -1);
+	*n_fetched += 2;
 	return *(int16_t*)BRByteOrder(&res, 2); 
 }
 
 int32_t loadInt32(FILE* fd, long* n_fetched)
 {
 	char res[4];
-	if (fread(&res, 1, 4, fd) != 4) { *n_fetched = 0; return 0; };
-	*n_fetched = 4;
+	if (!fread(res, 4, 1, fd)) return (*n_fetched = -1);
+	*n_fetched += 4;
 	return *(int32_t*)BRByteOrder(&res, 4);
 }
 
 int64_t loadInt64(FILE* fd, long* n_fetched)
 {
 	char res[8];
-	if (fread(&res, 1, 8, fd) != 8) { *n_fetched = 0; return 0; }
-	*n_fetched = 8;
+	if (!fread(res, 8, 1, fd)) return (*n_fetched = -1);
+	*n_fetched += 8;
 	return *(int64_t*)BRByteOrder(&res, 8);
 }
 
 int64_t loadInt(FILE* fd, long* n_fetched)
 {
-	if (feof(fd) || ferror(fd)) { *n_fetched = 0; return 0; }
-	int8_t size = fgetc(fd);
-	int64_t res;
-
-	long local_n_fetched = 0;
+	int8_t size = loadInt8(fd, n_fetched);
 	switch (size) {
-		case 0: res = 0; local_n_fetched = 1; break;
-		case 1: res = loadInt8(fd, &local_n_fetched); break;
-		case 2: res = loadInt16(fd, &local_n_fetched); break;
-		case 4: res = loadInt32(fd, &local_n_fetched); break;
-		case 8: res = loadInt64(fd, &local_n_fetched); break;
+		case 1: return loadInt8(fd, n_fetched);
+		case 2: return loadInt16(fd, n_fetched);
+		case 3: return loadInt32(fd, n_fetched);
+		case 4: return loadInt64(fd, n_fetched);
+		default: return size;
 	}
-	if (local_n_fetched) *n_fetched += local_n_fetched;
-	else *n_fetched = 0;
-	return res;
 }
 
-bool loadName(ModuleLoader* loader, char** dst)
+int64_t loadName(ModuleLoader* loader, char** dst, long* n_fetched)
 {
-	long n_fetched = 0;
-	int64_t index = loadInt(loader->src, &n_fetched);
-	if (!n_fetched) return false;
+	int64_t index = loadInt(loader->src, n_fetched);
+	if (*n_fetched < 0) return -1;
 
 	*dst = (char*)index;
 	fieldArray_append(&loader->unresolved, dst);
-	return true;
+	return index;
+}
+
+BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
+{
+	loadName(loader, &block->name, loader->n_fetched);
+	if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_NAME};
+
+	int n_pieces = loadInt(loader->src, loader->n_fetched);
+	if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SIZE};
+	block->pieces = DataPieceArray_new(-n_pieces);
+	block->pieces.length = n_pieces;
+
+	for (int i = 0; i < n_pieces; ++i) {
+		DataPiece* piece = block->pieces.data + i;
+		piece->type = loadInt8(loader->src, loader->n_fetched);
+		if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SPEC};
+
+		switch (piece->type) {
+			case PIECE_LITERAL:
+				piece->data.length = loadInt(loader->src, loader->n_fetched);
+				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SPEC};
+				piece->data = smalloc(piece->data.length);
+
+				if (!fread(piece->data.data, piece->data.length, 1, loader->src))
+					return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SPEC};
+				break;
+			case PIECE_INT16:
+			case PIECE_INT32:
+			case PIECE_INT64:
+				piece->integer = loadInt(loader->src, loader->n_fetched);
+				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SPEC};
+				break;
+			default:
+				return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
+		}
+	}
+
+	return (BRBLoadError){0};
 }
 
 typedef BRBLoadError (*OpLoader) (ModuleLoader*, Op*);
  
 void printLoadError(BRBLoadError err)
 {
-	static_assert(N_BRB_ERRORS == 20, "not all BRB errors are handled\n");
+	static_assert(N_BRB_ERRORS == 21, "not all BRB errors are handled\n");
 	switch (err.code) {
 		case BRB_ERR_OK: break;
 		case BRB_ERR_NO_MEMORY:
@@ -451,6 +502,9 @@ void printLoadError(BRBLoadError err)
 		case BRB_ERR_MODULE_NOT_FOUND:
 			eprintf("module `%s` not found in the specified search paths\n", err.module_name);
 			break;
+		case BRB_ERR_INVALID_BLOCK:
+			eprintf("invalid data block structure\n");
+			break;
 		case N_BRB_ERRORS:
 			eprintf("unreachable\n");
 	}
@@ -463,7 +517,8 @@ BRBLoadError loadNoArgOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadMarkOp(ModuleLoader* loader, Op* dst)
 {
-	if (!loadName(loader, &dst->mark_name)) {
+	loadName(loader, &dst->mark_name, loader->n_fetched);
+	if (loader->n_fetched < 0) {
 		return (BRBLoadError){.code = BRB_ERR_NO_MARK_NAME};
 	}
 	return (BRBLoadError){0};
@@ -471,171 +526,154 @@ BRBLoadError loadMarkOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadRegImmOp(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	dst->value = loadInt(loader->src, &status);
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->value = loadInt(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError load2RegOp(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	dst->src_reg = loadInt8(loader->src, &status);
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadRegSymbolIdOp(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	dst->symbol_id = loadInt(loader->src, &status);
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadRegNameOp(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	loadName(loader, &dst->mark_name, loader->n_fetched);
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
-	if (!loadName(loader, &dst->mark_name)) return (BRBLoadError){.code = BRB_ERR_NO_OP_ARG};
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpSyscall(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->syscall_id = loadInt8(loader->src, &status);
+	dst->syscall_id = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpGoto(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->op_offset = loadInt(loader->src, &status);
+	dst->op_offset = loadInt(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){.code = BRB_ERR_NO_OP_ARG};
+	if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_OP_ARG};
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpCmp(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->src_reg = loadInt8(loader->src, &status);
-	dst->value = loadInt(loader->src, &status);
+	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->value = loadInt(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpCmpr(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->src_reg = loadInt8(loader->src, &status);
-	dst->src2_reg = loadInt8(loader->src, &status);
+	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->src2_reg = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	dst->src_reg = loadInt8(loader->src, &status);
-	dst->value = loadInt(loader->src, &status);
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->value = loadInt(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError load3RegOp(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	dst->src_reg = loadInt8(loader->src, &status);
-	dst->src2_reg = loadInt8(loader->src, &status);
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->src2_reg = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpVar(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->new_var_size = loadInt(loader->src, &status);
+	dst->new_var_size = loadInt(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpLdv(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	dst->symbol_id = loadInt(loader->src, &status);
-	dst->var_size = loadInt8(loader->src, &status);
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
+	dst->var_size = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpStrv(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->symbol_id = loadInt(loader->src, &status);
-	dst->var_size = loadInt8(loader->src, &status);
-	dst->src_reg = loadInt8(loader->src, &status);
+	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
+	dst->var_size = loadInt8(loader->src, loader->n_fetched);
+	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpPopv(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	dst->var_size = loadInt8(loader->src, &status);
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->var_size = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpPushv(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->var_size = loadInt8(loader->src, &status);
-	dst->src_reg = loadInt8(loader->src, &status);
+	dst->var_size = loadInt8(loader->src, loader->n_fetched);
+	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadSymbolIdOp(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->symbol_id = loadInt(loader->src, &status);
+	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
 	
-	if (!status) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpSetc(ModuleLoader* loader, Op* dst)
 {
-	long status = 0;
-	dst->dst_reg = loadInt8(loader->src, &status);
-	dst->cond_arg = loadInt8(loader->src, &status);
+	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->cond_arg = loadInt8(loader->src, loader->n_fetched);
 
-	if (!status) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
 }
 
@@ -741,24 +779,18 @@ Module* mergeModule(Module* src, Module* dst)
 
 BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 {
+	long status = 0;
 	ModuleLoader loader = {
 		.dst = dst,
 		.src = src,
-		.unresolved = fieldArray_new(0)
+		.n_fetched = &status
 	};
-	dst->datablocks = DataBlockArray_new(0);
-	dst->memblocks = MemBlockArray_new(0);
-	dst->execblock = OpArray_new(0);
-	dst->submodules = strArray_new(0);
-	dst->_root_db_start = 0;
-	dst->_root_eb_start = 0;
-	dst->_root_mb_start = 0;
+	*dst = (Module){0};
 
-	long status = 0;
 // loading stack size
 	dst->stack_size = loadInt(src, &status);
 	if (!dst->stack_size) {
-		if (!status) return (BRBLoadError){
+		if (status < 0) return (BRBLoadError){
 			.code = BRB_ERR_NO_STACK_SIZE
 		};
 		dst->stack_size = DEFAULT_STACK_SIZE;
@@ -766,7 +798,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 	dst->stack_size *= 1024;
 // loading dependencies
 	int64_t n = loadInt(src, &status);
-	if (!status) return (BRBLoadError){
+	if (status < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_LOAD_SEGMENT
 	};
 	for (int64_t i = 0; i < n; i++) {
@@ -793,47 +825,34 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 	}
 // loading data blocks
 	n = loadInt(src, &status);
-	if (!status) return (BRBLoadError){
+	if (status < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_DATA_SEGMENT
 	};
 	DataBlockArray_resize(&dst->datablocks, n);
 	for (int64_t i = dst->datablocks.length - n; i < dst->datablocks.length; i++) {
-		if (!loadName(&loader, &dst->datablocks.data[i].name)) return (BRBLoadError){
-			.code = BRB_ERR_NO_BLOCK_NAME
-		};
-		dst->datablocks.data[i].spec.length = loadInt(src, &status);
-		if (!status) return (BRBLoadError){
-			.code = BRB_ERR_NO_BLOCK_SIZE
-		};
-		dst->datablocks.data[i].spec.data = malloc(dst->datablocks.data[i].spec.length);
-		if (!fread(
-			dst->datablocks.data[i].spec.data, 
-			dst->datablocks.data[i].spec.length,
-			1,
-			src
-		)) return (BRBLoadError){
-			.code = BRB_ERR_NO_BLOCK_SPEC
-		};
+		BRBLoadError err = loadDataBlock(&loader, dst->datablocks.data + i);
+		if (err.code) return err;
 	}
 //  loading memory blocks
 	n = loadInt(src, &status);
-	if (!status) return (BRBLoadError){
+	if (status < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_MEMORY_SEGMENT
 	};
 	MemBlockArray_resize(&dst->memblocks, n);
 	for (int64_t i = dst->memblocks.length - n; i < dst->memblocks.length; i++) {
-		if (!loadName(&loader, &dst->memblocks.data[i].name)) return (BRBLoadError){
+		loadName(&loader, &dst->memblocks.data[i].name, &status);
+		if (status < 0) return (BRBLoadError){
 			.code = BRB_ERR_NO_BLOCK_NAME
 		};
 		
 		dst->memblocks.data[i].size = loadInt(src, &status);
-		if (!status) return (BRBLoadError){
+		if (status < 0) return (BRBLoadError){
 			.code = BRB_ERR_NO_BLOCK_SIZE
 		};
 	}
 //  loading operations
 	n = loadInt(src, &status);
-	if (!status) return (BRBLoadError){
+	if (status < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_EXEC_SEGMENT
 	};
 	OpArray_resize(&dst->execblock, n);
@@ -841,13 +860,13 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		Op* op = dst->execblock.data + i;
 
 		op->type = loadInt8(src, &status);
-		if (!status) return (BRBLoadError){
+		if (status < 0) return (BRBLoadError){
 			.code = BRB_ERR_NO_OPCODE
 		};
 		if (op->type < 0) {
 			op->type = ~op->type;
 			op->cond_id = loadInt8(src, &status);
-			if (!status) return (BRBLoadError){
+			if (status < 0) return (BRBLoadError){
 				.code = BRB_ERR_NO_COND_ID
 			};
 			if (!inRange(op->cond_id, 0, N_CONDS)) return (BRBLoadError){
@@ -865,7 +884,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 	}
 //  resolving symbol names
 	n = loadInt(src, &status);
-	if (!status) return (BRBLoadError){
+	if (status < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_NAME_SEGMENT
 	};
 	for (int64_t i = 0; i < n; i++) {
@@ -949,23 +968,91 @@ BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags)
 	return (BRBLoadError){0};
 }
 
+sbuf assembleDataBlock(DataBlock block)
+{
+	sbuf res = {0};
+	for (int i = 0; i < block.pieces.length; ++i) {
+		DataPiece* piece = block.pieces.data + i;
+		switch (piece->type) {
+			case PIECE_LITERAL:
+				res.length += piece->data.length;
+				break;
+			case PIECE_INT16:
+				res.length += 2;
+				break;
+			case PIECE_INT32:
+				res.length += 4;
+				break;
+			case PIECE_INT64:
+				res.length += 8;
+			case PIECE_NONE:
+			case N_PIECE_TYPES:
+			default:
+				return (sbuf){0};
+		}
+	}
+
+	res = smalloc(res.length);
+	int64_t offset = 0;
+
+	for (int i = 0; i < block.pieces.length; ++i) {
+		DataPiece* piece = block.pieces.data + i;
+		switch (piece->type) {
+			case PIECE_LITERAL:
+				memcpy(res.data + offset, piece->data.data, piece->data.length);
+				offset += piece->data.length;
+				break;
+			case PIECE_INT16: {
+				int16_t x = (int16_t)piece->integer;
+				memcpy(res.data + offset, &x, 2);
+				offset += 2;
+				break;
+			} case PIECE_INT32: {
+				int32_t x = (int32_t)piece->integer;
+				memcpy(res.data + offset, &x, 4);
+				offset += 4;
+				break;
+			} case PIECE_INT64: {
+				int64_t x = piece->integer;
+				memcpy(res.data + offset, &x, 8);
+				offset += 8;
+				break;
+			}
+			case PIECE_NONE:
+			case N_PIECE_TYPES:
+			default:
+				sfree(&res);
+				return (sbuf){0};
+		}
+	}
+
+	return res;
+}
+
 void initExecEnv(ExecEnv* env, Module* module, char** args)
 {
 	env->exec_callbacks = NULL;
-	env->stack_brk = malloc(module->stack_size),
-	env->exitcode = 0,
-	env->memblocks = sbufArray_new(module->memblocks.length * -1),
-	env->op_id = module->entry_opid,
-	env->registers = calloc(N_REGS, sizeof(uint64_t)),
+	env->stack_brk = malloc(module->stack_size);
+	env->exitcode = 0;
+	env->memblocks = sbufArray_new(module->memblocks.length * -1);
+	env->op_id = module->entry_opid;
+	env->registers = calloc(N_REGS, sizeof(uint64_t));
 	env->prev_stack_head = env->stack_head = env->stack_brk + module->stack_size;
 
 	env->memblocks = sbufArray_new(-module->memblocks.length);
+	env->memblocks.length = module->memblocks.length;
 	array_foreach(MemBlock, block, module->memblocks,
 		env->memblocks.data[_block] = scalloc(block.size);
 	);
 
+	env->datablocks = sbufArray_new(-module->datablocks.length);
+	env->datablocks.length = module->datablocks.length;
+	for (int i = 0; i < module->datablocks.length; ++i) {
+		env->datablocks.data[i] = assembleDataBlock(module->datablocks.data[i]);
+	}
+
 	env->exec_argc = 0;
-	while (args[++env->exec_argc]) {}
+	while (args[++env->exec_argc]);
 	env->exec_argv = malloc(env->exec_argc * sizeof(sbuf));
 	for (int i = 0; i < env->exec_argc; i++) {
 		env->exec_argv[i] = SBUF(args[i]);
@@ -1122,7 +1209,7 @@ bool handleOpSetr(ExecEnv* env, Module* module)
 bool handleOpSetd(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-	env->registers[op.dst_reg] = (int64_t)module->datablocks.data[op.symbol_id].spec.data;
+	env->registers[op.dst_reg] = (uint64_t)env->datablocks.data[op.symbol_id].data;
 	env->op_id++;
 	return false;
 }

@@ -197,6 +197,7 @@ typedef enum {
 	BRB_ERR_NO_ENTRY,
 	BRB_ERR_NO_LOAD_SEGMENT,
 	BRB_ERR_MODULE_NOT_FOUND,
+	BRB_ERR_INVALID_BLOCK,
 	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
@@ -316,9 +317,28 @@ typedef struct {
 } MemBlock;
 declArray(MemBlock);
 
+
+typedef enum {
+	PIECE_NONE,
+	PIECE_LITERAL,
+	PIECE_INT16,
+	PIECE_INT32,
+	PIECE_INT64,
+	N_PIECE_TYPES
+} DataPieceType;
+
+typedef struct {
+	DataPieceType type;
+	union {
+		sbuf data; // for PIECE_LITERAL
+		int64_t integer; // for PIECE_INT*
+	};
+} DataPiece;
+declArray(DataPiece);
+
 typedef struct {
 	char* name;
-	sbuf spec;
+	DataPieceArray pieces;
 } DataBlock;
 declArray(DataBlock);
 
@@ -409,12 +429,12 @@ void cleanupVBRBCompiler(VBRBError status);
 
 #define BRB_EXECUTABLE       0b00000010 // used in loadModule function to make the loaded module executable with execModule
 
-
 typedef struct execEnv {
 	void* stack_brk;
 	void* stack_head;
 	void* prev_stack_head;
 	sbufArray memblocks;
+	sbufArray datablocks;
 	uint8_t exitcode;
 	int op_id;
 	uint64_t* registers;
