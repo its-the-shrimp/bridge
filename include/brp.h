@@ -136,8 +136,6 @@ typedef struct brp {
 #define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
 
 #define BRPempty(prep) ((prep)->cur_input.buffer.length + (size_t)(prep)->cur_input.prev == 0)
-#define getTokenKeywordId(token) ( (token).type == TOKEN_KEYWORD ? (token).keyword_id : -1 )
-#define getTokenSymbolId(token) ( (token).type == TOKEN_SYMBOL ? (token).symbol_id : -1 )
 #define isWordToken(token) ( (token).type == TOKEN_WORD || (token).type == TOKEN_KEYWORD )
 #define isSymbolSpecHidden(spec) ((spec).data[(spec).length] > 0)
 
@@ -173,6 +171,8 @@ void fprintTokenStr(FILE* fd, Token token, BRP* obj);
 void fprintToken(FILE* fd, Token token, BRP* obj);
 #define printToken(token, parser) fprintToken(stdout, token, parser)
 
+int getTokenSymbolId(Token token);
+int getTokenKeywordId(Token token);
 char* getTokenTypeName(TokenType type);
 char* getTokenWord(BRP* obj, Token token);
 void printBRPErrorStr(FILE* fd, BRP* obj);
@@ -1006,6 +1006,16 @@ void fprintToken(FILE* fd, Token token, BRP* obj)
 	fprintTokenLoc(fd, token.loc);
 	fprintTokenStr(fd, token, obj);
 	fputc('\n', fd);
+}
+
+int getTokenSymbolId(Token token)
+{
+	return token.type == TOKEN_SYMBOL ? token.symbol_id : -1;
+}
+
+int getTokenKeywordId(Token token)
+{
+	return token.type == TOKEN_KEYWORD ? token.keyword_id : -1;
 }
 
 char* TokenTypeNames[N_TOKEN_TYPES] = {
