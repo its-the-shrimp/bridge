@@ -7,6 +7,7 @@ typedef enum {
 	SYMBOL_SEGMENT_START,
 	SYMBOL_SEGMENT_END,
 	SYMBOL_CONDITION_SPEC,
+	SYMBOL_LITERAL_SPEC,
 	N_VBRB_SYMBOLS
 } VBRBSymbol;
 
@@ -129,7 +130,7 @@ char* getVBRBTokenTypeName(TokenType type)
 }
 
 void printVBRBError(FILE* dst, VBRBError err) {
-	static_assert(N_VBRB_ERRORS == 28, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 29, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
 		if (err.code != VBRB_ERR_PREPROCESSOR_FAILURE) fprintTokenLoc(stderr, err.loc.loc);
 		fprintf(dst, "error: ");
@@ -266,6 +267,11 @@ void printVBRBError(FILE* dst, VBRBError err) {
 					err.var.size
 				);
 				break;
+			case VBRB_ERR_INVALID_GOTO_ARG:
+				fputs("expected a word or `%<number of operations to skip>` as an argument for `goto` operation, instead got ", dst);
+				fprintTokenStr(dst, err.loc, err.prep);
+				fputc('\n', dst);
+				break;
 		}
 	}
 }
@@ -339,12 +345,16 @@ VBRBError getRegIdArg(CompilerCtx* ctx, Token src, int8_t* dst, char op_type, ch
 		.arg_id = arg_id,
 		.expected_token_type = TOKEN_REG_ID
 	};
-	*dst = src.word[1] - '0';
-	if (!inRange(*dst, 0, N_USER_REGS)) return (VBRBError){
-        .prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_REG_ID,
-		.loc = src
-	};
+	if (src.word[1] == 'Z') {
+		*dst = ZEROREG_ID;
+	} else {
+		*dst = src.word[1] - '0';
+		if (!inRange(*dst, 0, N_USER_REGS)) return (VBRBError){
+			.prep = ctx->prep,
+			.code = VBRB_ERR_INVALID_REG_ID,
+			.loc = src
+		};
+	}
 	return (VBRBError){ .prep = ctx->prep };
 }
 
@@ -555,7 +565,7 @@ VBRBError compileOpSyscall(CompilerCtx* ctx, Module* dst)
 		};
 	}
 	op->syscall_id = arg.keyword_id - N_OPS;
-							
+
 	return (VBRBError){ .prep = ctx->prep };
 }
 
@@ -564,15 +574,21 @@ VBRBError compileOpGoto(CompilerCtx* ctx, Module* dst)
 	Op* op = arrayhead(dst->execblock);
 
 	Token name_spec = fetchToken(ctx->prep);
-	if (!isWordToken(name_spec)) return (VBRBError){
-        .prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = name_spec,
-		.op_type = OP_GOTO,
-		.arg_id = 0,
-		.expected_token_type = TOKEN_WORD
+	if (isWordToken(name_spec)) {
+		ExecMarkArray_append(&ctx->proc_gotos, (ExecMark){ .name = name_spec, .id = dst->execblock.length - 1 });
+	} else if (getTokenSymbolId(name_spec) == SYMBOL_LITERAL_SPEC) {
+		name_spec = fetchToken(ctx->prep);
+		if (name_spec.type != TOKEN_INT) return (VBRBError){
+			.prep = ctx->prep,
+			.code = VBRB_ERR_INVALID_GOTO_ARG,
+			.loc = name_spec
+		};
+		op->op_offset = name_spec.value;
+	} else return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_INVALID_GOTO_ARG,
+		.loc = name_spec
 	};
-	ExecMarkArray_append(&ctx->proc_gotos, (ExecMark){ .name = name_spec, .id = dst->execblock.length - 1 });
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -1015,6 +1031,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 		BRP_SYMBOL("{"),
 		BRP_SYMBOL("}"),
 		BRP_SYMBOL(":"),
+		BRP_SYMBOL("%"),
 		BRP_HIDDEN_SYMBOL(" "),
 		BRP_HIDDEN_SYMBOL("\t"),
 		BRP_HIDDEN_SYMBOL("\n")

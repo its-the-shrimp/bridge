@@ -1820,6 +1820,7 @@ void _execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
 		}
 
 		if (op_handlers[op->type](env, module)) break;
+		env->registers[ZEROREG_ID] = 0;
 	}
 }
 
@@ -1838,6 +1839,7 @@ void _execModuleWithCallbacks(ExecEnv* env, Module* module, volatile bool* inter
 			if (env->exec_callbacks[op->type](env, module, op)) break;
 
 		if (op_handlers[op->type](env, module)) break;
+		env->registers[ZEROREG_ID] = 0;
 
 		if (env->exec_callbacks[N_OPS + op->type])
 			if (env->exec_callbacks[N_OPS + op->type](env, module, op)) break;

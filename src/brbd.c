@@ -3,41 +3,43 @@
 
 typedef void (*OpPrinter) (Module*, Op*, FILE*);
 
+#define regchar(reg_id) (reg_id < N_USER_REGS ? reg_id + '0' : 'Z')
+
 void printNoArgOp(Module* module, Op* op, FILE* dst) {}
 
 void printRegImmOp(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd %llu", op->dst_reg, op->value);
+	fprintf(dst, "r%c %llu", regchar(op->dst_reg), op->value);
 }
 
 void print2RegOp(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd r%hhd", op->dst_reg, op->src_reg);
+	fprintf(dst, "r%c r%c", regchar(op->dst_reg), regchar(op->src_reg));
 }
 
 void printOpSetd(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd %s", op->dst_reg, module->datablocks.data[op->symbol_id].name);
+	fprintf(dst, "r%c %s", regchar(op->dst_reg), module->datablocks.data[op->symbol_id].name);
 }
 
 void printOpSetb(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd %s", op->dst_reg, builtins[op->symbol_id].name);
+	fprintf(dst, "r%c %s", regchar(op->dst_reg), builtins[op->symbol_id].name);
 }
 
 void printOpSetm(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd %s", op->dst_reg, module->memblocks.data[op->symbol_id].name);
+	fprintf(dst, "r%c %s", regchar(op->dst_reg), module->memblocks.data[op->symbol_id].name);
 }
 
 void print2RegImmOp(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd r%hhd %llu", op->dst_reg, op->src_reg, op->value);
+	fprintf(dst, "r%c r%c %llu", regchar(op->dst_reg), regchar(op->src_reg), op->value);
 }
 
 void print3RegOp(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd r%hhd r%hhd", op->dst_reg, op->src_reg, op->src2_reg);
+	fprintf(dst, "r%c r%c r%c", regchar(op->dst_reg), regchar(op->src_reg), regchar(op->src2_reg));
 }
 
 void printOpSys(Module* module, Op* op, FILE* dst)
@@ -47,17 +49,17 @@ void printOpSys(Module* module, Op* op, FILE* dst)
 
 void printOpGoto(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, ".m%llu", (op - module->execblock.data) + op->op_offset);
+	fprintf(dst, "%%%lld", op->op_offset);
 }
 
 void printOpCmp(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd %llu", op->src_reg, op->value);
+	fprintf(dst, "r%c %llu", regchar(op->src_reg), op->value);
 }
 
 void printOpCmpr(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd r%hhd", op->src_reg, op->src2_reg);
+	fprintf(dst, "r%c r%c", regchar(op->src_reg), regchar(op->src2_reg));
 }
 
 void printOpMark(Module* module, Op* op, FILE* dst)
@@ -82,7 +84,7 @@ void printOpVar(Module* module, Op* op, FILE* dst)
 
 void printRegSymbolIdOp(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd %%%lld", op->dst_reg, op->symbol_id);
+	fprintf(dst, "r%c %%%lld", regchar(op->dst_reg), op->symbol_id);
 }
 
 void printSymbolIdOp(Module* module, Op* op, FILE* dst)
@@ -92,27 +94,27 @@ void printSymbolIdOp(Module* module, Op* op, FILE* dst)
 
 void printOpLdv(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd %lld%%%hhu", op->dst_reg, op->symbol_id, op->var_size);
+	fprintf(dst, "r%c %lld%%%hhu", regchar(op->dst_reg), op->symbol_id, op->var_size);
 }
 
 void printOpStrv(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "%lld%%%hhu r%hhd", op->symbol_id, op->var_size, op->dst_reg);
+	fprintf(dst, "%lld%%%hhu r%c", op->symbol_id, op->var_size, regchar(op->dst_reg));
 }
 
 void printOpPopv(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd 0%%%hhu", op->dst_reg, op->var_size);
+	fprintf(dst, "r%c 0%%%hhu", regchar(op->dst_reg), op->var_size);
 }
 
 void printOpPushv(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "0%%%hhu %hhu r%hhd", op->var_size, op->var_size, op->src_reg);
+	fprintf(dst, "0%%%hhu %hhu r%c", op->var_size, op->var_size, regchar(op->src_reg));
 }
 
 void printOpSetc(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%hhd %s", op->dst_reg, conditionNames[op->cond_arg].data);
+	fprintf(dst, "r%c %s", regchar(op->dst_reg), conditionNames[op->cond_arg].data);
 }
 
 const OpPrinter op_printers[] = {

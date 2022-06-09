@@ -2965,8 +2965,6 @@ void compileExprInt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
     fprintf(ctx->dst, "\tset r%d %lld\n", dst_reg, expr.int_literal);
 }
 
-static int array_init_counter;
-
 void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
     compileSrcRef(ctx, expr.loc);
@@ -2992,13 +2990,12 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                     initializer = getSubexpr(initializer, 0);
                     expr_compilers[initializer->type](ctx, *initializer, reg_state | (1 << dst_reg) | (1 << iter_reg), element_reg);
 
-                    fprintf(ctx->dst, "\tmark .ai%d\n", ++array_init_counter);
                     fprintf(ctx->dst, "\tset r%d %d\n", iter_reg, var_type.n_items);
                     fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size * 8, dst_reg, element_reg);
                     fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
                     fprintf(ctx->dst, "\tsub r%d r%d 1\n", iter_reg, iter_reg);
                     fprintf(ctx->dst, "\tcmp r%d 0\n", iter_reg);
-                    fprintf(ctx->dst, "\tgoto:equ .ai%d\n", array_init_counter);
+                    fprintf(ctx->dst, "\tgoto:neq %%-4\n");
 
                     freeRegister(ctx, &reg_state, iter_reg, iter_cache_id);
                 } else {
@@ -3012,11 +3009,10 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                 freeRegister(ctx, &reg_state, element_reg, cache_id);
             } else {
                 if (array_size <= 8) {
-                    fprintf(ctx->dst, "\tset r%d 0\n", dst_reg);
-                    fprintf(ctx->dst, "\tpushv %s %d r%d\n", name, array_size, dst_reg);
+                    fprintf(ctx->dst, "\tpushv %s %d rZ\n", name, array_size);
                 } else {
-                    int element_reg, cache_id, step = 1;
-                    getRegister(ctx, &reg_state, dst_reg, &element_reg, &cache_id);
+                    int iter_reg, cache_id, step = 1;
+                    getRegister(ctx, &reg_state, dst_reg, &iter_reg, &cache_id);
 
                     fprintf(ctx->dst, "\tvar %s %d\n", name, array_size);
                     fprintf(ctx->dst, "\tsetv r%d %s\n", dst_reg, name);
@@ -3029,18 +3025,19 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                         step = 2;
                     }
 
-                    fprintf(ctx->dst, "\tset r%d 0\n", element_reg);
-                    for (int i = 0; i < array_size; i += step) {
-                        fprintf(
-                            ctx->dst,
-                            "\tstr%d r%d r%d\n"
-                            "\tadd r%d r%d %d\n",
-                            step * 8, dst_reg, element_reg,
-                            dst_reg, dst_reg, step
-                        );
-                    }
+                    fprintf(
+                        ctx->dst,
+                        "\tset r%1$d %2$d\n"
+                        "\tstr%3$d r%4$d rZ\n"
+                        "\tadd r%4$d r%4$d %5$d\n"
+                        "\tsub r%1$d r%1$d %5$d\n"
+                        "\tcmp r%1$d 0\n"
+                        "\tgoto:neq %%-4\n",
+                        iter_reg, array_size,
+                        step * 8, dst_reg, step
+                    );
 
-                    freeRegister(ctx, &reg_state, element_reg, cache_id);
+                    freeRegister(ctx, &reg_state, iter_reg, cache_id);
                 }
             }
         } else {

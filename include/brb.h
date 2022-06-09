@@ -395,6 +395,7 @@ typedef enum {
 	VBRB_ERR_NO_VAR,
 	VBRB_ERR_DELNV_TOO_FEW_VARS,
 	VBRB_ERR_VAR_TOO_LARGE,
+	VBRB_ERR_INVALID_GOTO_ARG,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -421,10 +422,11 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 void printVBRBError(FILE* dst, VBRBError err);
 void cleanupVBRBCompiler(VBRBError status);
 
-#define N_REGS 10
+#define N_REGS 11
 #define N_USER_REGS 8
 #define CONDREG1_ID 8
 #define CONDREG2_ID 9
+#define ZEROREG_ID  10
 #define DEFAULT_STACK_SIZE 512 // 512 Kb, just like in JVM
 
 #define BRB_EXECUTABLE       0b00000010 // used in loadModule function to make the loaded module executable with execModule
