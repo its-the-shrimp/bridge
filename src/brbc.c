@@ -549,7 +549,7 @@ void compileOpProcNative(Module* module, int index, CompCtx* ctx)
 	}
 	if (ctx->is_cur_proc_complex) {
 		fprintf(
-			ctx->dst, 
+			ctx->dst,
 			"\tstp fp, lr, [sp, -16]!\n"
 			"\tmov fp, sp\n"
 		);
