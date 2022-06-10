@@ -31,19 +31,19 @@ void writeInt(FILE* fd, int64_t x)
 {
 	if (x) {
 		if (x == (int64_t)(x & 0xFF)) {
-			if (inRange(x, 1, 5)) fputc(1, fd);
-			fputc((char)x, fd);
+			fputc(x < 0 ? ~1 : 1, fd);
+			fputc((char)(x < 0 ? ~x : x), fd);
 		} else if (x == (int64_t)(x & 0xFFFF)) {
-			fputc(2, fd);
-			int16_t x16 = (int16_t)x;
+			fputc(x < 0 ? ~2 : 2, fd);
+			int16_t x16 = x < 0 ? ~x : x;
 			fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
 		} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
-			fputc(3, fd);
-			int32_t x32 = (int32_t)x;
+			fputc(x < 0 ? ~3 : 3, fd);
+			int32_t x32 = x < 0 ? ~x : x;
 			fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 		} else {
-			fputc(4, fd);
-			int64_t x64 = x;
+			fputc(x < 0 ? ~4 : 4, fd);
+			int64_t x64 = x < 0 ? ~x : x;
 			fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 		}
 	} else {
@@ -343,7 +343,7 @@ void writeModule(Module* src, FILE* dst)
 	strArray_clear(&writer.consts);
 }
 
-int8_t loadInt8(FILE* fd, long* n_fetched)
+uint8_t loadInt8(FILE* fd, long* n_fetched)
 {
 	char res;
 	if (!fread(&res, 1, 1, fd)) return (*n_fetched = -1);
@@ -351,28 +351,28 @@ int8_t loadInt8(FILE* fd, long* n_fetched)
 	return res;
 }
 
-int16_t loadInt16(FILE* fd, long* n_fetched)
+uint16_t loadInt16(FILE* fd, long* n_fetched)
 {
 	char res[2];
 	if (!fread(res, 2, 1, fd)) return (*n_fetched = -1);
 	*n_fetched += 2;
-	return *(int16_t*)BRByteOrder(&res, 2); 
+	return *(uint16_t*)BRByteOrder(&res, 2); 
 }
 
-int32_t loadInt32(FILE* fd, long* n_fetched)
+uint32_t loadInt32(FILE* fd, long* n_fetched)
 {
 	char res[4];
 	if (!fread(res, 4, 1, fd)) return (*n_fetched = -1);
 	*n_fetched += 4;
-	return *(int32_t*)BRByteOrder(&res, 4);
+	return *(uint32_t*)BRByteOrder(&res, 4);
 }
 
-int64_t loadInt64(FILE* fd, long* n_fetched)
+uint64_t loadInt64(FILE* fd, long* n_fetched)
 {
 	char res[8];
 	if (!fread(res, 8, 1, fd)) return (*n_fetched = -1);
 	*n_fetched += 8;
-	return *(int64_t*)BRByteOrder(&res, 8);
+	return *(uint64_t*)BRByteOrder(&res, 8);
 }
 
 int64_t loadInt(FILE* fd, long* n_fetched)
@@ -383,6 +383,10 @@ int64_t loadInt(FILE* fd, long* n_fetched)
 		case 2: return loadInt16(fd, n_fetched);
 		case 3: return loadInt32(fd, n_fetched);
 		case 4: return loadInt64(fd, n_fetched);
+		case ~1: return ~(int64_t)loadInt8(fd, n_fetched);
+		case ~2: return ~(int64_t)loadInt16(fd, n_fetched);
+		case ~3: return ~(int64_t)loadInt32(fd, n_fetched);
+		case ~4: return ~(int64_t)loadInt64(fd, n_fetched);
 		default: return size;
 	}
 }

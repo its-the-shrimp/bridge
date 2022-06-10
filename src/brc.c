@@ -385,12 +385,7 @@ void fprintType(FILE* dst, TypeDef type)
 {
     static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in fprintType");
     if (type.kind == KIND_INT) {
-        switch (type.size) {
-            case 1: fputs("int8", dst); break;
-            case 2: fputs("int16", dst); break;
-            case 4: fputs("int32", dst); break;
-            case 8: fputs("int64", dst); break;
-        }
+        fprintf(dst, "int%d", type.size * 8);
     } else if (type.kind == KIND_PTR) {
         fprintType(dst, *type.base);
         fputc('*', dst);
@@ -937,13 +932,16 @@ bool isExprEvaluatable(ExprType type) {
         [EXPR_RETURN    ] = false,
         [EXPR_IF        ] = false,
         [EXPR_WHILE     ] = false,
-        [EXPR_DOWHILE   ] = false
+        [EXPR_DOWHILE   ] = false,
+        [EXPR_NEW_VAR   ] = false
     };
     assert(inRange(type, 0, N_EXPR_TYPES));
     return expr_evaluatability_info[type];
 }
 
-void fprintExpr(FILE* dst, Expr expr, int indent_level)
+TypeDef getExprValueType(AST* ast, Expr expr);
+
+void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
 {
     for (int i = 0; i < indent_level; i++) {
         fputc('\t', dst);
@@ -951,10 +949,15 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
     static_assert(N_EXPR_TYPES == 54, "not all expression types are handled in fprintExpr");
 
     fprintTokenLoc(dst, expr.loc);
+    if (isExprEvaluatable(expr.type)) {
+        fprintf(dst, "(type: ");
+        fprintType(dst, getExprValueType(ast, expr));
+        fprintf(dst, ") ");
+    }
     switch (expr.type) {
         case EXPR_SYSCALL:
             fputs("SYSCALL\n", dst);
-            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(dst, subexpr, indent_level + 1); );
+            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
             break;
         case EXPR_NAME:
             fprintf(dst, "NAME %s\n", expr.str_literal);
@@ -975,57 +978,57 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             break;
         case EXPR_ASSIGN:
             fputs("ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_ADD_ASSIGN:
             fputs("ADD & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_SUB_ASSIGN:
             fputs("SUBTRACT & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_MUL_ASSIGN:
             fputs("MULTIPLY & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_DIV_ASSIGN:
             fputs("DIVIDE & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_AND_ASSIGN:
             fputs("BITWISE AND & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_XOR_ASSIGN:
             fputs("BITWISE EXCLUSIVE OR & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_OR_ASSIGN:
             fputs("BITWISE OR & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_SHL_ASSIGN:
             fputs("SHIFT LEFT & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_SHR_ASSIGN:
             fputs("SHIFT RIGHT & ASSIGN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_NEW_VAR:
             fputs("NEW VARIABLE:\n", dst);
-            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(dst, subexpr, indent_level + 1); );
+            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
             break;
         case EXPR_TYPE:
             fputs("TYPE ", dst);
@@ -1059,159 +1062,159 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             break;
         case EXPR_BLOCK:
             fputs("BLOCK\n", dst);
-            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(dst, subexpr, indent_level + 1); );
+            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
             break;
         case EXPR_PROC_CALL:
             fputs("CALL:\n", dst);
-            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(dst, subexpr, indent_level + 1); );
+            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
             break;
         case EXPR_RETURN:
             fputs("RETURN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
             break;
         case EXPR_ADD:
             fputs("ADD:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_SUB:
             fputs("SUBTRACT:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_MUL:
             fputs("MULTIPLY:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_DIV:
             fputs("DIVIDE:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_MOD:
             fputs("MODULO:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_AND:
             fputs("BITWISE AND:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_OR:
             fputs("BITWISE OR:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_XOR:
             fputs("BITWISE EXCLUSIVE OR:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_SHL:
             fputs("SHIFT LEFT:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_SHR:
             fputs("SHIFT RIGHT:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_NOT:
             fputs("BITWISE NOT:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
             break;
         case EXPR_CAST:
             fputs("CAST TO TYPE `", dst);
             fprintType(dst, *expr.var_type);
             fputs("`:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
             break;
         case EXPR_LOGICAL_EQ:
             fputs("EQUALS:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_LOGICAL_NEQ:
             fputs("NOT EQUALS:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_LOGICAL_LT:
             fputs("LESS THAN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_LOGICAL_GT:
             fputs("GREATER THAN:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_LOGICAL_LE:
             fputs("LESS THAN OR EQUALS:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_LOGICAL_GE:
             fputs("GREATER THAN OR EQUALS:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_LOGICAL_AND:
             fputs("LOGICAL AND:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_LOGICAL_OR:
             fputs("LOGICAL OR:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_LOGICAL_NOT:
             fputs("LOGICAL NOT:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
             break;
         case EXPR_WRAPPER:
             fputs("WRAPPED:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
             break;
         case EXPR_IF:
             fputs("IF:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
-            fprintExpr(dst, *expr.arg3, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg3, indent_level + 1);
             break;
         case EXPR_VOID:
             fputs("VOID\n", dst);
             break;
         case EXPR_WHILE:
             fputs("LOOP WHILE:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_DOWHILE:
             fputs("LOOP UNTIL:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_GET_REF:
             fputs("GET REFERENCE:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
             break;
         case EXPR_DEREF:
             fputs("DEREFERENCE:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
             break;
         case EXPR_GET_ITEM:
             fputs("GET ITEM:\n", dst);
-            fprintExpr(dst, *expr.arg1, indent_level + 1);
-            fprintExpr(dst, *expr.arg2, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg1, indent_level + 1);
+            fprintExpr(ast, dst, *expr.arg2, indent_level + 1);
             break;
         case EXPR_ARRAY:
             fputs("ARRAY:\n", dst);
-            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(dst, subexpr, indent_level + 1); );
+            chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
             break;
         case EXPR_INVALID:
         case N_EXPR_TYPES:
@@ -1219,7 +1222,7 @@ void fprintExpr(FILE* dst, Expr expr, int indent_level)
             reportCompilerBug("unknown expression type %d", expr.type);
     }
 }
-#define printExpr(expr, indent_level) fprintExpr(stdout, expr, indent_level)
+#define printExpr(ast, expr, indent_level) fprintExpr(ast, stdout, expr, indent_level)
 
 Expr* getVarDecl(Expr* block, char* name)
 {
@@ -1498,7 +1501,7 @@ TypeDef getExprValueType(AST* ast, Expr expr)
             switch (arg1_type.kind) {
                 case KIND_INT:
                     if (arg2_type.kind == KIND_INT) {
-                        return arg1_type.size == arg2_type.size ? INT_TYPE(arg1_type.size * 2) : (arg1_type.size > arg2_type.size ? arg1_type : arg2_type);
+                        return arg1_type.size == arg2_type.size ? INT_TYPE(minInt(arg1_type.size * 2, 8)) : (arg1_type.size > arg2_type.size ? arg1_type : arg2_type);
                     } else reportCompilerBug("unexpected type kind %d", arg2_type.kind);
                     break;
                 case KIND_ARRAY:
@@ -1508,7 +1511,7 @@ TypeDef getExprValueType(AST* ast, Expr expr)
                     return INT_TYPE(8);
                 case KIND_BOOL: {
                     int arg1_size = getTypeSize(arg1_type), arg2_size = getTypeSize(arg2_type);
-                    return arg1_size == arg2_size ? INT_TYPE(arg1_size * 2) : (arg1_size > arg2_size ? INT_TYPE(arg1_size) : INT_TYPE(arg2_size));
+                    return arg1_size == arg2_size ? INT_TYPE(minInt(arg1_size * 2, 8)) : (arg1_size > arg2_size ? INT_TYPE(arg1_size) : INT_TYPE(arg2_size));
                 }
                 case KIND_VOID:
                 case KIND_NONE:
@@ -1521,7 +1524,7 @@ TypeDef getExprValueType(AST* ast, Expr expr)
         case EXPR_MUL: {
             int arg1_size = getTypeSize(getExprValueType(ast, *expr.arg1));
             int arg2_size = getTypeSize(getExprValueType(ast, *expr.arg2));
-            return arg1_size == arg2_size ? INT_TYPE(arg1_size * 2) : INT_TYPE(maxInt(arg1_size, arg2_size));
+            return arg1_size == arg2_size ? INT_TYPE(minInt(arg1_size * 2, 8)) : INT_TYPE(maxInt(arg1_size, arg2_size));
         } case EXPR_DIV: {
             int arg1_size = getTypeSize(getExprValueType(ast, *expr.arg1));
             int arg2_size = getTypeSize(getExprValueType(ast, *expr.arg2));
@@ -1571,9 +1574,9 @@ void printAST(AST* ast)
         printTokenLoc(func.loc);
         printf("function %s:\n", func.name);
         puts("arguments:");
-        printExpr(func.args, 0);
+        printExpr(ast, func.args, 0);
         puts("body:");
-        printExpr(func.body, 0);
+        printExpr(ast, func.body, 0);
     );
 }
 
@@ -3016,7 +3019,7 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 
                     fprintf(ctx->dst, "\tvar %s %d\n", name, array_size);
                     fprintf(ctx->dst, "\tsetv r%d %s\n", dst_reg, name);
-                    
+
                     if (array_size % 8 == 0) {
                         step = 8;
                     } else if (array_size % 4 == 0) {
@@ -3866,7 +3869,7 @@ bool compileAST(AST* src, FILE* dst)
         fputs("data {\n", dst);
         array_foreach(str, literal, ctx.data_blocks, 
             fprintf(dst, "\t"STR_PREFIX"%d \"", _literal);
-            fputsbuf(dst, SBUF(literal));
+            fputsbufesc(dst, SBUF(literal), BYTEFMT_HEX);
             fputs("\\0\"\n", dst);
         );
         fputs("}\n", dst);

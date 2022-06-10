@@ -1,0 +1,8 @@
+#include <test_io.br>
+
+main() {
+    for (int32 i = 0; i < 100; i += 1) {
+        putchar('A');
+    }
+    putchar('\n');
+}

@@ -22,6 +22,7 @@ void* reverseByteOrder(void* src, long length);
 
 // DEF_WITH_ATTRS macro creates a function definition with attributes, which is normally prohibited by the C standard
 #define DEF_WITH_ATTRS(prototype, attrs) prototype attrs; prototype
+#define alignby(value, step) ((step) - (unsigned)((value) - 1) % (step) + (value) - 1)
 
 #endif // _BR_UTILS_H
 
