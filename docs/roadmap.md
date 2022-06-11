@@ -18,6 +18,7 @@
 - ~BRP: conditional compilation~
 - ~BRP: character literals~
 - ~BRP: function-like macros~
-- Array initializers
+- ~Array initializers~
+- Bytecode optimization
 - Proper documentation
 - `public` functions and globals

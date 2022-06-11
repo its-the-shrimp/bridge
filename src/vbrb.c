@@ -7,7 +7,6 @@ typedef enum {
 	SYMBOL_SEGMENT_START,
 	SYMBOL_SEGMENT_END,
 	SYMBOL_CONDITION_SPEC,
-	SYMBOL_LITERAL_SPEC,
 	N_VBRB_SYMBOLS
 } VBRBSymbol;
 
@@ -574,21 +573,12 @@ VBRBError compileOpGoto(CompilerCtx* ctx, Module* dst)
 	Op* op = arrayhead(dst->execblock);
 
 	Token name_spec = fetchToken(ctx->prep);
-	if (isWordToken(name_spec)) {
-		ExecMarkArray_append(&ctx->proc_gotos, (ExecMark){ .name = name_spec, .id = dst->execblock.length - 1 });
-	} else if (getTokenSymbolId(name_spec) == SYMBOL_LITERAL_SPEC) {
-		name_spec = fetchToken(ctx->prep);
-		if (name_spec.type != TOKEN_INT) return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_GOTO_ARG,
-			.loc = name_spec
-		};
-		op->op_offset = name_spec.value;
-	} else return (VBRBError){
+	if (!isWordToken(name_spec)) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_INVALID_GOTO_ARG,
 		.loc = name_spec
 	};
+	ExecMarkArray_append(&ctx->proc_gotos, (ExecMark){ .name = name_spec, .id = dst->execblock.length - 1 });
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -1031,7 +1021,6 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 		BRP_SYMBOL("{"),
 		BRP_SYMBOL("}"),
 		BRP_SYMBOL(":"),
-		BRP_SYMBOL("%"),
 		BRP_HIDDEN_SYMBOL(" "),
 		BRP_HIDDEN_SYMBOL("\t"),
 		BRP_HIDDEN_SYMBOL("\n")

@@ -430,7 +430,6 @@ int main(int argc, char* argv[])
 
 		if (sbufcut(&cmd, CSBUF("rr")).data) {
 			sbufstripl(&cmd, CSBUF(" "), CSBUF("\t"));
-			printf("shit\n");
 			if (cmd.length > 0) {
 				if (cmd.length == 2) {
 					if (cmd.data[0] == 'r' && cmd.data[1] >= '0' && cmd.data[1] <= '7') {

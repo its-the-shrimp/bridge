@@ -2359,6 +2359,7 @@ void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
                 [EXPR_SHR_ASSIGN] = EXPR_SHR
             };
             wrapExpr(expr->arg2, assigners_to_ops[expr->type], *expr->arg1);
+            swap(expr->arg2->arg1, expr->arg2->arg2, Expr*);
             expr->type = EXPR_ASSIGN;
         } case EXPR_ASSIGN:
             optimizeExpr(ast, expr->arg1, func);
@@ -2968,6 +2969,8 @@ void compileExprInt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
     fprintf(ctx->dst, "\tset r%d %lld\n", dst_reg, expr.int_literal);
 }
 
+static int array_init_counter;
+
 void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
     compileSrcRef(ctx, expr.loc);
@@ -2994,11 +2997,12 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                     expr_compilers[initializer->type](ctx, *initializer, reg_state | (1 << dst_reg) | (1 << iter_reg), element_reg);
 
                     fprintf(ctx->dst, "\tset r%d %d\n", iter_reg, var_type.n_items);
+                    fprintf(ctx->dst, "\tmark .ai%d\n", ++array_init_counter);
                     fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size * 8, dst_reg, element_reg);
                     fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
                     fprintf(ctx->dst, "\tsub r%d r%d 1\n", iter_reg, iter_reg);
                     fprintf(ctx->dst, "\tcmp r%d 0\n", iter_reg);
-                    fprintf(ctx->dst, "\tgoto:neq %%-4\n");
+                    fprintf(ctx->dst, "\tgoto:neq .ai%d\n", array_init_counter);
 
                     freeRegister(ctx, &reg_state, iter_reg, iter_cache_id);
                 } else {
@@ -3031,13 +3035,14 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                     fprintf(
                         ctx->dst,
                         "\tset r%1$d %2$d\n"
+                        "\tmark .ai%6$d\n"
                         "\tstr%3$d r%4$d rZ\n"
                         "\tadd r%4$d r%4$d %5$d\n"
                         "\tsub r%1$d r%1$d %5$d\n"
                         "\tcmp r%1$d 0\n"
-                        "\tgoto:neq %%-4\n",
+                        "\tgoto:neq .ai%6$d\n",
                         iter_reg, array_size,
-                        step * 8, dst_reg, step
+                        step * 8, dst_reg, step, ++array_init_counter
                     );
 
                     freeRegister(ctx, &reg_state, iter_reg, cache_id);

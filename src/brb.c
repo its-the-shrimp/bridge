@@ -1401,8 +1401,6 @@ bool handleOpShrsr(ExecEnv* env, Module* module)
 
 bool handleOpCall(ExecEnv* env, Module* module)
 {
-	Op op = module->execblock.data[env->op_id];
-
 	env->stack_head -= 8;
 	*(int64_t*)env->stack_head = env->op_id + 1;
 
@@ -1410,7 +1408,7 @@ bool handleOpCall(ExecEnv* env, Module* module)
 	*(void**)env->stack_head = env->prev_stack_head;
 	env->prev_stack_head = env->stack_head;
 
-	env->op_id = op.symbol_id;
+	env->op_id = module->execblock.data[env->op_id].symbol_id;
 
 	return false;
 }
