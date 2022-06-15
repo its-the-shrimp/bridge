@@ -77,6 +77,98 @@ typedef enum {
 	N_OPS
 } OpType;
 
+#define OPF_USES_DST_REG 1
+#define OPF_USES_SRC_REG 2
+#define OPF_USES_SRC2_REG 4
+#define OPF_USES_VALUE 8
+#define OPF_UNCONDITIONAL 16
+#define OPF_USES_SYMBOL_ID 32
+#define OPF_USES_SYSCALL_ID 64
+#define OPF_USES_OP_OFFSET 128
+#define OPF_USES_MARK_NAME 256
+#define OPF_USES_NEW_VAR_SIZE 512
+#define OPF_USES_VAR_SIZE 1024
+#define OPF_USES_COND_ARG 2048
+#define OPF_VOLATILE 4096
+
+#define OPF_IS_2REG_IMM (OPF_USES_DST_REG | OPF_USES_SRC_REG | OPF_USES_VALUE)
+#define OPF_IS_3REG (OPF_USES_DST_REG | OPF_USES_SRC_REG | OPF_USES_SRC2_REG)
+#define OPF_IS_2REG (OPF_USES_DST_REG | OPF_USES_SRC_REG)
+
+// information on the operations, i.e. what fields do they use, can they be conditional etc.
+const static unsigned short op_flags[N_OPS] = {
+	[OP_NONE] = 0,
+	[OP_END] = OPF_UNCONDITIONAL,
+	[OP_MARK] = OPF_UNCONDITIONAL,
+	[OP_SET] = OPF_USES_DST_REG | OPF_USES_VALUE,
+	[OP_SETR] = OPF_IS_2REG,
+	[OP_SETD] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID,
+	[OP_SETB] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID,
+	[OP_SETM] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID,
+	[OP_ADD] = OPF_IS_2REG_IMM, 
+	[OP_ADDR] = OPF_IS_3REG,
+	[OP_SUB] = OPF_IS_2REG_IMM,
+	[OP_SUBR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_SYS] = OPF_USES_SYSCALL_ID | OPF_VOLATILE, // uses Op::syscall_id
+	[OP_GOTO] = OPF_USES_OP_OFFSET, // uses Op::op_offset
+	[OP_CMP] = OPF_USES_SRC_REG | OPF_USES_VALUE, // uses Op::src_reg and Op::value
+	[OP_CMPR] = OPF_USES_SRC_REG | OPF_USES_SRC2_REG, // uses Op::src_reg and Op::src2_reg
+	[OP_AND] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_ANDR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_OR] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_ORR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_NOT] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_XOR] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_XORR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_SHL] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_SHLR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_SHR] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_SHRR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_SHRS] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_SHRSR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_PROC] = OPF_USES_MARK_NAME, // uses Op::mark_name
+	[OP_CALL] = OPF_USES_SYMBOL_ID | OPF_VOLATILE, // uses Op::symbol_id
+	[OP_RET] = OPF_VOLATILE,
+	[OP_ENDPROC] = OPF_UNCONDITIONAL | OPF_VOLATILE,
+	[OP_LD64] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_STR64] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_LD32] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_STR32] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_LD16] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_STR16] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_LD8] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_STR8] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_VAR] = OPF_USES_NEW_VAR_SIZE | OPF_UNCONDITIONAL, // uses Op::new_var_size
+	[OP_SETV] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID, // uses Op::dst_reg and Op::symbol_id
+	[OP_MUL] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_MULR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_DIV] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_DIVR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
+	[OP_DIVS] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_DIVSR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
+	[OP_EXTPROC] = OPF_USES_MARK_NAME, // uses Op::mark_name
+	[OP_LDV] = OPF_USES_SRC_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::src_reg, Op::symbol_id and Op::var_size
+	[OP_STRV] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::dst_reg, Op::symbol_id and Op::var_size
+	[OP_POPV] = OPF_USES_DST_REG | OPF_USES_VAR_SIZE | OPF_UNCONDITIONAL, // uses Op::dst_reg, Op::var_size
+	[OP_PUSHV] = OPF_USES_SRC_REG | OPF_USES_VAR_SIZE | OPF_UNCONDITIONAL, // uses Op::src_reg and Op::var_size
+	[OP_ATF] = OPF_USES_MARK_NAME | OPF_UNCONDITIONAL, // uses Op::mark_name
+	[OP_ATL] = OPF_USES_SYMBOL_ID | OPF_UNCONDITIONAL, // uses Op::symbol_id
+	[OP_SETC] = OPF_USES_COND_ARG | OPF_USES_DST_REG, // uses Op::cond_arg and Op::dst_reg
+	[OP_DELNV] = OPF_USES_SYMBOL_ID | OPF_UNCONDITIONAL, // uses Op::symbol_id
+	[OP_LD64S] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_LD32S] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_LD16S] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_LD8S] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_LDVS] = OPF_USES_SRC_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::src_reg, Op::symbol_id and Op::var_size
+	[OP_SX32] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_SX16] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_SX8] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
+	[OP_MOD] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_MODS] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
+	[OP_MODR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_MODSR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+};
+
 #define _opNames \
 	BRP_KEYWORD("nop"), \
 	BRP_KEYWORD("end"), \
@@ -272,11 +364,12 @@ static sbuf conditionNames[N_CONDS] = { _conditionNames };
 
 typedef struct {
 	int8_t type;
-	int8_t dst_reg;
-	int8_t src_reg;
+	uint8_t dst_reg;
+	uint8_t src_reg;
 	uint8_t var_size;
 	uint8_t cond_id;
 	uint8_t cond_arg;
+	uint8_t src2_reg;
 	union {
 		uint64_t value;
 		int64_t symbol_id;
@@ -284,11 +377,10 @@ typedef struct {
 		int64_t op_offset;
 		char* mark_name;
 		uint8_t syscall_id; 
-		int8_t src2_reg;
 	};
 } Op;
 declArray(Op);
-static_assert(sizeof(Op) == 16, "checking compactness of operations' storage");
+static_assert(sizeof(Op) <= 16, "checking compactness of operations' storage");
 
 typedef struct {
 	char* name;
@@ -320,10 +412,11 @@ declArray(MemBlock);
 
 typedef enum {
 	PIECE_NONE,
-	PIECE_LITERAL,
+	PIECE_BYTES,
 	PIECE_INT16,
 	PIECE_INT32,
 	PIECE_INT64,
+	PIECE_TEXT,
 	N_PIECE_TYPES
 } DataPieceType;
 
@@ -423,10 +516,10 @@ void printVBRBError(FILE* dst, VBRBError err);
 void cleanupVBRBCompiler(VBRBError status);
 
 #define N_REGS 11
-#define N_USER_REGS 8
-#define CONDREG1_ID 8
-#define CONDREG2_ID 9
-#define ZEROREG_ID  10
+#define ZEROREG_ID  8
+#define N_USER_REGS 9
+#define CONDREG1_ID 9
+#define CONDREG2_ID 10
 #define DEFAULT_STACK_SIZE 512 // 512 Kb, just like in JVM
 
 #define BRB_EXECUTABLE       0b00000010 // used in loadModule function to make the loaded module executable with execModule

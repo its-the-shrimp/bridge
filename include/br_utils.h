@@ -24,6 +24,15 @@ void* reverseByteOrder(void* src, long length);
 #define DEF_WITH_ATTRS(prototype, attrs) prototype attrs; prototype
 #define alignby(value, step) ((step) - (unsigned)((value) - 1) % (step) + (value) - 1)
 
+#if IS_BIG_ENDIAN
+#define CC16(src) (src[0] << 8 | src[1])
+#define CC32(src) (CC16(src) << 16 | CC16((char*)((void*)src + 2)))
+#else
+#define CC16(src) ((src)[1] << 8 | (src)[0])
+#define CC32(src) (CC16((char*)((void*)src + 2)) << 16 | CC16(src))
+#define CC64(src) ((long)CC32((char*)((void*)src + 4)) << 32 | CC32(src))
+#endif // IS_BIG_ENDIAN
+
 #endif // _BR_UTILS_H
 
 #if defined(BR_UTILS_IMPLEMENTATION) && !defined(_BR_UTILS_IMPL_LOCK)

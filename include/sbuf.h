@@ -348,7 +348,7 @@ sbuf _sbufunesc(sbuf src, sbuf* dst)
 {
 	sbuf stub_dst;
 	if (!dst) {
-		stub_dst = smalloc(src.length);
+		stub_dst = scalloc(src.length);
 		dst = &stub_dst;
 	}
 	dst->length = 0;

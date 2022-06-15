@@ -27,58 +27,65 @@ typedef struct {
 	long* n_fetched;
 } ModuleLoader;
 
-void writeInt(FILE* fd, int64_t x)
+void writeInt(FILE* fd, int64_t x, uint8_t hb)
 {
-	if (x) {
-		if (x == (int64_t)(x & 0xFF)) {
-			fputc(x < 0 ? ~1 : 1, fd);
-			fputc((char)(x < 0 ? ~x : x), fd);
-		} else if (x == (int64_t)(x & 0xFFFF)) {
-			fputc(x < 0 ? ~2 : 2, fd);
-			int16_t x16 = x < 0 ? ~x : x;
-			fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
-		} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
-			fputc(x < 0 ? ~3 : 3, fd);
-			int32_t x32 = x < 0 ? ~x : x;
-			fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
+	if (x == (int64_t)(x & 0xFF)) {
+		if (x < 4 || inRange(x, 12, 16)) {
+			fputc(x | hb << 4, fd);
 		} else {
-			fputc(x < 0 ? ~4 : 4, fd);
-			int64_t x64 = x < 0 ? ~x : x;
-			fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
+			fputc((x < 0 ? 8 : 4) | hb << 4, fd);
+			fputc((char)(x < 0 ? ~x : x), fd);
 		}
+	} else if (x == (int64_t)(x & 0xFFFF)) {
+		fputc((x < 0 ? 9 : 5) | hb << 4, fd);
+		int16_t x16 = x < 0 ? ~x : x;
+		fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
+	} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
+		fputc((x < 0 ? 10 : 6) | hb << 4, fd);
+		int32_t x32 = x < 0 ? ~x : x;
+		fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 	} else {
-		fputc(0, fd);
+		fputc((x < 0 ? 11 : 7) | hb << 4, fd);
+		int64_t x64 = x < 0 ? ~x : x;
+		fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 	}
 }
 
-void writeName(ModuleWriter* writer, char* name)
+void write2HalfBytes(FILE* fd, uint8_t hb1, uint8_t hb2)
+{
+	fputc(((hb1 << 4) | hb2) & 255, fd);
+}
+
+void writeName(ModuleWriter* writer, char* name, uint8_t hb)
 {
 	for (long i = 0; i < writer->consts.length; i++) {
 		if (sbufeq(name, writer->consts.data[i])) {
-			writeInt(writer->dst, i);
+			writeInt(writer->dst, i, hb);
 			return;
 		}
 	}
-	writeInt(writer->dst, writer->consts.length);
+	writeInt(writer->dst, writer->consts.length, hb);
 	strArray_append(&writer->consts, name);
 }
 
 void writeDataBlock(ModuleWriter* writer, DataBlock block)
 {
-	writeName(writer, block.name);
-	writeInt(writer->dst, block.pieces.length);
+	writeName(writer, block.name, 0);
+	writeInt(writer->dst, block.pieces.length, 0);
 	for (int i = 0; i < block.pieces.length; ++i) {
 		DataPiece* piece = block.pieces.data + i;
 		fputc(piece->type, writer->dst);
 		switch (piece->type) {
-			case PIECE_LITERAL:
-				writeInt(writer->dst, piece->data.length);
+			case PIECE_BYTES:
+				writeInt(writer->dst, piece->data.length, 0);
+			case PIECE_TEXT:
 				fputsbuf(writer->dst, piece->data);
 				break;
 			case PIECE_INT16:
 			case PIECE_INT32:
 			case PIECE_INT64:
-				writeInt(writer->dst, piece->integer);
+				writeInt(writer->dst, piece->integer, 0);
+				break;
 				break;
 			case PIECE_NONE:
 			case N_PIECE_TYPES:
@@ -90,8 +97,8 @@ void writeDataBlock(ModuleWriter* writer, DataBlock block)
 
 void writeMemoryBlock(ModuleWriter* writer, char* name, int32_t size)
 {
-	writeName(writer, name);
-	writeInt(writer->dst, size);
+	writeName(writer, name, 0);
+	writeInt(writer->dst, size, 0);
 }
 
 typedef void (*OpWriter) (ModuleWriter*, Op);
@@ -100,37 +107,32 @@ void writeNoArgOp(ModuleWriter* writer, Op op) {}
 
 void writeMarkOp(ModuleWriter* writer, Op op)
 {
-	writeName(writer, op.mark_name);
+	writeName(writer, op.mark_name, 0);
 }
 
 void writeRegImmOp(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	writeInt(writer->dst, op.value);
+	writeInt(writer->dst, op.value, op.dst_reg);
 }
 
 void write2RegOp(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	fputc(op.src_reg, writer->dst);
+	write2HalfBytes(writer->dst, op.dst_reg, op.src_reg);
 }
 
 void writeRegSymbolIdOp(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	writeInt(writer->dst, op.symbol_id);
+	writeInt(writer->dst, op.symbol_id, op.dst_reg);
 }
 
 void writeOpSetd(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	writeName(writer, writer->src->datablocks.data[op.symbol_id].name);
+	writeName(writer, writer->src->datablocks.data[op.symbol_id].name, op.dst_reg);
 }
 
 void writeOpSetm(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	writeName(writer, writer->src->memblocks.data[op.symbol_id].name);
+	writeName(writer, writer->src->memblocks.data[op.symbol_id].name, op.dst_reg);
 }
 
 void writeOpSyscall(ModuleWriter* writer, Op op)
@@ -140,80 +142,77 @@ void writeOpSyscall(ModuleWriter* writer, Op op)
 
 void writeOpGoto(ModuleWriter* writer, Op op)
 {
-	writeInt(writer->dst, op.op_offset);
+	writeInt(writer->dst, op.op_offset, 0);
 }
 
 void writeOpCall(ModuleWriter* writer, Op op)
 {
-	writeName(writer, writer->src->execblock.data[op.symbol_id].mark_name);
+	writeName(writer, writer->src->execblock.data[op.symbol_id].mark_name, 0);
 }
 
 void writeOpCmp(ModuleWriter* writer, Op op)
 {
-	fputc(op.src_reg, writer->dst);
-	writeInt(writer->dst, op.value);
+	writeInt(writer->dst, op.value, op.src_reg);
 }
 
 void writeOpCmpr(ModuleWriter* writer, Op op)
 {
-	fputc(op.src_reg, writer->dst);
-	fputc(op.src2_reg, writer->dst);
+	write2HalfBytes(writer->dst, op.src_reg, op.src2_reg);
 }
 
 void write2RegImmOp(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	fputc(op.src_reg, writer->dst);
-	writeInt(writer->dst, op.value);
+	write2HalfBytes(writer->dst, op.dst_reg, op.src_reg);
+	writeInt(writer->dst, op.value, 0);
 }
 
 void write3RegOp(ModuleWriter* writer, Op op)
 {
 	fputc(op.dst_reg, writer->dst);
-	fputc(op.src_reg, writer->dst);
-	fputc(op.src2_reg, writer->dst);
+	write2HalfBytes(writer->dst, op.src_reg, op.src2_reg);
 }
 
 void writeOpVar(ModuleWriter* writer, Op op)
 {
-	writeInt(writer->dst, op.new_var_size);
+	writeInt(writer->dst, op.new_var_size, 0);
 }
 
 void writeOpLdv(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	writeInt(writer->dst, op.symbol_id);
-	fputc(op.var_size, writer->dst);
+	write2HalfBytes(writer->dst, op.dst_reg, op.var_size);
+	writeInt(writer->dst, op.symbol_id, 0);
 }
 
 void writeOpStrv(ModuleWriter* writer, Op op)
 {
-	writeInt(writer->dst, op.symbol_id);
-	fputc(op.var_size, writer->dst);
-	fputc(op.src_reg, writer->dst);
+	writeInt(writer->dst, op.symbol_id, 0);
+	write2HalfBytes(writer->dst, op.var_size, op.src_reg);
 }
 
 void writeOpPopv(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	fputc(op.var_size, writer->dst);
+	write2HalfBytes(writer->dst, op.dst_reg, op.var_size);
 }
 
 void writeOpPushv(ModuleWriter* writer, Op op)
 {
-	fputc(op.var_size, writer->dst);
-	fputc(op.src_reg, writer->dst);
+	write2HalfBytes(writer->dst, op.var_size, op.src_reg);
 }
 
 void writeSymbolIdOp(ModuleWriter* writer, Op op)
 {
-	writeInt(writer->dst, op.symbol_id);
+	writeInt(writer->dst, op.symbol_id, 0);
 }
 
 void writeOpSetc(ModuleWriter* writer, Op op)
 {
-	fputc(op.dst_reg, writer->dst);
-	fputc(op.cond_arg, writer->dst);
+	write2HalfBytes(writer->dst, op.dst_reg, op.cond_arg);
+}
+
+void writeBitShiftOp(ModuleWriter* writer, Op op)
+{
+	write2HalfBytes(writer->dst, op.dst_reg, op.src_reg);
+	fputc(op.value & 255, writer->dst);
 }
 
 const OpWriter op_writers[] = {
@@ -240,11 +239,11 @@ const OpWriter op_writers[] = {
 	[OP_NOT] = &write2RegOp,
 	[OP_XOR] = &write2RegImmOp,
 	[OP_XORR] = &write3RegOp,
-	[OP_SHL] = &write2RegImmOp,
+	[OP_SHL] = &writeBitShiftOp,
 	[OP_SHLR] = &write3RegOp,
-	[OP_SHR] = &write2RegImmOp,
+	[OP_SHR] = &writeBitShiftOp,
 	[OP_SHRR] = &write3RegOp,
-	[OP_SHRS] = &write2RegImmOp,
+	[OP_SHRS] = &writeBitShiftOp,
 	[OP_SHRSR] = &write3RegOp,
 	[OP_PROC] = &writeMarkOp,
 	[OP_CALL] = &writeOpCall,
@@ -310,32 +309,32 @@ void writeModule(Module* src, FILE* dst)
 	};
 // writing stack size
 	src->stack_size /= 1024;
-	writeInt(dst, src->stack_size == DEFAULT_STACK_SIZE ? 0 : src->stack_size); // dumping stack size
+	writeInt(dst, src->stack_size == DEFAULT_STACK_SIZE ? 0 : src->stack_size, 0); // dumping stack size
 	src->stack_size *= 1024;
 // writing dependencies
-	writeInt(dst, src->submodules.length);
-	array_foreach(str, name, src->submodules, 
+	writeInt(dst, src->submodules.length, 0);
+	array_foreach(str, name, src->submodules,
 		fputs(name, dst);
 		fputc('\n', dst);
 	);
 //  dumping data blocks
-	writeInt(dst, src->datablocks.length - src->_root_db_start); 
+	writeInt(dst, src->datablocks.length - src->_root_db_start, 0);
 	for (int i = src->_root_db_start; i < src->datablocks.length; i++) {
 		writeDataBlock(&writer, src->datablocks.data[i]);
 	}
 //  dumping memory blocks
-	writeInt(dst, src->memblocks.length - src->_root_mb_start);
+	writeInt(dst, src->memblocks.length - src->_root_mb_start, 0);
 	for (int i = src->_root_mb_start; i < src->memblocks.length; i++) {
 		writeMemoryBlock(&writer, src->memblocks.data[i].name, src->memblocks.data[i].size);
 	}
 //  dumping operations
-	writeInt(dst, src->execblock.length - src->_root_eb_start);
+	writeInt(dst, src->execblock.length - src->_root_eb_start, 0);
 	for (int i = src->_root_eb_start; i < src->execblock.length; i++) {
 		writeOp(&writer, src->execblock.data[i]);
 	}
 //  dumping constants pool
-	writeInt(dst, writer.consts.length);
-	array_foreach(str, constant, writer.consts, 
+	writeInt(dst, writer.consts.length, 0);
+	array_foreach(str, constant, writer.consts,
 		fputs(constant, dst);
 		fputc('\n', dst);
 	);
@@ -377,18 +376,38 @@ uint64_t loadInt64(FILE* fd, long* n_fetched)
 
 int64_t loadInt(FILE* fd, long* n_fetched)
 {
-	int8_t size = loadInt8(fd, n_fetched);
+	register uint8_t size = loadInt8(fd, n_fetched) & 0b1111;
 	switch (size) {
-		case 1: return loadInt8(fd, n_fetched);
-		case 2: return loadInt16(fd, n_fetched);
-		case 3: return loadInt32(fd, n_fetched);
-		case 4: return loadInt64(fd, n_fetched);
-		case ~1: return ~(int64_t)loadInt8(fd, n_fetched);
-		case ~2: return ~(int64_t)loadInt16(fd, n_fetched);
-		case ~3: return ~(int64_t)loadInt32(fd, n_fetched);
-		case ~4: return ~(int64_t)loadInt64(fd, n_fetched);
+		case 4: return loadInt8(fd, n_fetched);
+		case 5: return loadInt16(fd, n_fetched);
+		case 6: return loadInt32(fd, n_fetched);
+		case 7: return loadInt64(fd, n_fetched);
+		case 8: return ~(int64_t)loadInt8(fd, n_fetched);
+		case 9: return ~(int64_t)loadInt16(fd, n_fetched);
+		case 10: return ~(int64_t)loadInt32(fd, n_fetched);
+		case 11: return ~(int64_t)loadInt64(fd, n_fetched);
 		default: return size;
 	}
+}
+
+uint8_t loadHalfByte(FILE* fd, long* n_fetched)
+{
+	register uint8_t res = loadInt8(fd, n_fetched);
+	if (*n_fetched < 0) return 0;
+	if (ungetc(res & 0b1111, fd) == EOF) {
+		*n_fetched = -1;
+		return 0;
+	}
+	return res >> 4;
+}
+
+void load2HalfBytes(FILE* fd, uint8_t* hb1, uint8_t* hb2, long* n_fetched)
+{
+	register uint8_t res = loadInt8(fd, n_fetched);
+	if (*n_fetched < 0) return;
+
+	*hb1 = res >> 4;
+	*hb2 = res & 0b1111;
 }
 
 int64_t loadName(ModuleLoader* loader, char** dst, long* n_fetched)
@@ -417,13 +436,18 @@ BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
 		if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SPEC};
 
 		switch (piece->type) {
-			case PIECE_LITERAL:
+			case PIECE_BYTES:
 				piece->data.length = loadInt(loader->src, loader->n_fetched);
 				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SPEC};
 				piece->data = smalloc(piece->data.length);
 
 				if (!fread(piece->data.data, piece->data.length, 1, loader->src))
 					return (BRBLoadError){.code = BRB_ERR_NO_BLOCK_SPEC};
+				*loader->n_fetched += piece->data.length;
+				break;
+			case PIECE_TEXT:
+				piece->data = (sbuf){0};
+				getdelim(&piece->data.data, (size_t*)&piece->data.length, '\0', loader->src);
 				break;
 			case PIECE_INT16:
 			case PIECE_INT32:
@@ -530,7 +554,7 @@ BRBLoadError loadMarkOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadRegImmOp(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->dst_reg = loadHalfByte(loader->src, loader->n_fetched);
 	dst->value = loadInt(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
@@ -539,8 +563,7 @@ BRBLoadError loadRegImmOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError load2RegOp(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
-	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->dst_reg, &dst->src_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -548,7 +571,7 @@ BRBLoadError load2RegOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadRegSymbolIdOp(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->dst_reg = loadHalfByte(loader->src, loader->n_fetched);
 	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
@@ -557,7 +580,7 @@ BRBLoadError loadRegSymbolIdOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadRegNameOp(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->dst_reg = loadHalfByte(loader->src, loader->n_fetched);
 	loadName(loader, &dst->mark_name, loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
@@ -582,7 +605,7 @@ BRBLoadError loadOpGoto(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpCmp(ModuleLoader* loader, Op* dst)
 {
-	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	dst->src_reg = loadHalfByte(loader->src, loader->n_fetched);
 	dst->value = loadInt(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
@@ -591,8 +614,7 @@ BRBLoadError loadOpCmp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpCmpr(ModuleLoader* loader, Op* dst)
 {
-	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
-	dst->src2_reg = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->src_reg, &dst->src2_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -600,8 +622,7 @@ BRBLoadError loadOpCmpr(ModuleLoader* loader, Op* dst)
 
 BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
-	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->dst_reg, &dst->src_reg, loader->n_fetched);
 	dst->value = loadInt(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
@@ -611,8 +632,7 @@ BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 BRBLoadError load3RegOp(ModuleLoader* loader, Op* dst)
 {
 	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
-	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
-	dst->src2_reg = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->src_reg, &dst->src2_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -628,9 +648,8 @@ BRBLoadError loadOpVar(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpLdv(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->dst_reg, &dst->var_size, loader->n_fetched);
 	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
-	dst->var_size = loadInt8(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -639,8 +658,7 @@ BRBLoadError loadOpLdv(ModuleLoader* loader, Op* dst)
 BRBLoadError loadOpStrv(ModuleLoader* loader, Op* dst)
 {
 	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
-	dst->var_size = loadInt8(loader->src, loader->n_fetched);
-	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->var_size, &dst->src_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -648,8 +666,7 @@ BRBLoadError loadOpStrv(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpPopv(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
-	dst->var_size = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->dst_reg, &dst->var_size, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -657,8 +674,7 @@ BRBLoadError loadOpPopv(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpPushv(ModuleLoader* loader, Op* dst)
 {
-	dst->var_size = loadInt8(loader->src, loader->n_fetched);
-	dst->src_reg = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->var_size, &dst->src_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -674,8 +690,16 @@ BRBLoadError loadSymbolIdOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpSetc(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
-	dst->cond_arg = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst->dst_reg, &dst->cond_arg, loader->n_fetched);
+
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+	return (BRBLoadError){0};
+}
+
+BRBLoadError loadBitShiftOp(ModuleLoader* loader, Op* dst)
+{
+	load2HalfBytes(loader->src, &dst->dst_reg, &dst->src_reg, loader->n_fetched);
+	dst->value = loadInt8(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -705,11 +729,11 @@ OpLoader op_loaders[] = {
 	[OP_NOT] = &load2RegOp,
 	[OP_XOR] = &load2RegImmOp,
 	[OP_XORR] = &load3RegOp,
-	[OP_SHL] = &load2RegImmOp,
+	[OP_SHL] = &loadBitShiftOp,
 	[OP_SHLR] = &load3RegOp,
-	[OP_SHR] = &load2RegImmOp,
+	[OP_SHR] = &loadBitShiftOp,
 	[OP_SHRR] = &load3RegOp,
-	[OP_SHRS] = &load2RegImmOp,
+	[OP_SHRS] = &loadBitShiftOp,
 	[OP_SHRSR] = &load3RegOp,
 	[OP_PROC] = &loadMarkOp,
 	[OP_CALL] = &loadMarkOp,
@@ -972,13 +996,372 @@ BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags)
 	return (BRBLoadError){0};
 }
 
+typedef int Symbol;
+declArray(Symbol);
+defArray(Symbol);
+
+typedef struct {
+	SymbolArray used_mb;
+	SymbolArray used_db;
+	SymbolArray vars;
+	Op* proc_start;
+	FILE* temp_out;
+} OptimizerCtx;
+
+static const char* BRBRegNames[N_REGS] = {
+	[0] = "r0",
+	[1] = "r1",
+	[2] = "r2",
+	[3] = "r3",
+	[4] = "r4",
+	[5] = "r5",
+	[6] = "r6",
+	[7] = "r7",
+	[8] = "rZ"
+};
+
+typedef void (*Optimizer) (Module*, OptimizerCtx*, Op*);
+
+void optimizeNop(Module* module, OptimizerCtx* ctx, Op* op)
+{}
+
+void optimizeOpEnd(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\tend\n");
+}
+
+void optimizeOpMark(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	Op* iter = ctx->proc_start;
+	for (; iter->type != OP_ENDPROC; ++iter) {
+		if (iter->type == OP_GOTO ? iter + iter->op_offset == op : false) {
+			iter = NULL;
+			break;
+		}
+	}
+
+	if (!iter) fprintf(ctx->temp_out, "\tmark .m%ld\n", op - module->execblock.data);
+}
+
+void optimizeOpSet(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+
+	bool keep = false;
+	for (
+		Op* iter = op + 1;
+		iter - module->execblock.data < module->execblock.length &&
+		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
+		++iter
+	) {
+		if (op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) {
+			if (op->value == 0) {
+				iter->src_reg = ZEROREG_ID;
+			} else {
+				keep = true;
+				break;
+			}
+		} else if (op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) {
+			if (op->value == 0) {
+				iter->src2_reg = ZEROREG_ID;
+			} else {
+				keep = true;
+				break;
+			}
+		} else if (op_flags[iter->type] & OPF_VOLATILE) {
+			keep = true;
+			break;
+		}
+	}
+
+	if (keep) fprintf(ctx->temp_out, "\tset %s %lld\n", BRBRegNames[op->dst_reg], op->value);
+}
+
+void optimizeOpSetr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+
+	bool keep = false;
+	for (
+		Op* iter = op + 1;
+		iter - module->execblock.data < module->execblock.length &&
+		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
+		++iter
+	) {
+		if (op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) {
+			if (op->src_reg == ZEROREG_ID) {
+				iter->src_reg = ZEROREG_ID;
+			} else {
+				keep = true;
+				break;
+			}
+		} else if (op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) {
+			if (op->src2_reg == ZEROREG_ID) {
+				iter->src2_reg = ZEROREG_ID;
+			} else {
+				keep = true;
+				break;
+			}
+		} else if (op_flags[iter->type] & OPF_VOLATILE) {
+			keep = true;
+			break;
+		}
+	}
+
+	if (keep) fprintf(ctx->temp_out, "\tset %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+}
+
+void optimizeOpSetd(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+
+	bool keep = false;
+	for (
+		Op* iter = op + 1;
+		iter - module->execblock.data < module->execblock.length &&
+		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
+		++iter
+	) {
+		if (
+			(op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) ||
+			(op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) ||
+			(op_flags[iter->type] & OPF_VOLATILE)
+		) {
+			keep = true;
+			break;
+		}
+	}
+
+	if (keep) {
+		int db_iter = 0;
+		for (; db_iter < ctx->used_db.length; ++db_iter) {
+			if (ctx->used_db.data[db_iter] == op->symbol_id) break;
+		}
+
+		if (db_iter >= ctx->used_db.length) {
+			SymbolArray_append(&ctx->used_db, op->symbol_id);
+		}
+
+		fprintf(ctx->temp_out, "\tsetd %s %s\n", BRBRegNames[op->dst_reg], module->datablocks.data[op->symbol_id].name);
+	}
+}
+
+void optimizeOpSetb(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+
+	bool keep = false;
+	for (
+		Op* iter = op + 1;
+		iter - module->execblock.data < module->execblock.length &&
+		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
+		++iter
+	) {
+		if (
+			(op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) ||
+			(op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) ||
+			(op_flags[iter->type] & OPF_VOLATILE)
+		) {
+			keep = true;
+			break;
+		}
+	}
+
+	if (keep) fprintf(ctx->temp_out, "\tsetb %s %s\n", BRBRegNames[op->dst_reg], builtins[op->symbol_id].name);
+}
+
+void optimizeOpSetm(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+
+	bool keep = false;
+	for (
+		Op* iter = op + 1;
+		iter - module->execblock.data < module->execblock.length &&
+		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
+		++iter
+	) {
+		if (
+			(op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) ||
+			(op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) ||
+			(op_flags[iter->type] & OPF_VOLATILE)
+		) {
+			keep = true;
+			break;
+		}
+	}
+
+	if (keep) {
+		int mb_iter = 0;
+		for (; mb_iter < ctx->used_db.length; ++mb_iter) {
+			if (ctx->used_db.data[mb_iter] == op->symbol_id) break;
+		}
+
+		if (mb_iter >= ctx->used_mb.length) {
+			SymbolArray_append(&ctx->used_mb, op->symbol_id);
+		}
+
+		fprintf(ctx->temp_out, "\tsetm %s %s\n", BRBRegNames[op->dst_reg], module->memblocks.data[op->symbol_id].name);
+	}
+}
+
+void optimizeOpAdd(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->value == 0 && op->dst_reg == op->src_reg || op->dst_reg == ZEROREG_ID) return; 
+
+	bool keep = false;
+	for (
+		Op* iter = op + 1;
+		iter - module->execblock.data < module->execblock.length &&
+		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
+		++iter
+	) {
+		if (
+			(op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) ||
+			(op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) ||
+			(op_flags[iter->type] & OPF_VOLATILE)
+		) {
+			keep = true;
+			break;
+		}
+	}
+
+	if (keep) {
+		if (op->value == 0) {
+			fprintf(ctx->temp_out, "\tsetr %s %s", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+		} else if (op->src_reg == ZEROREG_ID) {
+			fprintf(ctx->temp_out, "\tset %s %lld\n", BRBRegNames[op->dst_reg], op->value);
+		} else {
+			fprintf(ctx->temp_out, "\tadd %s %s %lld\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+		}
+	}
+}
+
+void optimizeOpAddr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src2_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\taddr %s %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+void optimizeOpSub(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->value == 0 && op->dst_reg == op->src_reg || op->dst_reg == ZEROREG_ID) return; 
+
+	if (op->value == 0) {
+		fprintf(ctx->temp_out, "\tsetr %s %s", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tset %s %lld\n", BRBRegNames[op->dst_reg], -op->value);
+	} else {
+		fprintf(ctx->temp_out, "\tsub %s %s %lld\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpSubr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID && op->src_reg == op->src2_reg) {
+		fprintf(ctx->temp_out, "\tsetr %s rZ\n", BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tsubr %s %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+void optimizeOpSys(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\tsys %s\n", syscallNames[op->syscall_id].data);
+}
+
+void optimizeOpGoto(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\tgoto .m%ld\n", op + op->op_offset - module->execblock.data);
+}
+
+void optimizeOpCmp(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->value == 0) {
+		fprintf(ctx->temp_out, "\tcmpr %s rZ\n", BRBRegNames[op->src_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tcmp %s %lld\n", BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpCmpr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\tcmpr %s %s\n", BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+}
+
+void optimizeOpAnd(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->value == 0 || op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr %s rZ\n", BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tand %s %s %lld\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpAndr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->src_reg == ZEROREG_ID || op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr %s rZ\n", BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tandr %s %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+static Optimizer optimizers[N_OPS] = {
+	[OP_NONE] = optimizeNop,
+	[OP_END] = optimizeOpEnd,
+	[OP_MARK] = optimizeOpMark,
+	[OP_SET] = optimizeOpSet,
+	[OP_SETR] = optimizeOpSetr,
+	[OP_SETD] = optimizeOpSetd,
+	[OP_SETB] = optimizeOpSetb,
+	[OP_SETM] = optimizeOpSetm,
+	[OP_ADD] = optimizeOpAdd,
+	[OP_ADDR] = optimizeOpAddr,
+	[OP_SUB] = optimizeOpSub,
+	[OP_SUBR] = optimizeOpSubr,
+	[OP_SYS] = optimizeOpSys,
+	[OP_GOTO] = optimizeOpGoto,
+	[OP_CMP] = optimizeOpCmp,
+	[OP_CMPR] = optimizeOpCmpr,
+	[OP_AND] = optimizeOpAnd,
+	[OP_ANDR] = optimizeOpAndr
+};
+
+void optimizeModule(Module* module)
+{
+	assert(false);
+	sbuf temp_buf = {0};
+
+	OptimizerCtx ctx = {
+		.used_db = SymbolArray_new(-module->datablocks.length),
+		.used_mb = SymbolArray_new(-module->memblocks.length),
+		.vars = SymbolArray_new(0),
+		.temp_out = open_memstream(&temp_buf.data, (size_t*)&temp_buf.length),
+		.proc_start = NULL
+	};
+
+}
+
 sbuf assembleDataBlock(DataBlock block)
 {
 	sbuf res = {0};
 	for (int i = 0; i < block.pieces.length; ++i) {
 		DataPiece* piece = block.pieces.data + i;
 		switch (piece->type) {
-			case PIECE_LITERAL:
+			case PIECE_BYTES:
+			case PIECE_TEXT:
 				res.length += piece->data.length;
 				break;
 			case PIECE_INT16:
@@ -1002,7 +1385,8 @@ sbuf assembleDataBlock(DataBlock block)
 	for (int i = 0; i < block.pieces.length; ++i) {
 		DataPiece* piece = block.pieces.data + i;
 		switch (piece->type) {
-			case PIECE_LITERAL:
+			case PIECE_BYTES:
+			case PIECE_TEXT:
 				memcpy(res.data + offset, piece->data.data, piece->data.length);
 				offset += piece->data.length;
 				break;
@@ -1500,7 +1884,7 @@ bool handleOpVar(ExecEnv* env, Module* module)
 bool handleOpSetv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-	env->registers[op.dst_reg] = (int64_t)env->stack_head + op.symbol_id;
+	env->registers[op.dst_reg] = (int64_t)env->prev_stack_head - op.symbol_id;
 	env->op_id++;
 	return false;
 }
@@ -1557,7 +1941,7 @@ bool handleOpLdv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = 0;
-	memcpy(env->registers + op.dst_reg, env->stack_head + op.symbol_id, op.var_size);
+	memcpy(env->registers + op.dst_reg, env->prev_stack_head - op.symbol_id, op.var_size);
 	env->op_id++;
 	return false;
 }
@@ -1565,7 +1949,7 @@ bool handleOpLdv(ExecEnv* env, Module* module)
 bool handleOpStrv(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
-	memcpy(env->stack_head + op.symbol_id, env->registers + op.src_reg, op.var_size);
+	memcpy(env->prev_stack_head - op.symbol_id, env->registers + op.src_reg, op.var_size);
 	env->op_id++;
 	return false;
 }
@@ -1655,7 +2039,7 @@ bool handleOpLdvs(ExecEnv* env, Module* module)
 {
 	Op op = module->execblock.data[env->op_id];
 	env->registers[op.dst_reg] = 0;
-	memcpy(env->registers + op.dst_reg, env->stack_head + op.symbol_id, op.var_size);
+	memcpy(env->registers + op.dst_reg, env->prev_stack_head - op.symbol_id, op.var_size);
 	if (op.var_size < 8 ? env->registers[op.dst_reg] & (1LL << (op.var_size * 8 - 1)) : false) {
 		env->registers[op.dst_reg] |= ~byteMask(op.var_size);
 	}

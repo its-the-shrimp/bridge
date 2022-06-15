@@ -49,10 +49,11 @@ typedef struct token {
 	int8_t type;
 	TokenLoc loc;
 	union {
-		char* word; // for TOKEN_WORD or TOKEN_STRING
+		char* word; // for TOKEN_WORD
+		sbuf string; // for TOKEN_STRING
 		int64_t value; // for TOKEN_INT
-		int64_t keyword_id; // for TOKEN_KEYWORD
-		int64_t symbol_id; // for TOKEN_SYMBOL
+		uint32_t keyword_id; // for TOKEN_KEYWORD
+		uint32_t symbol_id; // for TOKEN_SYMBOL
 	};
 } Token;
 #define emptyToken ((Token){ .type = TOKEN_NONE })
@@ -791,7 +792,8 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pendi
 		case TOKEN_NONE: break;
 		case TOKEN_SYMBOL: if (isSymbolSpecHidden(obj->symbols[res.symbol_id])) break;
 			return res;
-		case TOKEN_STRING:
+		case TOKEN_STRING: if (res.string.length == 0) break;
+			return res;
 		case TOKEN_WORD: if (sbufspace(res.word)) break;
 		case TOKEN_KEYWORD:
 		case TOKEN_INT:
@@ -842,19 +844,15 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pendi
 					return (Token){0};
 				}
 
-				char* str_literal_c;
-				if (obj->flags & BRP_ESC_STR_LITERALS) {
-					sbuf temp = scalloc(str_literal.length + 1);
-					sbufunesc(str_literal, &temp);
-					str_literal_c = temp.data;
-				} else str_literal_c = tostr(str_literal);
+				sbuf str_literal_res = str_literal;
+				if (obj->flags & BRP_ESC_STR_LITERALS) str_literal_res = sbufunesc(str_literal, NULL);
 
 				TokenArray_append(
 					&obj->pending,
 					(Token){
 						.type = TOKEN_STRING,
 						.loc = input->cur_loc,
-						.word = str_literal_c
+						.string = str_literal_res
 					}
 				);
 				input->cur_loc.colno += sbufutf8len(str_literal) + DQUOTE.length;
@@ -903,16 +901,13 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pendi
 				return (Token){0};
 			}
 
-			char* str_literal_c;
-			if (obj->flags & BRP_ESC_STR_LITERALS) {
-				sbuf temp = scalloc(str_literal.length + 1);
-				sbufunesc(str_literal, &temp);
-				str_literal_c = temp.data;
-			} else str_literal_c = tostr(str_literal);
+			sbuf str_literal_res = str_literal;
+			if (obj->flags & BRP_ESC_STR_LITERALS) str_literal_res = sbufunesc(str_literal, NULL);
+
 
 			res.type = TOKEN_STRING;
 			res.loc = input->cur_loc;
-			res.word = str_literal_c;
+			res.string = str_literal_res;
 			input->cur_loc.colno += sbufutf8len(str_literal) + DQUOTE.length;
 		} else if (delim_id == obj->_quote_symbol_id) {
 			sbuf char_literal;
@@ -992,7 +987,7 @@ void fprintTokenStr(FILE* fd, Token token, BRP* obj)
 		case TOKEN_INT: fprintf(fd, "integer %lld", token.value); break;
 		case TOKEN_STRING:
 			fprintf(fd, "string \"");
-			fputsbufesc(fd, SBUF(token.word), BYTEFMT_HEX);
+			fputsbufesc(fd, token.string, BYTEFMT_HEX);
 			fputc('"', fd);
 			break;
 		case TOKEN_KEYWORD: fprintf(fd, "keyword `"sbuf_format"`", unpack(obj->keywords[token.keyword_id])); break;

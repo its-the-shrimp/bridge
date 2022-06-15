@@ -297,8 +297,14 @@ VBRBError getDataPiece(CompilerCtx* ctx, DataPiece* piece)
 {
 	Token spec = fetchToken(ctx->prep);
 	if (spec.type == TOKEN_STRING) {
-		piece->type = PIECE_LITERAL;
-		piece->data = SBUF(spec.word);
+		piece->data = spec.string;
+		int nul_index = sbufindex(spec.string, CSTRTERM);
+		if (nul_index < 0) {
+			piece->type = PIECE_TEXT;
+			++piece->data.length;
+		} else {
+			piece->type = PIECE_BYTES;
+		}
 		return (VBRBError){ .prep = ctx->prep };
 	}
 
@@ -326,7 +332,7 @@ VBRBError getDataPiece(CompilerCtx* ctx, DataPiece* piece)
 	return (VBRBError){ .prep = ctx->prep };
 }
 
-VBRBError getRegIdArg(CompilerCtx* ctx, Token src, int8_t* dst, char op_type, char arg_id)
+VBRBError getRegIdArg(CompilerCtx* ctx, Token src, uint8_t* dst, char op_type, char arg_id)
 {
 	if (src.type != TOKEN_WORD) return (VBRBError){
         .prep = ctx->prep,
@@ -403,7 +409,7 @@ VBRBError getVarArg(CompilerCtx* ctx, Token src, int64_t* offset_p, uint8_t* var
 	
 	*offset_p = 0;
 	sbuf var_name = SBUF(getTokenWord(ctx->prep, src));
-	for (int i = ctx->vars.length - 1; i >= 0; i--) {
+	for (int i = 0; i < ctx->vars.length; ++i) {
 		if (sbufeq(ctx->vars.data[i].name, var_name)) { 
 			var_name.data = NULL;
 			*var_size_p = ctx->vars.data[i].size;
@@ -416,6 +422,7 @@ VBRBError getVarArg(CompilerCtx* ctx, Token src, int64_t* offset_p, uint8_t* var
 		.code = VBRB_ERR_UNKNOWN_VAR_NAME,
 		.loc = src
 	};
+	*offset_p += *var_size_p;
 
 	return (VBRBError){0};
 }
@@ -885,7 +892,7 @@ VBRBError compileOpAtf(CompilerCtx* ctx, Module* dst)
 		.arg_id = 0,
 		.expected_token_type = TOKEN_STRING
 	};
-	op->mark_name = src_path.word;
+	op->mark_name = tostr(src_path.string);
 
 	return (VBRBError){ .prep = ctx->prep };
 }

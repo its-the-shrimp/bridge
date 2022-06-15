@@ -171,15 +171,19 @@ typedef struct expr {
         struct expr* arg1;
     };
     union {
-        struct expr* arg2;
-        int64_t int_literal; // for EXPR_INT
-        TypeDef* var_type; // for EXPR_TYPE
-        char* name; // for EXPR_NAME
-        char* str_literal; // for EXPR_STRING
-    };
-    union {
-        struct expr* arg3; // for ternary expressions
-        TypeDef* element_type; // for EXPR_ARRAY
+        struct {
+            union {
+                struct expr* arg2;
+                int64_t int_literal; // for EXPR_INT
+                TypeDef* var_type; // for EXPR_TYPE
+                char* name; // for EXPR_NAME
+            };
+            union {
+                struct expr* arg3; // for ternary expressions
+                TypeDef* element_type; // for EXPR_ARRAY
+            };
+        };
+        sbuf string;
     };
     struct expr* block;
     TokenLoc loc;
@@ -187,6 +191,7 @@ typedef struct expr {
 } Expr;
 declChain(Expr);
 defChain(Expr);
+
 
 typedef struct {
     TokenLoc loc;
@@ -311,15 +316,15 @@ static char expr_order_table[] = {
     [EXPR_ADD        ] = 3,
     [EXPR_SHL        ] = 4,
     [EXPR_SHR        ] = 4,
-    [EXPR_LOGICAL_GT ] = 5,
-    [EXPR_LOGICAL_LT ] = 5,
-    [EXPR_LOGICAL_LE ] = 5,
-    [EXPR_LOGICAL_GE ] = 5,
-    [EXPR_LOGICAL_EQ ] = 6,
-    [EXPR_LOGICAL_NEQ] = 6,
-    [EXPR_AND        ] = 7,
-    [EXPR_XOR        ] = 8,
-    [EXPR_OR         ] = 9,
+    [EXPR_AND        ] = 5,
+    [EXPR_XOR        ] = 6,
+    [EXPR_OR         ] = 7,
+    [EXPR_LOGICAL_GT ] = 8,
+    [EXPR_LOGICAL_LT ] = 8,
+    [EXPR_LOGICAL_LE ] = 8,
+    [EXPR_LOGICAL_GE ] = 8,
+    [EXPR_LOGICAL_EQ ] = 9,
+    [EXPR_LOGICAL_NEQ] = 9,
     [EXPR_LOGICAL_AND] = 10,
     [EXPR_LOGICAL_OR ] = 11,
     [EXPR_ASSIGN     ] = 12,
@@ -956,17 +961,17 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
     }
     switch (expr.type) {
         case EXPR_SYSCALL:
-            fputs("SYSCALL\n", dst);
+            fprintf(dst, "SYSCALL %s\n", expr.name);
             chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
             break;
         case EXPR_NAME:
-            fprintf(dst, "NAME %s\n", expr.str_literal);
+            fprintf(dst, "NAME %s\n", expr.name);
             break;
         case EXPR_BUILTIN:
-            fprintf(dst, "BUILTIN %s\n", expr.str_literal);
+            fprintf(dst, "BUILTIN %s\n", expr.name);
             break;
         case EXPR_STRING:
-            fprintf(dst, "STRING \"%s\"\n", expr.str_literal);
+            fprintf(dst, "STRING \"%.*s\"\n", unpack(expr.string));
             break;
         case EXPR_INT:
             fprintf(dst, "INTEGER %lld\n", expr.int_literal);
@@ -1620,7 +1625,7 @@ bool parseVarDecl(AST* ast, Token token, TypeDef var_type, Expr* dst, Expr* pare
     if (decl) raiseNameTakenError(ast, token, decl->loc);
     addSubexpr(dst, (Expr){
         .type = EXPR_NAME,
-        .str_literal = token.word,
+        .name = token.word,
         .block = dst->block,
         .loc = dst->loc
     });
@@ -1663,7 +1668,7 @@ bool parseStrLiteral(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDe
         unfetchToken(ast->prep, token);
         return true;
     }
-    dst->str_literal = token.word;
+    dst->string = token.string;
 
     return false;
 }
@@ -1702,7 +1707,6 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
     token = peekToken(ast->prep);
     if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
         while (true) {
-            token = peekToken(ast->prep);
             Expr* arg = addSubexpr(dst, (Expr){0});
             parseExpr(ast, arg, dst, dst->block, func, EXPRTERM_ARG | EXPRTYPE_EVALUATABLE);
 
@@ -1736,7 +1740,7 @@ bool parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDec
         }
     }
     if (!name_vaildated) raiseUnknownBuiltinNameError(ast, token);
-    dst->str_literal = token.word;
+    dst->name = token.word;
 
     return false;
 }
@@ -2814,7 +2818,7 @@ void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
                 }
             }
 
-            if (sbufeq(func_name_spec.word, "main")) {
+            if (sbufeq(new_func->name, "main")) {
                 if (new_func->return_type.kind != KIND_VOID) raiseMainProcRetTypeMismatchError(dst, func_name_spec.loc, new_func->return_type);
                 int main_proc_n_args = getSubexprsCount(&new_func->args) - 1;
                 if (main_proc_n_args != 0) raiseMainProcArgCountMismatchError(dst, token.loc, main_proc_n_args);
@@ -2839,7 +2843,7 @@ void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
 
 typedef uint8_t regstate_t;
 typedef struct {
-    strArray data_blocks;
+    sbufArray data_blocks;
     intArray mem_blocks;
     sbuf cur_src_path;
     int cur_src_line;
@@ -2950,14 +2954,14 @@ void compileExprString(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 
     int str_index = -1;
     for (int i = 0; i < ctx->data_blocks.length; i++) {
-        if (sbufeq(ctx->data_blocks.data[i], expr.str_literal)) {
+        if (sbufeq(ctx->data_blocks.data[i], expr.string)) {
             str_index = i;
             break;
         }
     }
     if (str_index < 0) {
         str_index = ctx->data_blocks.length;
-        strArray_append(&ctx->data_blocks, expr.str_literal);
+        sbufArray_append(&ctx->data_blocks, expr.string);
     }
 
     fprintf(ctx->dst, "\tsetd r%d "STR_PREFIX"%d\n", dst_reg, str_index);
@@ -3850,7 +3854,7 @@ static_assert(N_EXPR_TYPES == 54, "not all expression types have corresponding c
 bool compileAST(AST* src, FILE* dst)
 {
     ASTCompilerCtx ctx = {
-        .data_blocks = strArray_new(0),
+        .data_blocks = sbufArray_new(0),
         .dst = dst
     };
 
@@ -3872,15 +3876,15 @@ bool compileAST(AST* src, FILE* dst)
 
     if (ctx.data_blocks.length) {
         fputs("data {\n", dst);
-        array_foreach(str, literal, ctx.data_blocks, 
+        array_foreach(sbuf, literal, ctx.data_blocks, 
             fprintf(dst, "\t"STR_PREFIX"%d \"", _literal);
-            fputsbufesc(dst, SBUF(literal), BYTEFMT_HEX);
+            fputsbufesc(dst, literal, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
             fputs("\\0\"\n", dst);
         );
         fputs("}\n", dst);
     }
 
-    strArray_clear(&ctx.data_blocks);
+    sbufArray_clear(&ctx.data_blocks);
     return true;
 }
 
