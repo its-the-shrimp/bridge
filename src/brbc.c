@@ -54,12 +54,13 @@ static int cond_counter = 0;
 void compileCondition(FILE* dst, uint8_t cond_id, uint8_t n_ops)
 {
 	if (cond_id == COND_NON) return;
-	assert(cond_id < N_CONDS);
+	assert(cond_id < N_CONDS, "invalid condition ID was provided");
 	fprintf(dst, "\tb%s . + %d\n", oppositeConditionName(cond_id), (n_ops + 1) * 4);
 }
 
 int startConditionalOp(FILE* dst, uint8_t cond_id)
 {
+	assert(cond_id < N_CONDS, "invalid condition ID was provided");
 	if (!cond_id) return -1;
 	fprintf(dst, "\tb%s .co_%d\n", oppositeConditionName(cond_id), cond_counter++);
 	return cond_counter;
@@ -644,9 +645,6 @@ void compileOpMulNative(Module* module, int index, CompCtx* ctx)
 	if (op.value == -1) {
 		compileCondition(ctx->dst, op.cond_id, 1);
 		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-	} else if ((op.value & (op.value - 1)) == 0) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tlsl %s, %s, %d\n", regNames64[op.dst_reg], regNames64[op.src_reg], (int)log2f(op.value));
 	} else {
 		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
 		fprintf(ctx->dst, "\tmul %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG));
@@ -667,9 +665,6 @@ void compileOpDivNative(Module* module, int index, CompCtx* ctx)
 	if (op.value == -1) {
 		compileCondition(ctx->dst, op.cond_id, 1);
 		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-	} else if ((op.value & (op.value - 1)) == 0) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tlsr %s, %s, %d\n", regNames64[op.dst_reg], regNames64[op.src_reg], (int)log2f(op.value));
 	} else {
 		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
 		fprintf(ctx->dst, "\tudiv %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG));
@@ -690,9 +685,6 @@ void compileOpDivsNative(Module* module, int index, CompCtx* ctx)
 	if (op.value == -1) {
 		compileCondition(ctx->dst, op.cond_id, 1);
 		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-	} else if ((op.value & (op.value - 1)) == 0) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tasr %s, %s, %d\n", regNames64[op.dst_reg], regNames64[op.src_reg], (int)log2f(op.value));
 	} else {
 		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
 		fprintf(ctx->dst, "\tsdiv %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG));

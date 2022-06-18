@@ -10,7 +10,6 @@
 #include <br_utils.h>
 #include <datasets.h>
 #include <sbuf.h>
-#include <assert.h>
 #include <brp.h>
 #include <stdint.h>
 #include <stdio.h>

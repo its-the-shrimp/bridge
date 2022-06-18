@@ -787,7 +787,8 @@ VBRBError compileOpLdv(CompilerCtx* ctx, Module* dst)
 		.var = (Var){
 			.name = var_name.word,
 			.size = op->var_size
-		}
+		},
+		.loc = ctx->op_token
 	};
 
 	return (VBRBError){ .prep = ctx->prep };
@@ -807,7 +808,8 @@ VBRBError compileOpStrv(CompilerCtx* ctx, Module* dst)
 		.var = (Var){
 			.name = var_name.word,
 			.size = op->var_size
-		}
+		},
+		.loc = ctx->op_token
 	};
 
 	err = getRegIdArg(ctx, fetchToken(ctx->prep), &op->src_reg, op->type, 0);
@@ -825,8 +827,14 @@ VBRBError compileOpPopv(CompilerCtx* ctx, Module* dst)
 		.code = VBRB_ERR_NO_VAR,
 		.loc = ctx->op_token
 	};
-	op->var_size = VarArray_get(ctx->vars, -1).size;
-	ctx->vars.length--;
+	Var popped = VarArray_pop(&ctx->vars, -1);
+	op->var_size = popped.size;
+	if (popped.size > 8) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_VAR_TOO_LARGE,
+		.loc = ctx->op_token,
+		.var = popped
+	};
 
 	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &op->dst_reg, op->type, 0);
 	if (err.code) return err;
@@ -870,6 +878,7 @@ VBRBError compileOpPushv(CompilerCtx* ctx, Module* dst)
 	if (token.value > 8) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_VAR_TOO_LARGE,
+		.loc = ctx->op_token,
 		.var = *new_var
 	};
 

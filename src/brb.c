@@ -1,9 +1,9 @@
 #include <brb.h>
 #include <stdio.h>
 #include <errno.h>
-#include <unistd.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <math.h>
 
 defArray(Op);
 defArray(DataBlock);
@@ -1004,7 +1004,7 @@ typedef struct {
 	SymbolArray used_mb;
 	SymbolArray used_db;
 	SymbolArray vars;
-	Op* proc_start;
+	int frame_size;
 	FILE* temp_out;
 } OptimizerCtx;
 
@@ -1032,208 +1032,72 @@ void optimizeOpEnd(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpMark(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	Op* iter = ctx->proc_start;
-	for (; iter->type != OP_ENDPROC; ++iter) {
-		if (iter->type == OP_GOTO ? iter + iter->op_offset == op : false) {
-			iter = NULL;
-			break;
-		}
-	}
-
-	if (!iter) fprintf(ctx->temp_out, "\tmark .m%ld\n", op - module->execblock.data);
+	fprintf(ctx->temp_out, "\tmark .m%ld\n", op - module->execblock.data);
 }
 
 void optimizeOpSet(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-
-	bool keep = false;
-	for (
-		Op* iter = op + 1;
-		iter - module->execblock.data < module->execblock.length &&
-		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
-		++iter
-	) {
-		if (op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) {
-			if (op->value == 0) {
-				iter->src_reg = ZEROREG_ID;
-			} else {
-				keep = true;
-				break;
-			}
-		} else if (op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) {
-			if (op->value == 0) {
-				iter->src2_reg = ZEROREG_ID;
-			} else {
-				keep = true;
-				break;
-			}
-		} else if (op_flags[iter->type] & OPF_VOLATILE) {
-			keep = true;
-			break;
-		}
+	if (op->value == 0) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tset:%s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], op->value);
 	}
-
-	if (keep) fprintf(ctx->temp_out, "\tset %s %lld\n", BRBRegNames[op->dst_reg], op->value);
 }
 
 void optimizeOpSetr(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-
-	bool keep = false;
-	for (
-		Op* iter = op + 1;
-		iter - module->execblock.data < module->execblock.length &&
-		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
-		++iter
-	) {
-		if (op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) {
-			if (op->src_reg == ZEROREG_ID) {
-				iter->src_reg = ZEROREG_ID;
-			} else {
-				keep = true;
-				break;
-			}
-		} else if (op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) {
-			if (op->src2_reg == ZEROREG_ID) {
-				iter->src2_reg = ZEROREG_ID;
-			} else {
-				keep = true;
-				break;
-			}
-		} else if (op_flags[iter->type] & OPF_VOLATILE) {
-			keep = true;
-			break;
-		}
-	}
-
-	if (keep) fprintf(ctx->temp_out, "\tset %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 }
 
 void optimizeOpSetd(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-
-	bool keep = false;
-	for (
-		Op* iter = op + 1;
-		iter - module->execblock.data < module->execblock.length &&
-		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
-		++iter
-	) {
-		if (
-			(op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) ||
-			(op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) ||
-			(op_flags[iter->type] & OPF_VOLATILE)
-		) {
-			keep = true;
-			break;
-		}
-	}
-
-	if (keep) {
+	if (op->symbol_id >= module->_root_db_start) {
 		int db_iter = 0;
 		for (; db_iter < ctx->used_db.length; ++db_iter) {
 			if (ctx->used_db.data[db_iter] == op->symbol_id) break;
 		}
 
-		if (db_iter >= ctx->used_db.length) {
+		if (db_iter >= ctx->used_db.length)
 			SymbolArray_append(&ctx->used_db, op->symbol_id);
-		}
-
-		fprintf(ctx->temp_out, "\tsetd %s %s\n", BRBRegNames[op->dst_reg], module->datablocks.data[op->symbol_id].name);
 	}
+
+	fprintf(ctx->temp_out, "\tsetd:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], module->datablocks.data[op->symbol_id].name);
 }
 
 void optimizeOpSetb(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-
-	bool keep = false;
-	for (
-		Op* iter = op + 1;
-		iter - module->execblock.data < module->execblock.length &&
-		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
-		++iter
-	) {
-		if (
-			(op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) ||
-			(op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) ||
-			(op_flags[iter->type] & OPF_VOLATILE)
-		) {
-			keep = true;
-			break;
-		}
-	}
-
-	if (keep) fprintf(ctx->temp_out, "\tsetb %s %s\n", BRBRegNames[op->dst_reg], builtins[op->symbol_id].name);
+	fprintf(ctx->temp_out, "\tsetb:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], builtins[op->symbol_id].name);
 }
 
 void optimizeOpSetm(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-
-	bool keep = false;
-	for (
-		Op* iter = op + 1;
-		iter - module->execblock.data < module->execblock.length &&
-		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
-		++iter
-	) {
-		if (
-			(op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) ||
-			(op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) ||
-			(op_flags[iter->type] & OPF_VOLATILE)
-		) {
-			keep = true;
-			break;
-		}
-	}
-
-	if (keep) {
+	if (op->symbol_id >= module->_root_mb_start) {
 		int mb_iter = 0;
 		for (; mb_iter < ctx->used_db.length; ++mb_iter) {
 			if (ctx->used_db.data[mb_iter] == op->symbol_id) break;
 		}
 
-		if (mb_iter >= ctx->used_mb.length) {
+		if (mb_iter >= ctx->used_mb.length)
 			SymbolArray_append(&ctx->used_mb, op->symbol_id);
-		}
-
-		fprintf(ctx->temp_out, "\tsetm %s %s\n", BRBRegNames[op->dst_reg], module->memblocks.data[op->symbol_id].name);
 	}
+
+	fprintf(ctx->temp_out, "\tsetm:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], module->memblocks.data[op->symbol_id].name);
 }
 
 void optimizeOpAdd(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->value == 0 && op->dst_reg == op->src_reg || op->dst_reg == ZEROREG_ID) return; 
-
-	bool keep = false;
-	for (
-		Op* iter = op + 1;
-		iter - module->execblock.data < module->execblock.length &&
-		!(op_flags[iter->type] & OPF_USES_DST_REG && iter->dst_reg == op->dst_reg);
-		++iter
-	) {
-		if (
-			(op_flags[iter->type] & OPF_USES_SRC_REG && iter->src_reg == op->dst_reg) ||
-			(op_flags[iter->type] & OPF_USES_SRC2_REG && iter->src2_reg == op->dst_reg) ||
-			(op_flags[iter->type] & OPF_VOLATILE)
-		) {
-			keep = true;
-			break;
-		}
-	}
-
-	if (keep) {
-		if (op->value == 0) {
-			fprintf(ctx->temp_out, "\tsetr %s %s", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
-		} else if (op->src_reg == ZEROREG_ID) {
-			fprintf(ctx->temp_out, "\tset %s %lld\n", BRBRegNames[op->dst_reg], op->value);
-		} else {
-			fprintf(ctx->temp_out, "\tadd %s %s %lld\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
-		}
+	if (op->value == 0) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tset:%s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], op->value);
+	} else {
+		fprintf(ctx->temp_out, "\tadd:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
 	}
 }
 
@@ -1241,11 +1105,11 @@ void optimizeOpAddr(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
 	if (op->src2_reg == ZEROREG_ID) {
-		fprintf(ctx->temp_out, "\tsetr %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
-		fprintf(ctx->temp_out, "\tsetr %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src2_reg]);
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src2_reg]);
 	} else {
-		fprintf(ctx->temp_out, "\taddr %s %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+		fprintf(ctx->temp_out, "\taddr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
 	}
 }
 
@@ -1254,11 +1118,11 @@ void optimizeOpSub(Module* module, OptimizerCtx* ctx, Op* op)
 	if (op->value == 0 && op->dst_reg == op->src_reg || op->dst_reg == ZEROREG_ID) return; 
 
 	if (op->value == 0) {
-		fprintf(ctx->temp_out, "\tsetr %s %s", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
-		fprintf(ctx->temp_out, "\tset %s %lld\n", BRBRegNames[op->dst_reg], -op->value);
+		fprintf(ctx->temp_out, "\tset:%s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], -op->value);
 	} else {
-		fprintf(ctx->temp_out, "\tsub %s %s %lld\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+		fprintf(ctx->temp_out, "\tsub:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
 	}
 }
 
@@ -1266,45 +1130,45 @@ void optimizeOpSubr(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
 	if (op->src2_reg == ZEROREG_ID) {
-		fprintf(ctx->temp_out, "\tsetr %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID && op->src_reg == op->src2_reg) {
-		fprintf(ctx->temp_out, "\tsetr %s rZ\n", BRBRegNames[op->dst_reg]);
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
 	} else {
-		fprintf(ctx->temp_out, "\tsubr %s %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+		fprintf(ctx->temp_out, "\tsubr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
 	}
 }
 
 void optimizeOpSys(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tsys %s\n", syscallNames[op->syscall_id].data);
+	fprintf(ctx->temp_out, "\tsys:%s %s\n", conditionNames[op->cond_id].data, syscallNames[op->syscall_id].data);
 }
 
 void optimizeOpGoto(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tgoto .m%ld\n", op + op->op_offset - module->execblock.data);
+	fprintf(ctx->temp_out, "\tgoto:%s .m%ld\n", conditionNames[op->cond_id].data, op + op->op_offset - module->execblock.data);
 }
 
 void optimizeOpCmp(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->value == 0) {
-		fprintf(ctx->temp_out, "\tcmpr %s rZ\n", BRBRegNames[op->src_reg]);
+		fprintf(ctx->temp_out, "\tcmpr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->src_reg]);
 	} else {
-		fprintf(ctx->temp_out, "\tcmp %s %lld\n", BRBRegNames[op->src_reg], op->value);
+		fprintf(ctx->temp_out, "\tcmp:%s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->src_reg], op->value);
 	}
 }
 
 void optimizeOpCmpr(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tcmpr %s %s\n", BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	fprintf(ctx->temp_out, "\tcmpr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
 }
 
 void optimizeOpAnd(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
 	if (op->value == 0 || op->src_reg == ZEROREG_ID) {
-		fprintf(ctx->temp_out, "\tsetr %s rZ\n", BRBRegNames[op->dst_reg]);
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
 	} else {
-		fprintf(ctx->temp_out, "\tand %s %s %lld\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+		fprintf(ctx->temp_out, "\tand:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
 	}
 }
 
@@ -1312,9 +1176,521 @@ void optimizeOpAndr(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
 	if (op->src_reg == ZEROREG_ID || op->src2_reg == ZEROREG_ID) {
-		fprintf(ctx->temp_out, "\tsetr %s rZ\n", BRBRegNames[op->dst_reg]);
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
 	} else {
-		fprintf(ctx->temp_out, "\tandr %s %s %s\n", BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+		fprintf(ctx->temp_out, "\tandr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+
+void optimizeOpOr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if ((int64_t)op->value == -1) {
+		fprintf(ctx->temp_out, "\tnot:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tor:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpOrr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->src_reg == op->src2_reg && op->src_reg == op->dst_reg) return;
+	if (op->src_reg == op->src2_reg) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\torr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+void optimizeOpNot(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	fprintf(ctx->temp_out, "\tnot:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+}
+
+void optimizeOpXor(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->value == 0) return;
+	if (op->value == 0) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tset:%s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], op->value);
+	} else {
+		fprintf(ctx->temp_out, "\txor:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpXorr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->src_reg == op->src2_reg) return;
+	if (op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src2_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\txorr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+void optimizeOpShl(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->value == 0) return;
+	if (op->value == 0) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tshl:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpShlr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID) return;
+	if (op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tshlr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+void optimizeOpShr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->value == 0) return;
+	if (op->value == 0) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tshr:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpShrr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID) return;
+	if (op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tshrr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+void optimizeOpShrs(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->value == 0) return;
+	if (op->value == 0) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tshr:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpShrsr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID) return;
+	if (op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if (op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tshrr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+void optimizeOpProc(Module* module, OptimizerCtx* ctx, Op* op)
+// TODO: store data about ownership of ops and data blocks by the loaded modules and submodules in the `Module` object
+{
+	fprintf(ctx->temp_out, "\tproc %s\n", op->mark_name);
+}
+
+void optimizeOpCall(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\tcall:%s %s\n", conditionNames[op->cond_id].data, module->execblock.data[op->symbol_id].mark_name);
+}
+
+void optimizeOpRet(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\tret:%s\n", conditionNames[op->cond_id].data);
+}
+
+void optimizeOpEndproc(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\tendproc\n");
+	ctx->frame_size = 0;
+	SymbolArray_clear(&ctx->vars);
+}
+
+void optimizeLoadOp(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->type >= OP_LD64S) {
+		fprintf(
+			ctx->temp_out,
+			"\tld%ds:%s %s %s\n",
+			8 << (3 - op->type + OP_LD64S),
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg]
+		);
+	} else {
+		fprintf(
+			ctx->temp_out,
+			"\tld%d:%s %s %s\n",
+			8 << (3 - ((op->type - OP_LD64) >> 1)),
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg]
+		);
+	}
+}
+
+void optimizeStoreOp(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	fprintf(
+		ctx->temp_out,
+		"\tstr%d:%s %s %s\n",
+		8 << (3 - ((op->type - OP_STR64) >> 1)),
+		conditionNames[op->cond_id].data,
+		BRBRegNames[op->dst_reg],
+		BRBRegNames[op->src_reg]
+	);
+}
+
+void optimizeOpVar(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	ctx->frame_size += op->new_var_size;
+	SymbolArray_append(&ctx->vars, op->new_var_size);
+	fprintf(ctx->temp_out, "\tvar .v%d %lld\n", ctx->frame_size, op->new_var_size);
+}
+
+void optimizeOpSetv(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	fprintf(
+		ctx->temp_out,
+		"\tsetv:%s %s .v%lld\n",
+		conditionNames[op->cond_id].data,
+		BRBRegNames[op->dst_reg],
+		op->symbol_id
+	);
+}
+
+void optimizeOpMul(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->src_reg == op->dst_reg && op->value == 1) return;
+	if (op->value == 0 || op->src_reg == ZEROREG_ID) {
+		fprintf(
+			ctx->temp_out, 
+			"\tsetr:%s %s rZ\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg]
+		);
+	} else if (op->value == 1) {
+		fprintf(
+			ctx->temp_out,
+			"\tsetr:%s %s %s\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg]
+		);
+	} else if ((op->value & (op->value - 1)) == 0) {
+		fprintf(
+			ctx->temp_out,
+			"\tshl:%s %s %s %d\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			(int)log2f(op->value)
+		);
+	} else {
+		fprintf(
+			ctx->temp_out,
+			"\tmul:%s %s %s %lld\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			op->value
+		);
+	}
+}
+
+void optimizeOpMulr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->src_reg == ZEROREG_ID || op->src2_reg == ZEROREG_ID) {
+		fprintf(
+			ctx->temp_out,
+			"\tsetr:%s %s rZ\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg]
+		);
+	} else {
+		fprintf(
+			ctx->temp_out, 
+			"\tmulr:%s %s %s %s\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			BRBRegNames[op->src2_reg]
+		);
+	}
+}
+
+void optimizeOpDiv(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->src_reg == op->dst_reg && op->value == 1) return;
+	if (op->src_reg == ZEROREG_ID) {
+		fprintf(
+			ctx->temp_out,
+			"\tsetr:%s %s rZ\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg]
+		);
+	} else if (op->value == 1) {
+		fprintf(
+			ctx->temp_out,
+			"\tsetr:%s %s %s\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg]
+		);
+	} else if ((op->value & (op->value - 1)) == 0) {
+		fprintf(
+			ctx->temp_out,
+			"\tshr:%s %s %s %d\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			(int)log2f(op->value)
+		);
+	} else {
+		fprintf(
+			ctx->temp_out,
+			"\tdiv:%s %s %s %lld\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			op->value
+		);
+	}
+}
+
+void optimizeOpDivr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->src_reg == ZEROREG_ID) {
+		fprintf(
+			ctx->temp_out,
+			"\tsetr:%s %s rZ\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg]
+		);
+	} else {
+		fprintf(
+			ctx->temp_out,
+			"\tdivr:%s %s %s %s\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			BRBRegNames[op->src2_reg]
+		);
+	}
+}
+
+void optimizeOpDivs(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID || op->src_reg == op->dst_reg && op->value == 1) return;
+	if (op->src_reg == ZEROREG_ID) {
+		fprintf(
+			ctx->temp_out,
+			"\tsetr:%s %s rZ\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg]
+		);
+	} else if (op->value == 1) {
+		fprintf(
+			ctx->temp_out,
+			"\tsetr:%s %s %s\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg]
+		);
+	} else if ((op->value & (op->value - 1)) == 0) {
+		fprintf(
+			ctx->temp_out,
+			"\tshrs:%s %s %s %d\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			(int)log2f(op->value)
+		);
+	} else {
+		fprintf(
+			ctx->temp_out,
+			"\tdivs:%s %s %s %lld\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			op->value
+		);
+	}
+}
+
+void optimizeOpDivsr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->src_reg == ZEROREG_ID) {
+		fprintf(
+			ctx->temp_out,
+			"\tsetr:%s %s rZ\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg]
+		);
+	} else {
+		fprintf(
+			ctx->temp_out,
+			"\tdivsr:%s %s %s %s\n",
+			conditionNames[op->cond_id].data,
+			BRBRegNames[op->dst_reg],
+			BRBRegNames[op->src_reg],
+			BRBRegNames[op->src2_reg]
+		);
+	}
+}
+
+void optimizeOpExtproc(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\textproc %s\n", op->mark_name);
+}
+
+void optimizeOpLdv(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	fprintf(
+		ctx->temp_out,
+		"\tldv%s:%s %s .v%lld\n",
+		op->type == OP_LDVS ? "s" : "",
+		conditionNames[op->cond_id].data,
+		BRBRegNames[op->dst_reg],
+		op->symbol_id
+	);
+}
+
+void optimizeOpStrv(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(
+		ctx->temp_out,
+		"\tstrv:%s .v%lld %s\n",
+		conditionNames[op->cond_id].data,
+		op->symbol_id,
+		BRBRegNames[op->dst_reg]
+	);
+}
+
+void optimizeOpPopv(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\tpopv %s\n", BRBRegNames[op->dst_reg]);
+	ctx->vars.length -= 1;
+}
+
+void optimizeOpPushv(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	ctx->frame_size += op->var_size;
+	SymbolArray_append(&ctx->vars, op->var_size);
+	fprintf(ctx->temp_out, "\tpushv .v%d %hhu %s\n", ctx->frame_size, op->var_size, BRBRegNames[op->dst_reg]);
+}
+
+void optimizeOpAtf(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\t@f \"%s\"\n", op->mark_name);
+}
+
+void optimizeOpAtl(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	fprintf(ctx->temp_out, "\t@l %lld\n", op->symbol_id);
+}
+
+void optimizeOpSetc(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	fprintf(ctx->temp_out, "\tsetc:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], conditionNames[op->cond_arg].data);
+}
+
+void optimizeOpDelnv(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	ctx->frame_size -= op->symbol_id;
+	int n_vars = 0;
+	for (int64_t i = op->symbol_id; i > 0; i -= ctx->vars.data[--ctx->vars.length]) {
+		n_vars += 1;
+	}
+	fprintf(ctx->temp_out, "\tdelnv %d\n", n_vars);
+}
+
+void optimizeSignExtendOp(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	fprintf(
+		ctx->temp_out,
+		"\tsx%d:%s %s %s\n",
+		4 << (3 - op->type + OP_SX32),
+		conditionNames[op->cond_id].data,
+		BRBRegNames[op->dst_reg],
+		BRBRegNames[op->src_reg]
+	);
+}
+
+void optimizeOpMod(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->value <= 1 || op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else if ((int64_t)op->value == -1) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
+	} else if ((op->value & (op->value - 1)) == 0) {
+		fprintf(ctx->temp_out, "\tand:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value - 1);
+	} else {
+		fprintf(ctx->temp_out, "\tmod:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpModr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->src_reg == ZEROREG_ID || op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tmodr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
+	}
+}
+
+void optimizeOpMods(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (inRange((int64_t)op->value, -1, 2) || op->src_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else if ((op->value & (op->value - 1)) == 0) {
+		fprintf(ctx->temp_out, "\tand:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value - 1);
+	} else {
+		fprintf(ctx->temp_out, "\tmods:%s %s %s %lld\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], op->value);
+	}
+}
+
+void optimizeOpModsr(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (op->dst_reg == ZEROREG_ID) return;
+	if (op->src_reg == ZEROREG_ID || op->src2_reg == ZEROREG_ID) {
+		fprintf(ctx->temp_out, "\tsetr:%s %s rZ\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg]);
+	} else {
+		fprintf(ctx->temp_out, "\tmodsr:%s %s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg], BRBRegNames[op->src2_reg]);
 	}
 }
 
@@ -1336,22 +1712,150 @@ static Optimizer optimizers[N_OPS] = {
 	[OP_CMP] = optimizeOpCmp,
 	[OP_CMPR] = optimizeOpCmpr,
 	[OP_AND] = optimizeOpAnd,
-	[OP_ANDR] = optimizeOpAndr
+	[OP_ANDR] = optimizeOpAndr,
+	[OP_OR] = optimizeOpOr,
+	[OP_ORR] = optimizeOpOrr,
+	[OP_NOT] = optimizeOpNot,
+	[OP_XOR] = optimizeOpXor,
+	[OP_XORR] = optimizeOpXorr,
+	[OP_SHL] = optimizeOpShl,
+	[OP_SHLR] = optimizeOpShlr,
+	[OP_SHR] = optimizeOpShr,
+	[OP_SHRR] = optimizeOpShrr,
+	[OP_SHRS] = optimizeOpShrs,
+	[OP_SHRSR] = optimizeOpShrsr,
+	[OP_PROC] = optimizeOpProc,
+	[OP_CALL] = optimizeOpCall,
+	[OP_RET] = optimizeOpRet,
+	[OP_ENDPROC] = optimizeOpEndproc,
+	[OP_LD64] = optimizeLoadOp,
+	[OP_STR64] = optimizeStoreOp,
+	[OP_LD32] = optimizeLoadOp,
+	[OP_STR32] = optimizeStoreOp,
+	[OP_LD16] = optimizeLoadOp,
+	[OP_STR16] = optimizeStoreOp,
+	[OP_LD8] = optimizeLoadOp,
+	[OP_STR8] = optimizeStoreOp,
+	[OP_VAR] = optimizeOpVar,
+	[OP_SETV] = optimizeOpSetv,
+	[OP_MUL] = optimizeOpMul,
+	[OP_MULR] = optimizeOpMulr,
+	[OP_DIV] = optimizeOpDiv,
+	[OP_DIVR] = optimizeOpDivr,
+	[OP_DIVS] = optimizeOpDivs,
+	[OP_DIVSR] = optimizeOpDivsr,
+	[OP_EXTPROC] = optimizeOpExtproc,
+	[OP_LDV] = optimizeOpLdv,
+	[OP_STRV] = optimizeOpStrv,
+	[OP_POPV] = optimizeOpPopv,
+	[OP_PUSHV] = optimizeOpPushv,
+	[OP_ATF] = optimizeOpAtf,
+	[OP_ATL] = optimizeOpAtl,
+	[OP_SETC] = optimizeOpSetc,
+	[OP_DELNV] = optimizeOpDelnv,
+	[OP_LD64S] = optimizeLoadOp,
+	[OP_LD32S] = optimizeLoadOp,
+	[OP_LD16S] = optimizeStoreOp,
+	[OP_LD8S] = optimizeLoadOp,
+	[OP_LDVS] = optimizeOpLdv,
+	[OP_SX32] = optimizeSignExtendOp,
+	[OP_SX16] = optimizeSignExtendOp,
+	[OP_SX8] = optimizeSignExtendOp,
+	[OP_MOD] = optimizeOpMod,
+	[OP_MODR] = optimizeOpModr,
+	[OP_MODS] = optimizeOpMods,
+	[OP_MODSR] = optimizeOpModsr
 };
 
-void optimizeModule(Module* module)
+void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level)
 {
-	assert(false);
+	assert(level <= 1, "invalid optimization level");
+	if (level == 0) return;
 	sbuf temp_buf = {0};
 
 	OptimizerCtx ctx = {
 		.used_db = SymbolArray_new(-module->datablocks.length),
 		.used_mb = SymbolArray_new(-module->memblocks.length),
 		.vars = SymbolArray_new(0),
-		.temp_out = open_memstream(&temp_buf.data, (size_t*)&temp_buf.length),
-		.proc_start = NULL
+		.frame_size = 0,
+		.temp_out = open_memstream(&temp_buf.data, (size_t*)&temp_buf.length)
 	};
 
+	if (module->submodules.length) {
+		fprintf(ctx.temp_out, "load { ");
+		for (int i = 0; i < module->submodules.length; ++i) {
+			fprintf(ctx.temp_out, "%s ", module->submodules.data[i]);
+		}
+		fprintf(ctx.temp_out, "}\n");
+	}
+
+	if (module->execblock.length) {
+		fprintf(ctx.temp_out, "exec {\n");
+		for (Op* op = module->execblock.data + module->_root_eb_start; op->type != OP_END; ++op) {
+			optimizers[op->type](module, &ctx, op);
+		}
+		fprintf(ctx.temp_out, "}\n");
+	}
+
+	if (ctx.used_db.length) {
+		fprintf(ctx.temp_out, "data {\n");
+		for (int i = 0; i < ctx.used_db.length; ++i) {
+			DataBlock* block = module->datablocks.data + ctx.used_db.data[i];
+			fprintf(ctx.temp_out, "\t%s { ", block->name);
+			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
+				switch (piece->type) {
+					case PIECE_BYTES:
+					case PIECE_TEXT:
+						fprintf(ctx.temp_out, "\"%.*s\" ", unpack(piece->data));
+						break;
+					case PIECE_INT16:
+						fprintf(ctx.temp_out, ".int16 %lld ", piece->integer);
+						break;
+					case PIECE_INT32:
+						fprintf(ctx.temp_out, ".int32 %lld ", piece->integer);
+						break;
+					case PIECE_INT64:
+						fprintf(ctx.temp_out, ".int64 %lld ", piece->integer);
+						break;
+					case PIECE_NONE:
+					case N_PIECE_TYPES:
+					default:
+						assert(false, "unexpected data piece type");
+				}
+			}
+			fprintf(ctx.temp_out, "}\n");
+		}
+		fprintf(ctx.temp_out, "}\n");
+	}
+
+	if (ctx.used_mb.length) {
+		fprintf(ctx.temp_out, "memory {\n");
+		for (int i = 0; i < ctx.used_mb.length; ++i) {
+			MemBlock* block = module->memblocks.data + ctx.used_mb.data[i];
+			fprintf(ctx.temp_out, "\t%s %lld\n", block->name, block->size);
+		}
+		fprintf(ctx.temp_out, "}\n");
+	}
+
+	DataBlockArray_clear(&module->datablocks);
+	MemBlockArray_clear(&module->memblocks);
+	OpArray_clear(&module->execblock);
+	strArray_clear(&module->submodules);
+
+	fclose(ctx.temp_out);
+	if (output)
+		fwrite(temp_buf.data, temp_buf.length, 1, output);
+	ctx.temp_out = fmemopen(temp_buf.data, temp_buf.length, "r");
+
+	VBRBError err = compileModule(ctx.temp_out, "<optimizer output>", module, search_paths, module->entry_opid >= 0 ? BRB_EXECUTABLE : 0);
+	if (err.code) {
+		eprintf("unexpected internal error during optimization:\n");
+		printVBRBError(stderr, err);
+		abort();
+	}
+
+	SymbolArray_clear(&ctx.used_db);
+	SymbolArray_clear(&ctx.used_mb);
 }
 
 sbuf assembleDataBlock(DataBlock block)

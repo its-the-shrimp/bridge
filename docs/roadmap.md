@@ -19,6 +19,6 @@
 - ~BRP: character literals~
 - ~BRP: function-like macros~
 - ~Array initializers~
-- Bytecode optimization
-- Proper documentation
+- ~Bytecode optimization: level 1~
 - `public` functions and globals
+- Bytecode optimization: level 2~

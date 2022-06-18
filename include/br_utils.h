@@ -33,6 +33,18 @@ void* reverseByteOrder(void* src, long length);
 #define CC64(src) ((long)CC32((char*)((void*)src + 4)) << 32 | CC32(src))
 #endif // IS_BIG_ENDIAN
 
+#define _s(x) #x
+
+#define _assert(expr, msg, file, line, f_name) { \
+    if (!(expr)) { \
+        fprintf(stderr, "Asssertion failed at "_s(file)":"_s(line)", in function "_s(f_name)":\n\t%s\n", (msg)); \
+        abort(); \
+    } \
+}
+
+#define assert(expr, msg) _assert(expr, msg, __FILE__, __LINE__, __func__)
+#define static_assert _Static_assert
+
 #endif // _BR_UTILS_H
 
 #if defined(BR_UTILS_IMPLEMENTATION) && !defined(_BR_UTILS_IMPL_LOCK)

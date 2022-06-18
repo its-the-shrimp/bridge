@@ -6,7 +6,6 @@
 #include <sbuf.h>
 #include <datasets.h>
 #include <errno.h>
-#include <assert.h>
 #include <sys/cdefs.h>
 
 
@@ -1049,7 +1048,7 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 			fprintf(fd, "unclosed string literal ");
 			break;
 		case BRP_ERR_NO_MEMORY: 
-			fprintf(fd, "memory allocation failure ");
+			fprintf(fd, "memory allocation failure (reason: %s) ", strerror(errno));
 			break;
 		case BRP_ERR_FILE_NOT_FOUND:
 			fprintf(fd, "could not open file `%.*s` (reason: %s) ", unpack(obj->error_symbol), strerror(errno));

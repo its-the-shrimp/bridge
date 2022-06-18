@@ -348,25 +348,25 @@ static inline void initExpr(Expr* expr)
 
 static inline ExprChain* getSubexprs(Expr* expr)
 {
-    assert(expr_arity_table[expr->type] == VARIADIC);
+    assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get subexpressions of a non-variadic expression");
     return (ExprChain*)expr;
 }
 
 static inline Expr* addSubexpr(Expr* expr, Expr new)
 {
-    assert(expr_arity_table[expr->type] == VARIADIC);
+    assert(expr_arity_table[expr->type] == VARIADIC, "attempted to add a subexpression to a non-varaidic expression");
     return ExprChain_append(getSubexprs(expr), new);
 }
 
 static inline Expr* getSubexpr(Expr* expr, int id)
 {
-    assert(expr_arity_table[expr->type] == VARIADIC);
+    assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get a subexpression of a non-variadic expression");
     return ExprChain_getref(*getSubexprs(expr), id);
 }
 
 static inline int getSubexprsCount(Expr* expr)
 {
-    assert(expr_arity_table[expr->type] == VARIADIC);
+    assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get the amount of subexpressions of a non-variadic expression");
     return ExprChain_length(*getSubexprs(expr));
 }
 
@@ -940,7 +940,7 @@ bool isExprEvaluatable(ExprType type) {
         [EXPR_DOWHILE   ] = false,
         [EXPR_NEW_VAR   ] = false
     };
-    assert(inRange(type, 0, N_EXPR_TYPES));
+    assert(inRange(type, 0, N_EXPR_TYPES), "unknown expression type was previded");
     return expr_evaluatability_info[type];
 }
 
@@ -1043,9 +1043,9 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
         case EXPR_REF:
             fputs("REF -> `", dst);
             if (expr.arg1) {
-                assert(expr.arg1->type == EXPR_NEW_VAR);
-                    fprintType(dst, *getSubexpr(expr.arg1, 1)->var_type);
-                    fprintf(dst, " %s;", getSubexpr(expr.arg1, 0)->name);
+                assert(expr.arg1->type == EXPR_NEW_VAR, "expected the variable chain to have an expression of type EXPR_NEW_VAR in it");
+                fprintType(dst, *getSubexpr(expr.arg1, 1)->var_type);
+                fprintf(dst, " %s;", getSubexpr(expr.arg1, 0)->name);
             } else fputs("NULL", dst);
             fputs("`\n", dst);
             break;
@@ -1232,9 +1232,9 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
 Expr* getVarDecl(Expr* block, char* name)
 {
     for (; block; block = block->block) {
-        assert(block->type == EXPR_BLOCK);
+        assert(block->type == EXPR_BLOCK, "`block` argument is expected to be an expression of type EXPR_BLOCK");
         for (Expr* expr = getSubexpr(block, 0)->arg1; expr; expr = getSubexpr(expr, 2)->arg1) {
-            assert(expr->type == EXPR_NEW_VAR);
+            assert(expr->type == EXPR_NEW_VAR, "expected the variable chain to have an expression of type EXPR_NEW_VAR in it");
             if (sbufeq(name, getSubexpr(expr, 0)->name)) return expr;
         }
     }
@@ -1264,7 +1264,7 @@ int64_t getIntLiteral(Expr* expr)
         if (expr->var_type->kind == KIND_BOOL) return getIntLiteral(expr->arg1) != 0;
         return getIntLiteral(expr->arg1) & byteMask(getTypeSize(*expr->var_type));
     }
-    assert(false);
+    assert(false, "attempted to get an integer literal from an expression which does not produce an integer literal");
 }
 
 static void wrapExpr(Expr* expr, ExprType new_expr_type, Expr arg2)
@@ -3922,12 +3922,12 @@ int main(int argc, char* argv[])
     TYPE_STR_LITERAL.base = &str_lit_base;
 
     bool run_program = false, silent = false;
-    int debug_opts = 0;
+    unsigned int optimization_level = 1, debug_opts = 0;
     char *input_path = NULL, *brb_output_path = NULL, *vbrb_output_path = NULL;
-    for (int i = 1; i < argc; i++) {
+    for (int i = 1; i < argc; ++i) {
         bool go_on = false;
         if (argv[i][0] == '-') {
-			for (argv[i]++; *argv[i]; argv[i]++) {
+			for (++argv[i]; *argv[i]; ++argv[i]) {
 				if (go_on) { go_on = false; break; }
                 switch (*argv[i]) {
                     case 'h':
@@ -3960,6 +3960,13 @@ int main(int argc, char* argv[])
 						brb_output_path = argv[i];
 						go_on = true;
 						break;
+                    case 'O':
+                        if (!inRange(argv[i][1], '0', '2')) {
+                            eprintf("error: invalid option `-O%c`; expected either `-O0` or `-O1`\n", argv[i][1]);
+                            exit(1);
+                        }
+                        optimization_level = *(++argv[i]) - '0';
+                        break;
                     case '-':
                         argv[i]++;
                         if (sbufeq(argv[i], "vbrb-output")) {
@@ -4138,6 +4145,17 @@ int main(int argc, char* argv[])
         eputs("BRidge assembler failure; assembler output:\n\t");
         printVBRBError(stderr, vbrb_err);
         return 1;
+    }
+    if (optimization_level) {
+        fclose(vbrb_output);
+        vbrb_output = NULL;
+        if (vbrb_output_path) {
+            if (!(vbrb_output = fopen(vbrb_output_path, "w"))) {
+                eprintf("error: could not open file `%s` (reason: %s)\n", vbrb_output_path, strerror(errno));
+                return 1;
+            }
+        }
+        optimizeModule(&res, search_paths, vbrb_output, optimization_level);
     }
     if (!silent) printf("%s -> %s in %.3f ms\n", input_path, vbrb_visual_output_path, endTimer());
 

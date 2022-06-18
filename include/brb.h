@@ -146,20 +146,20 @@ const static unsigned short op_flags[N_OPS] = {
 	[OP_DIVR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
 	[OP_DIVS] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
 	[OP_DIVSR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
-	[OP_EXTPROC] = OPF_USES_MARK_NAME, // uses Op::mark_name
-	[OP_LDV] = OPF_USES_SRC_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::src_reg, Op::symbol_id and Op::var_size
-	[OP_STRV] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::dst_reg, Op::symbol_id and Op::var_size
+	[OP_EXTPROC] = OPF_USES_MARK_NAME | OPF_UNCONDITIONAL, // uses Op::mark_name
+	[OP_LDV] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::src_reg, Op::symbol_id and Op::var_size
+	[OP_STRV] = OPF_USES_SRC_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::dst_reg, Op::symbol_id and Op::var_size
 	[OP_POPV] = OPF_USES_DST_REG | OPF_USES_VAR_SIZE | OPF_UNCONDITIONAL, // uses Op::dst_reg, Op::var_size
 	[OP_PUSHV] = OPF_USES_SRC_REG | OPF_USES_VAR_SIZE | OPF_UNCONDITIONAL, // uses Op::src_reg and Op::var_size
 	[OP_ATF] = OPF_USES_MARK_NAME | OPF_UNCONDITIONAL, // uses Op::mark_name
 	[OP_ATL] = OPF_USES_SYMBOL_ID | OPF_UNCONDITIONAL, // uses Op::symbol_id
-	[OP_SETC] = OPF_USES_COND_ARG | OPF_USES_DST_REG, // uses Op::cond_arg and Op::dst_reg
+	[OP_SETC] = OPF_USES_DST_REG | OPF_USES_COND_ARG | OPF_USES_DST_REG, // uses Op::cond_arg and Op::dst_reg
 	[OP_DELNV] = OPF_USES_SYMBOL_ID | OPF_UNCONDITIONAL, // uses Op::symbol_id
 	[OP_LD64S] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
 	[OP_LD32S] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
 	[OP_LD16S] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
 	[OP_LD8S] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
-	[OP_LDVS] = OPF_USES_SRC_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::src_reg, Op::symbol_id and Op::var_size
+	[OP_LDVS] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::src_reg, Op::symbol_id and Op::var_size
 	[OP_SX32] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
 	[OP_SX16] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
 	[OP_SX8] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
@@ -550,6 +550,7 @@ Module* mergeModule(Module* src, Module* dst);
 void resolveModule(Module* dst, bool for_exec);
 BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);
+void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level);
 void printLoadError(BRBLoadError err);
 void initExecEnv(ExecEnv* env, Module* module, char** args);
 bool addDefaultCallback(ExecEnv* env, ExecCallback callback);
