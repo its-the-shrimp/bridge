@@ -44,16 +44,18 @@ static char _CHARSET[UINT8_MAX + 1] = {
 #define _STATIC_IF(condition, on_true, on_false) _Generic(&(char[(condition) + 1]){0}, char(*)[2]: (on_true), char(*)[1]: (on_false))
 
 #define SBUF(x) _Generic((x), \
-    sbuf: (x), \
-    char*: _STATIC_IF(IS_CSTR(_FORCECAST((x), char*)), fromcstr(_FORCECAST((x), char*)), fromstr(_FORCECAST((x), char*))), \
-    int: ((sbuf){ .data = &_CHARSET[_FORCECAST((x), int)], .length = 1 }), \
-    char: ((sbuf){ .data = &_CHARSET[_FORCECAST((x), int)], .length = 1 }) \
+	sbuf: (x), \
+	char*: _STATIC_IF(IS_CSTR(_FORCECAST((x), char*)), fromcstr(_FORCECAST((x), char*)), fromstr(_FORCECAST((x), char*))), \
+	const char*: _STATIC_IF(IS_CSTR(_FORCECAST((x), char*)), fromcstr(_FORCECAST((x), char*)), fromstr(_FORCECAST((x), char*))), \
+	int: ((sbuf){ .data = &_CHARSET[_FORCECAST((x), int)], .length = 1 }), \
+	char: ((sbuf){ .data = &_CHARSET[_FORCECAST((x), int)], .length = 1 }) \
 )
 
 #define CSBUF(x) _Generic((x), \
-    sbuf: (x), \
-    char*: fromcstr(_FORCECAST((x), char*)), \
-    int: ((sbuf){ .data = &_CHARSET[_FORCECAST((x), int)], .length = 1 }) \
+	sbuf: (x), \
+	char*: fromcstr(_FORCECAST((x), char*)), \
+	const char*: fromcstr(_FORCECAST((x), char*)), \
+	int: ((sbuf){ .data = &_CHARSET[_FORCECAST((x), int)], .length = 1 }) \
 )
 
 #define BYTEFMT_OCT         0b00000001

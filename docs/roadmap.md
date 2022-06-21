@@ -21,4 +21,5 @@
 - ~Array initializers~
 - ~Bytecode optimization: level 1~
 - `public` functions and globals
-- Bytecode optimization: level 2~
+- Classes
+- Bytecode optimization: level 2

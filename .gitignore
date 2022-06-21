@@ -9,3 +9,4 @@ a.out
 test*
 __pycache__
 *.pyc
+*.swp

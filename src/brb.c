@@ -8,8 +8,9 @@
 defArray(Op);
 defArray(DataBlock);
 defArray(MemBlock);
-defArray(str);
 defArray(DataPiece);
+defArray(str);
+defArray(Submodule);
 
 typedef struct {
 	Module* src;
@@ -30,22 +31,46 @@ typedef struct {
 void writeInt(FILE* fd, int64_t x, uint8_t hb)
 {
 	if (x == (int64_t)(x & 0xFF)) {
-		if (x < 4 || inRange(x, 12, 16)) {
+		if (x < 8) {
 			fputc(x | hb << 4, fd);
 		} else {
-			fputc((x < 0 ? 8 : 4) | hb << 4, fd);
+			fputc((x < 0 ? 12 : 8) | hb << 4, fd);
 			fputc((char)(x < 0 ? ~x : x), fd);
 		}
 	} else if (x == (int64_t)(x & 0xFFFF)) {
-		fputc((x < 0 ? 9 : 5) | hb << 4, fd);
+		fputc((x < 0 ? 13 : 9) | hb << 4, fd);
 		int16_t x16 = x < 0 ? ~x : x;
 		fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
 	} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
-		fputc((x < 0 ? 10 : 6) | hb << 4, fd);
+		fputc((x < 0 ? 14 : 10) | hb << 4, fd);
 		int32_t x32 = x < 0 ? ~x : x;
 		fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 	} else {
-		fputc((x < 0 ? 11 : 7) | hb << 4, fd);
+		fputc((x < 0 ? 15 : 11) | hb << 4, fd);
+		int64_t x64 = x < 0 ? ~x : x;
+		fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
+	}
+}
+
+void writeInt_swapped(FILE* fd, int64_t x, uint8_t hb)
+{
+	if (x == (int64_t)(x & 0xFF)) {
+		if (x < 8) {
+			fputc(hb | x << 4, fd);
+		} else {
+			fputc((x < 0 ? 12 : 8) << 4 | hb, fd);
+			fputc((char)(x < 0 ? ~x : x), fd);
+		}
+	} else if (x == (int64_t)(x & 0xFFFF)) {
+		fputc((x < 0 ? 13 : 9) << 4 | hb, fd);
+		int16_t x16 = x < 0 ? ~x : x;
+		fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
+	} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
+		fputc((x < 0 ? 14 : 10) << 4 | hb, fd);
+		int32_t x32 = x < 0 ? ~x : x;
+		fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
+	} else {
+		fputc((x < 0 ? 15 : 11) << 4 | hb, fd);
 		int64_t x64 = x < 0 ? ~x : x;
 		fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 	}
@@ -56,16 +81,125 @@ void write2HalfBytes(FILE* fd, uint8_t hb1, uint8_t hb2)
 	fputc(((hb1 << 4) | hb2) & 255, fd);
 }
 
-void writeName(ModuleWriter* writer, char* name, uint8_t hb)
+void write2Ints(FILE* fd, int64_t x, int64_t y)
 {
-	for (long i = 0; i < writer->consts.length; i++) {
-		if (sbufeq(name, writer->consts.data[i])) {
-			writeInt(writer->dst, i, hb);
-			return;
+	if (x < 8) {
+		if (y < 8) {
+			fputc(x << 4 | y, fd);
+		} else {
+			writeInt(fd, y, x);
+		}
+	} else {
+		if (y < 8) {
+			writeInt_swapped(fd, x, y);
+		} else {
+			if (x == (int64_t)(x & 0xFF)) {
+				if (y == (int64_t)(y & 0xFF)) {
+					fputc((x < 0 ? 12 : 8) << 4 | (y < 0 ? 12 : 8), fd);
+					fputc((char)(x < 0 ? ~x : x), fd);
+					fputc((char)(y < 0 ? ~y : y), fd);
+				} else if (y == (int64_t)(y & 0xFFFF)) {
+					fputc((x < 0 ? 12 : 8) << 4 | (y < 0 ? 13 : 9), fd);
+					int16_t y16 = y < 0 ? ~y : y;
+					fputc((char)(x < 0 ? ~x : x), fd);
+					fwrite(BRByteOrder(&y16, 2), 2, 1, fd);
+				} else if (y == (int64_t)(y & 0xFFFFFFFFLL)) {
+					fputc((x < 0 ? 12 : 8) << 4 | (y < 0 ? 14 : 10), fd);
+					int32_t y32 = y < 0 ? ~y : y;
+					fputc((char)(x < 0 ? ~x : x), fd);
+					fwrite(BRByteOrder(&y32, 4), 4, 1, fd);
+				} else {
+					fputc((x < 0 ? 12 : 8) << 4 | (y < 0 ? 15 : 11), fd);
+					int64_t y64 = y < 0 ? ~y : y;
+					fputc((char)(x < 0 ? ~x : x), fd);
+					fwrite(BRByteOrder(&y64, 8), 8, 1, fd);
+				}
+			} else if (x == (int64_t)(x & 0xFFFF)) {
+				int16_t x16 = x < 0 ? ~x : x;
+				if (y == (int64_t)(y & 0xFF)) {
+					fputc((x < 0 ? 13 : 9) << 4 | (y < 0 ? 12 : 8), fd);
+					fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
+					fputc((char)(y < 0 ? ~y : y), fd);
+				} else if (y == (int64_t)(y & 0xFFFF)) {
+					fputc((x < 0 ? 13 : 9) << 4 | (y < 0 ? 13 : 9), fd);
+					int16_t y16 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
+					fwrite(BRByteOrder(&y16, 2), 2, 1, fd);
+				} else if (y == (int64_t)(y & 0xFFFFFFFFLL)) {
+					fputc((x < 0 ? 13 : 9) << 4 | (y < 0 ? 14 : 10), fd);
+					int32_t y32 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
+					fwrite(BRByteOrder(&y32, 4), 4, 1, fd);
+				} else {
+					fputc((x < 0 ? 13 : 9) << 4 | (y < 0 ? 15 : 11), fd);
+					int64_t y64 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
+					fwrite(BRByteOrder(&y64, 8), 8, 1, fd);
+				}
+			} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
+				int32_t x32 = x < 0 ? ~x : x;
+				if (y == (int64_t)(y & 0xFF)) {
+					fputc((x < 0 ? 14 : 10) << 4 | (y < 0 ? 12 : 8), fd);
+					fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
+					fputc((char)(y < 0 ? ~y : y), fd);
+				} else if (y == (int64_t)(y & 0xFFFF)) {
+					fputc((x < 0 ? 14 : 10) << 4 | (y < 0 ? 13 : 9), fd);
+					int16_t y16 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
+					fwrite(BRByteOrder(&y16, 2), 2, 1, fd);
+				} else if (y == (int64_t)(y & 0xFFFFFFFFLL)) {
+					fputc((x < 0 ? 14 : 10) << 4 | (y < 0 ? 14 : 10), fd);
+					int32_t y32 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
+					fwrite(BRByteOrder(&y32, 4), 4, 1, fd);
+				} else {
+					fputc((x < 0 ? 14 : 10) << 4 | (y < 0 ? 15 : 11), fd);
+					int64_t y64 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
+					fwrite(BRByteOrder(&y64, 8), 8, 1, fd);
+				}
+			} else {
+				int64_t x64 = x < 0 ? ~x : x;
+				fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
+				if (y == (int64_t)(y & 0xFF)) {
+					fputc((x < 0 ? 15 : 11) << 4 | (y < 0 ? 12 : 8), fd);
+					fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
+					fputc((char)(y < 0 ? ~y : y), fd);
+				} else if (y == (int64_t)(y & 0xFFFF)) {
+					fputc((x < 0 ? 15 : 11) << 4 | (y < 0 ? 13 : 9), fd);
+					int16_t y16 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
+					fwrite(BRByteOrder(&y16, 2), 2, 1, fd);
+				} else if (y == (int64_t)(y & 0xFFFFFFFFLL)) {
+					fputc((x < 0 ? 15 : 11) << 4 | (y < 0 ? 14 : 10), fd);
+					int32_t y32 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
+					fwrite(BRByteOrder(&y32, 4), 4, 1, fd);
+				} else {
+					fputc((x < 0 ? 15 : 11) << 4 | (y < 0 ? 15 : 11), fd);
+					int64_t y64 = y < 0 ? ~y : y;
+					fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
+					fwrite(BRByteOrder(&y64, 8), 8, 1, fd);
+				}
+			}
 		}
 	}
-	writeInt(writer->dst, writer->consts.length, hb);
+}
+
+int getNameId(ModuleWriter* writer, char* name)
+{
+	for (int i = 0; i < writer->consts.length; i++) {
+		if (sbufeq(name, writer->consts.data[i])) {
+			return i;
+		}
+	}
 	strArray_append(&writer->consts, name);
+	return writer->consts.length - 1;
+}
+
+void writeName(ModuleWriter* writer, char* name, uint8_t hb)
+{
+	writeInt(writer->dst, getNameId(writer, name), hb);
 }
 
 void writeDataBlock(ModuleWriter* writer, DataBlock block)
@@ -127,11 +261,13 @@ void writeRegSymbolIdOp(ModuleWriter* writer, Op op)
 
 void writeOpSetd(ModuleWriter* writer, Op op)
 {
+	writeInt(writer->dst, op.module_id, 0);
 	writeName(writer, writer->src->datablocks.data[op.symbol_id].name, op.dst_reg);
 }
 
 void writeOpSetm(ModuleWriter* writer, Op op)
 {
+	writeInt(writer->dst, op.module_id, 0);
 	writeName(writer, writer->src->memblocks.data[op.symbol_id].name, op.dst_reg);
 }
 
@@ -147,7 +283,7 @@ void writeOpGoto(ModuleWriter* writer, Op op)
 
 void writeOpCall(ModuleWriter* writer, Op op)
 {
-	writeName(writer, writer->src->execblock.data[op.symbol_id].mark_name, 0);
+	write2Ints(writer->dst, op.module_id, getNameId(writer, writer->src->execblock.data[op.symbol_id].mark_name));
 }
 
 void writeOpCmp(ModuleWriter* writer, Op op)
@@ -312,24 +448,41 @@ void writeModule(Module* src, FILE* dst)
 	writeInt(dst, src->stack_size == DEFAULT_STACK_SIZE ? 0 : src->stack_size, 0); // dumping stack size
 	src->stack_size *= 1024;
 // writing dependencies
-	writeInt(dst, src->submodules.length, 0);
-	array_foreach(str, name, src->submodules,
-		fputs(name, dst);
-		fputc('\n', dst);
-	);
+	int n_dependencies = 0;
+	for (
+		Submodule* submodule = src->submodules.data;
+		submodule - src->submodules.data < src->submodules.length;
+		++submodule
+	) {
+		if (submodule->direct && submodule - src->submodules.data < src->submodules.length - 1) n_dependencies += 1;
+	}
+	writeInt(dst, n_dependencies, 0);
+	for (
+		Submodule* submodule = src->submodules.data;
+		submodule - src->submodules.data < src->submodules.length;
+		++submodule
+	) {
+		if (submodule->direct && submodule - src->submodules.data < src->submodules.length - 1) {
+			fputs(submodule->name, dst);
+			fputc('\n', dst);
+		}
+	}
+
+	Submodule* root = arrayhead(src->submodules);
+	
 //  dumping data blocks
-	writeInt(dst, src->datablocks.length - src->_root_db_start, 0);
-	for (int i = src->_root_db_start; i < src->datablocks.length; i++) {
+	writeInt(dst, root->ds_length, 0);
+	for (int i = root->ds_offset; i < src->datablocks.length; i++) {
 		writeDataBlock(&writer, src->datablocks.data[i]);
 	}
 //  dumping memory blocks
-	writeInt(dst, src->memblocks.length - src->_root_mb_start, 0);
-	for (int i = src->_root_mb_start; i < src->memblocks.length; i++) {
+	writeInt(dst, root->ms_length, 0);
+	for (int i = root->ms_offset; i < src->memblocks.length; i++) {
 		writeMemoryBlock(&writer, src->memblocks.data[i].name, src->memblocks.data[i].size);
 	}
 //  dumping operations
-	writeInt(dst, src->execblock.length - src->_root_eb_start, 0);
-	for (int i = src->_root_eb_start; i < src->execblock.length; i++) {
+	writeInt(dst, root->es_length, 0);
+	for (int i = root->es_offset; i < src->execblock.length; i++) {
 		writeOp(&writer, src->execblock.data[i]);
 	}
 //  dumping constants pool
@@ -378,14 +531,14 @@ int64_t loadInt(FILE* fd, long* n_fetched)
 {
 	register uint8_t size = loadInt8(fd, n_fetched) & 0b1111;
 	switch (size) {
-		case 4: return loadInt8(fd, n_fetched);
-		case 5: return loadInt16(fd, n_fetched);
-		case 6: return loadInt32(fd, n_fetched);
-		case 7: return loadInt64(fd, n_fetched);
-		case 8: return ~(int64_t)loadInt8(fd, n_fetched);
-		case 9: return ~(int64_t)loadInt16(fd, n_fetched);
-		case 10: return ~(int64_t)loadInt32(fd, n_fetched);
-		case 11: return ~(int64_t)loadInt64(fd, n_fetched);
+		case 8: return loadInt8(fd, n_fetched);
+		case 9: return loadInt16(fd, n_fetched);
+		case 10: return loadInt32(fd, n_fetched);
+		case 11: return loadInt64(fd, n_fetched);
+		case 12: return ~(int64_t)loadInt8(fd, n_fetched);
+		case 13: return ~(int64_t)loadInt16(fd, n_fetched);
+		case 14: return ~(int64_t)loadInt32(fd, n_fetched);
+		case 15: return ~(int64_t)loadInt64(fd, n_fetched);
 		default: return size;
 	}
 }
@@ -410,14 +563,47 @@ void load2HalfBytes(FILE* fd, uint8_t* hb1, uint8_t* hb2, long* n_fetched)
 	*hb2 = res & 0b1111;
 }
 
-int64_t loadName(ModuleLoader* loader, char** dst, long* n_fetched)
+void load2Ints(FILE* fd, int64_t* x, int64_t* y, long* n_fetched)
 {
-	int64_t index = loadInt(loader->src, n_fetched);
-	if (*n_fetched < 0) return -1;
+	uint8_t sizes = loadInt8(fd, n_fetched);
 
+	switch (sizes >> 4) {
+		case 8: *x = loadInt8(fd, n_fetched);
+		case 9: *x = loadInt16(fd, n_fetched);
+		case 10: *x = loadInt32(fd, n_fetched);
+		case 11: *x = loadInt64(fd, n_fetched);
+		case 12: *x = ~(int64_t)loadInt8(fd, n_fetched);
+		case 13: *x = ~(int64_t)loadInt16(fd, n_fetched);
+		case 14: *x = ~(int64_t)loadInt32(fd, n_fetched);
+		case 15: *x = ~(int64_t)loadInt64(fd, n_fetched);
+		default: *x = sizes >> 4;
+	}
+
+	switch (sizes & 0b1111) {
+		case 8: *y = loadInt8(fd, n_fetched);
+		case 9: *y = loadInt16(fd, n_fetched);
+		case 10: *y = loadInt32(fd, n_fetched);
+		case 11: *y = loadInt64(fd, n_fetched);
+		case 12: *y = ~(int64_t)loadInt8(fd, n_fetched);
+		case 13: *y = ~(int64_t)loadInt16(fd, n_fetched);
+		case 14: *y = ~(int64_t)loadInt32(fd, n_fetched);
+		case 15: *y = ~(int64_t)loadInt64(fd, n_fetched);
+		default: *y = sizes & 0b1111;
+	}
+}
+
+int64_t loadNameWith(ModuleLoader* loader, char** dst, int64_t index)
+{
 	*dst = (char*)index;
 	fieldArray_append(&loader->unresolved, dst);
 	return index;
+}
+
+int64_t loadName(ModuleLoader* loader, char** dst, long* n_fetched)
+{
+	register int64_t index = loadInt(loader->src, n_fetched);
+	if (*n_fetched < 0) return -1;
+	return loadNameWith(loader, dst, index);
 }
 
 BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
@@ -525,13 +711,13 @@ void printLoadError(BRBLoadError err)
 			eprintf("BRB loading error: no condition code found\n");
 			break;
 		case BRB_ERR_NO_LOAD_SEGMENT:
-			eprintf("dependencies segment not found\n");
+			eprintf("BRB loading error: dependencies segment not found\n");
 			break;
 		case BRB_ERR_MODULE_NOT_FOUND:
-			eprintf("module `%s` not found in the specified search paths\n", err.module_name);
+			eprintf("BRB loading error: module `%s` not found in the specified search paths\n", err.module_name);
 			break;
 		case BRB_ERR_INVALID_BLOCK:
-			eprintf("invalid data block structure\n");
+			eprintf("BRB loading error: invalid data block structure\n");
 			break;
 		case N_BRB_ERRORS:
 			eprintf("unreachable\n");
@@ -563,9 +749,13 @@ BRBLoadError loadRegImmOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError load2RegOp(ModuleLoader* loader, Op* dst)
 {
-	load2HalfBytes(loader->src, &dst->dst_reg, &dst->src_reg, loader->n_fetched);
+	uint8_t dst_reg, src_reg;
+	load2HalfBytes(loader->src, &dst_reg, &src_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+
+	dst->dst_reg = dst_reg;
+	dst->src_reg = src_reg;
 	return (BRBLoadError){0};
 }
 
@@ -578,8 +768,9 @@ BRBLoadError loadRegSymbolIdOp(ModuleLoader* loader, Op* dst)
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadRegNameOp(ModuleLoader* loader, Op* dst)
+BRBLoadError loadRegModuleIdNameOp(ModuleLoader* loader, Op* dst)
 {
+	dst->module_id = loadInt(loader->src, loader->n_fetched);
 	dst->dst_reg = loadHalfByte(loader->src, loader->n_fetched);
 	loadName(loader, &dst->mark_name, loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
@@ -614,7 +805,21 @@ BRBLoadError loadOpCmp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpCmpr(ModuleLoader* loader, Op* dst)
 {
-	load2HalfBytes(loader->src, &dst->src_reg, &dst->src2_reg, loader->n_fetched);
+	uint8_t src_reg, src2_reg;
+	load2HalfBytes(loader->src, &src_reg, &src2_reg, loader->n_fetched);
+
+	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+
+	dst->src_reg = src_reg;
+	dst->src2_reg = src2_reg;
+	return (BRBLoadError){0};
+}
+
+BRBLoadError loadOpCall(ModuleLoader* loader, Op* dst)
+{
+	int64_t temp;
+	load2Ints(loader->src, (int64_t*)&dst->module_id, &temp, loader->n_fetched);
+	loadNameWith(loader, &dst->mark_name, temp);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -622,19 +827,27 @@ BRBLoadError loadOpCmpr(ModuleLoader* loader, Op* dst)
 
 BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 {
-	load2HalfBytes(loader->src, &dst->dst_reg, &dst->src_reg, loader->n_fetched);
+	uint8_t dst_reg, src_reg;
+	load2HalfBytes(loader->src, &dst_reg, &src_reg, loader->n_fetched);
 	dst->value = loadInt(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+
+	dst->dst_reg = dst_reg;
+	dst->src_reg = src_reg;
 	return (BRBLoadError){0};
 }
 
 BRBLoadError load3RegOp(ModuleLoader* loader, Op* dst)
 {
+	uint8_t src_reg, src2_reg;
 	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
-	load2HalfBytes(loader->src, &dst->src_reg, &dst->src2_reg, loader->n_fetched);
+	load2HalfBytes(loader->src, &src_reg, &src2_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+
+	dst->src_reg = src_reg;
+	dst->src2_reg = src2_reg;
 	return (BRBLoadError){0};
 }
 
@@ -648,35 +861,51 @@ BRBLoadError loadOpVar(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpLdv(ModuleLoader* loader, Op* dst)
 {
-	load2HalfBytes(loader->src, &dst->dst_reg, &dst->var_size, loader->n_fetched);
+	uint8_t dst_reg, var_size;
+	load2HalfBytes(loader->src, &dst_reg, &var_size, loader->n_fetched);
 	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+
+	dst->dst_reg = dst_reg;
+	dst->var_size = var_size;
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpStrv(ModuleLoader* loader, Op* dst)
 {
+	uint8_t var_size, src_reg;
 	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
-	load2HalfBytes(loader->src, &dst->var_size, &dst->src_reg, loader->n_fetched);
+	load2HalfBytes(loader->src, &var_size, &src_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+
+	dst->var_size = var_size;
+	dst->src_reg = src_reg;
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpPopv(ModuleLoader* loader, Op* dst)
 {
-	load2HalfBytes(loader->src, &dst->dst_reg, &dst->var_size, loader->n_fetched);
+	uint8_t dst_reg, var_size;
+	load2HalfBytes(loader->src, &dst_reg, &var_size, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+
+	dst->dst_reg = dst_reg;
+	dst->var_size = var_size;
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadOpPushv(ModuleLoader* loader, Op* dst)
 {
-	load2HalfBytes(loader->src, &dst->var_size, &dst->src_reg, loader->n_fetched);
+	uint8_t var_size, src_reg;
+	load2HalfBytes(loader->src, &var_size, &src_reg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
+
+	dst->var_size = var_size;
+	dst->src_reg = src_reg;
 	return (BRBLoadError){0};
 }
 
@@ -690,18 +919,26 @@ BRBLoadError loadSymbolIdOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpSetc(ModuleLoader* loader, Op* dst)
 {
-	load2HalfBytes(loader->src, &dst->dst_reg, &dst->cond_arg, loader->n_fetched);
+	uint8_t dst_reg, cond_arg;
+	load2HalfBytes(loader->src, &dst_reg, &cond_arg, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+
+	dst->dst_reg = dst_reg;
+	dst->cond_arg = cond_arg;
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadBitShiftOp(ModuleLoader* loader, Op* dst)
 {
-	load2HalfBytes(loader->src, &dst->dst_reg, &dst->src_reg, loader->n_fetched);
+	uint8_t dst_reg, src_reg;
+	load2HalfBytes(loader->src, &dst_reg, &src_reg, loader->n_fetched);
 	dst->value = loadInt8(loader->src, loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
+
+	dst->dst_reg = dst_reg;
+	dst->src_reg = src_reg;
 	return (BRBLoadError){0};
 }
 
@@ -711,9 +948,9 @@ OpLoader op_loaders[] = {
 	[OP_MARK] = &loadNoArgOp,
 	[OP_SET] = &loadRegImmOp,
 	[OP_SETR] = &load2RegOp,
-	[OP_SETD] = &loadRegNameOp,
+	[OP_SETD] = &loadRegModuleIdNameOp,
 	[OP_SETB] = &loadRegSymbolIdOp,
-	[OP_SETM] = &loadRegNameOp,
+	[OP_SETM] = &loadRegModuleIdNameOp,
 	[OP_ADD] = &load2RegImmOp,
 	[OP_ADDR] = &load3RegOp,
 	[OP_SUB] = &load2RegImmOp,
@@ -792,15 +1029,99 @@ FILE* findModule(char* name, char* search_paths[])
 	return NULL;
 }
 
-Module* mergeModule(Module* src, Module* dst)
+Submodule* getOpSubmodule(Module* module, Op* op)
 {
+	int index = op - module->execblock.data;
+	
+	for (Submodule* submodule = module->submodules.data; submodule - module->submodules.data < module->submodules.length; ++submodule) {
+		if (inRange(index, submodule->es_offset, submodule->es_offset + submodule->es_length)) 
+			return submodule;
+	}
+	assert(false, "`op` does not belong to `module`");
+	return NULL;
+}
+
+Submodule* getDataBlockSubmodule(Module* module, DataBlock* block)
+{
+	int index = block - module->datablocks.data;
+	
+	for (Submodule* submodule = module->submodules.data; submodule - module->submodules.data < module->submodules.length; ++submodule) {
+		if (inRange(index, submodule->ds_offset, submodule->ds_offset + submodule->ds_length)) 
+			return submodule;
+	}
+	assert(false, "`block` does not belong to `module`");
+	return NULL;
+}
+
+Submodule* getMemBlockSubmodule(Module* module, MemBlock* block)
+{
+	int index = block - module->memblocks.data;
+	
+	for (Submodule* submodule = module->submodules.data; submodule - module->submodules.data < module->submodules.length; ++submodule) {
+		if (inRange(index, submodule->ms_offset, submodule->ms_offset + submodule->ms_length)) 
+			return submodule;
+	}
+	assert(false, "`block` does not belong to `module`");
+	return NULL;
+}
+
+Submodule getRootSubmodule(Module* module, char* new_name)
+{
+	if (module->submodules.length) {
+		Submodule* last = arrayhead(module->submodules);
+		return (Submodule){
+			.ds_offset = last->ds_offset + last->ds_length,
+			.ds_length = module->datablocks.length - last->ds_offset - last->ds_length,
+			.ms_offset = last->ms_offset + last->ms_length,
+			.ms_length = module->memblocks.length - last->ms_offset - last->ms_length,
+			.es_offset = last->es_offset + last->es_length,
+			.es_length = module->execblock.length - last->es_offset - last->es_length,
+			.name = new_name,
+			.direct = true
+		};
+	} else {
+		return (Submodule){
+			.ds_offset = 0,
+			.ds_length = module->datablocks.length,
+			.ms_offset = 0,
+			.ms_length = module->memblocks.length,
+			.es_offset = 0,
+			.es_length = module->execblock.length,
+			.name = new_name,
+			.direct = true
+		};
+	}
+}
+
+Module* mergeModule(Module* restrict src, Module* dst, char* src_name)
+{
+	SubmoduleArray_append(&src->submodules, getRootSubmodule(src, src_name));
+	for (
+		Submodule* submodule = src->submodules.data;
+		submodule - src->submodules.data < src->submodules.length;
+		++submodule
+	) {
+		submodule->ds_offset += dst->datablocks.length;
+		submodule->ms_offset += dst->memblocks.length;
+		submodule->es_offset += dst->execblock.length;
+		if (submodule - src->submodules.data != src->submodules.length - 1)
+			submodule->direct = false;
+	}
+
+	for (Op* op = src->execblock.data; op - src->execblock.data < src->execblock.length; ++op) {
+		if (op_flags[op->type] & OPF_USES_MODULE_ID)
+			op->module_id += dst->submodules.length;
+	}
+
 	DataBlockArray_extend(&dst->datablocks, src->datablocks);
 	MemBlockArray_extend(&dst->memblocks, src->memblocks);
 	OpArray_extend(&dst->execblock, src->execblock);
-	strArray_extend(&dst->submodules, src->submodules);
-	dst->_root_db_start = dst->datablocks.length;
-	dst->_root_mb_start = dst->memblocks.length;
-	dst->_root_eb_start = dst->execblock.length;
+	SubmoduleArray_extend(&dst->submodules, src->submodules);
+
+	DataBlockArray_clear(&src->datablocks);
+	MemBlockArray_clear(&src->memblocks);
+	OpArray_clear(&src->execblock);
+	SubmoduleArray_clear(&src->submodules);
 
 	return dst;
 }
@@ -848,8 +1169,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		BRBLoadError err = preloadModule(module_fd, &submodule, module_paths);
 		if (err.code) return err;
 
-		dst = mergeModule(&submodule, dst);
-		strArray_append(&dst->submodules, name);
+		dst = mergeModule(&submodule, dst, name);
 	}
 // loading data blocks
 	n = loadInt(src, &status);
@@ -937,46 +1257,60 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 
 void resolveModule(Module* dst, bool for_exec)
 {
+	Submodule *submodule, *root = SubmoduleArray_append(&dst->submodules, getRootSubmodule(dst, "."));
 	for (int i = 0; i < dst->execblock.length; i++) {
 		Op* op = dst->execblock.data + i;
 		
 		switch (op->type) {
 			case OP_SETD:
-				for (int64_t db_i = 0; db_i < dst->datablocks.length; db_i++) {
+				submodule = dst->submodules.data + op->module_id;
+				for (int64_t db_i = submodule->ds_offset; db_i < submodule->ds_offset + submodule->ds_length; db_i++) {
 					if (sbufeq(op->mark_name, dst->datablocks.data[db_i].name)) {
 						op->symbol_id = db_i;
+						op = NULL;
 						break;
 					}
 				}
+				assert(op == NULL, "internal bug: could not resolve location of the data block, referred to by `setd` operation");
 				break;
 			case OP_SETM:
-				for (int64_t mb_i = 0; mb_i < dst->memblocks.length; mb_i++) {
+				submodule = dst->submodules.data + op->module_id;
+				for (int64_t mb_i = submodule->ms_offset; mb_i < submodule->ms_offset + submodule->ms_length; mb_i++) {
 					if (sbufeq(op->mark_name, dst->memblocks.data[mb_i].name)) {
 						op->symbol_id = mb_i;
+						op = NULL;
 						break;
 					}
 				}
+
+				assert(op == NULL, "internal bug: could not resolve location of the memory block, referred to by `setm` operation");
 				break;
 			case OP_CALL:
-				for (int64_t proc_index = 0; proc_index < dst->execblock.length; proc_index++) {
+				submodule = dst->submodules.data + op->module_id;
+				for (int64_t proc_index = submodule->es_offset; proc_index < submodule->es_offset + submodule->es_length; proc_index++) {
 					Op* proc = dst->execblock.data + proc_index;
 
 					if (proc->type == OP_PROC || proc->type == OP_EXTPROC) {
 						if (sbufeq(proc->mark_name, op->mark_name)) {
 							op->symbol_id = proc_index;
+							op = NULL;
 							break;
 						}
 					}
 				}
+
+				assert(op == NULL, "internal bug: could not resolve location of the procedure, referred to by `call` operation");
 				break;
 			default:
 				break;
 		}
 	}
+
+
 //  resolving entry
 	if (for_exec) {
 		dst->entry_opid = -1;
-		for (int i = dst->_root_eb_start; i < dst->execblock.length; i++) {
+		for (int i = root->es_offset; i < dst->execblock.length; i++) {
 			Op* op = dst->execblock.data + i;
 			if (op->type == OP_PROC || op->type == OP_EXTPROC) {
 				if (sbufeq(op->mark_name, "main")) {
@@ -1032,7 +1366,7 @@ void optimizeOpEnd(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpMark(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tmark .m%ld\n", op - module->execblock.data);
+	fprintf(ctx->temp_out, "\tmark \".m%ld\"\n", op - module->execblock.data);
 }
 
 void optimizeOpSet(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1054,7 +1388,7 @@ void optimizeOpSetr(Module* module, OptimizerCtx* ctx, Op* op)
 void optimizeOpSetd(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-	if (op->symbol_id >= module->_root_db_start) {
+	if (op->symbol_id >= arrayhead(module->submodules)->ds_offset) {
 		int db_iter = 0;
 		for (; db_iter < ctx->used_db.length; ++db_iter) {
 			if (ctx->used_db.data[db_iter] == op->symbol_id) break;
@@ -1064,7 +1398,14 @@ void optimizeOpSetd(Module* module, OptimizerCtx* ctx, Op* op)
 			SymbolArray_append(&ctx->used_db, op->symbol_id);
 	}
 
-	fprintf(ctx->temp_out, "\tsetd:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], module->datablocks.data[op->symbol_id].name);
+	fprintf(
+		ctx->temp_out,
+		"\tsetd:%s %s %s \"%s\"\n",
+		conditionNames[op->cond_id].data,
+		BRBRegNames[op->dst_reg],
+		module->submodules.data[op->module_id].name,
+		module->datablocks.data[op->symbol_id].name
+	);
 }
 
 void optimizeOpSetb(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1076,7 +1417,7 @@ void optimizeOpSetb(Module* module, OptimizerCtx* ctx, Op* op)
 void optimizeOpSetm(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-	if (op->symbol_id >= module->_root_mb_start) {
+	if (op->symbol_id >= arrayhead(module->submodules)->ms_offset) {
 		int mb_iter = 0;
 		for (; mb_iter < ctx->used_db.length; ++mb_iter) {
 			if (ctx->used_db.data[mb_iter] == op->symbol_id) break;
@@ -1086,7 +1427,14 @@ void optimizeOpSetm(Module* module, OptimizerCtx* ctx, Op* op)
 			SymbolArray_append(&ctx->used_mb, op->symbol_id);
 	}
 
-	fprintf(ctx->temp_out, "\tsetm:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], module->memblocks.data[op->symbol_id].name);
+	fprintf(
+		ctx->temp_out,
+		"\tsetm:%s %s %s \"%s\"\n",
+		conditionNames[op->cond_id].data,
+		BRBRegNames[op->dst_reg],
+		module->submodules.data[op->module_id].name,
+		module->memblocks.data[op->symbol_id].name
+	);
 }
 
 void optimizeOpAdd(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1145,7 +1493,7 @@ void optimizeOpSys(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpGoto(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tgoto:%s .m%ld\n", conditionNames[op->cond_id].data, op + op->op_offset - module->execblock.data);
+	fprintf(ctx->temp_out, "\tgoto:%s \".m%ld\"\n", conditionNames[op->cond_id].data, op + op->op_offset - module->execblock.data);
 }
 
 void optimizeOpCmp(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1308,12 +1656,18 @@ void optimizeOpShrsr(Module* module, OptimizerCtx* ctx, Op* op)
 void optimizeOpProc(Module* module, OptimizerCtx* ctx, Op* op)
 // TODO: store data about ownership of ops and data blocks by the loaded modules and submodules in the `Module` object
 {
-	fprintf(ctx->temp_out, "\tproc %s\n", op->mark_name);
+	fprintf(ctx->temp_out, "\tproc \"%s\"\n", op->mark_name);
 }
 
 void optimizeOpCall(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tcall:%s %s\n", conditionNames[op->cond_id].data, module->execblock.data[op->symbol_id].mark_name);
+	fprintf(
+		ctx->temp_out,
+		"\tcall:%s %s \"%s\"\n",
+		conditionNames[op->cond_id].data,
+		module->submodules.data[op->module_id].name,
+		module->execblock.data[op->symbol_id].mark_name
+	);
 }
 
 void optimizeOpRet(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1369,7 +1723,7 @@ void optimizeOpVar(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	ctx->frame_size += op->new_var_size;
 	SymbolArray_append(&ctx->vars, op->new_var_size);
-	fprintf(ctx->temp_out, "\tvar .v%d %lld\n", ctx->frame_size, op->new_var_size);
+	fprintf(ctx->temp_out, "\tvar \".v%d\" %lld\n", ctx->frame_size, op->new_var_size);
 }
 
 void optimizeOpSetv(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1377,7 +1731,7 @@ void optimizeOpSetv(Module* module, OptimizerCtx* ctx, Op* op)
 	if (op->dst_reg == ZEROREG_ID) return;
 	fprintf(
 		ctx->temp_out,
-		"\tsetv:%s %s .v%lld\n",
+		"\tsetv:%s %s \".v%d\"\n",
 		conditionNames[op->cond_id].data,
 		BRBRegNames[op->dst_reg],
 		op->symbol_id
@@ -1569,7 +1923,7 @@ void optimizeOpDivsr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpExtproc(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\textproc %s\n", op->mark_name);
+	fprintf(ctx->temp_out, "\textproc \"%s\"\n", op->mark_name);
 }
 
 void optimizeOpLdv(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1577,7 +1931,7 @@ void optimizeOpLdv(Module* module, OptimizerCtx* ctx, Op* op)
 	if (op->dst_reg == ZEROREG_ID) return;
 	fprintf(
 		ctx->temp_out,
-		"\tldv%s:%s %s .v%lld\n",
+		"\tldv%s:%s %s \".v%d\"\n",
 		op->type == OP_LDVS ? "s" : "",
 		conditionNames[op->cond_id].data,
 		BRBRegNames[op->dst_reg],
@@ -1589,7 +1943,7 @@ void optimizeOpStrv(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	fprintf(
 		ctx->temp_out,
-		"\tstrv:%s .v%lld %s\n",
+		"\tstrv:%s \".v%d\" %s\n",
 		conditionNames[op->cond_id].data,
 		op->symbol_id,
 		BRBRegNames[op->dst_reg]
@@ -1606,7 +1960,7 @@ void optimizeOpPushv(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	ctx->frame_size += op->var_size;
 	SymbolArray_append(&ctx->vars, op->var_size);
-	fprintf(ctx->temp_out, "\tpushv .v%d %hhu %s\n", ctx->frame_size, op->var_size, BRBRegNames[op->dst_reg]);
+	fprintf(ctx->temp_out, "\tpushv \".v%d\" %hhu %s\n", ctx->frame_size, op->var_size, BRBRegNames[op->dst_reg]);
 }
 
 void optimizeOpAtf(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1616,7 +1970,7 @@ void optimizeOpAtf(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpAtl(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\t@l %lld\n", op->symbol_id);
+	fprintf(ctx->temp_out, "\t@l %d\n", op->symbol_id);
 }
 
 void optimizeOpSetc(Module* module, OptimizerCtx* ctx, Op* op)
@@ -1783,15 +2137,20 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 
 	if (module->submodules.length) {
 		fprintf(ctx.temp_out, "load { ");
-		for (int i = 0; i < module->submodules.length; ++i) {
-			fprintf(ctx.temp_out, "%s ", module->submodules.data[i]);
+		for (
+			Submodule* submodule = module->submodules.data;
+			submodule - module->submodules.data < module->submodules.length;
+			++submodule
+		) {
+			if (submodule->direct && submodule - module->submodules.data < module->submodules.length - 1)
+				fprintf(ctx.temp_out, "%s ", submodule->name);
 		}
 		fprintf(ctx.temp_out, "}\n");
 	}
 
 	if (module->execblock.length) {
 		fprintf(ctx.temp_out, "exec {\n");
-		for (Op* op = module->execblock.data + module->_root_eb_start; op->type != OP_END; ++op) {
+		for (Op* op = module->execblock.data + arrayhead(module->submodules)->es_offset; op->type != OP_END; ++op) {
 			optimizers[op->type](module, &ctx, op);
 		}
 		fprintf(ctx.temp_out, "}\n");
@@ -1801,7 +2160,7 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 		fprintf(ctx.temp_out, "data {\n");
 		for (int i = 0; i < ctx.used_db.length; ++i) {
 			DataBlock* block = module->datablocks.data + ctx.used_db.data[i];
-			fprintf(ctx.temp_out, "\t%s { ", block->name);
+			fprintf(ctx.temp_out, "\t\"%s\" { ", block->name);
 			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
 				switch (piece->type) {
 					case PIECE_BYTES:
@@ -1832,7 +2191,7 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 		fprintf(ctx.temp_out, "memory {\n");
 		for (int i = 0; i < ctx.used_mb.length; ++i) {
 			MemBlock* block = module->memblocks.data + ctx.used_mb.data[i];
-			fprintf(ctx.temp_out, "\t%s %lld\n", block->name, block->size);
+			fprintf(ctx.temp_out, "\t\"%s\" %lld\n", block->name, block->size);
 		}
 		fprintf(ctx.temp_out, "}\n");
 	}
@@ -1840,7 +2199,7 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 	DataBlockArray_clear(&module->datablocks);
 	MemBlockArray_clear(&module->memblocks);
 	OpArray_clear(&module->execblock);
-	strArray_clear(&module->submodules);
+	SubmoduleArray_clear(&module->submodules);
 
 	fclose(ctx.temp_out);
 	if (output)

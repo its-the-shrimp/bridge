@@ -265,11 +265,12 @@ void compileOpSetrNative(Module* module, int index, CompCtx* ctx)
 void compileOpSetdNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
+	DataBlock* block = module->datablocks.data + op.symbol_id;
 	compileCondition(ctx->dst, op.cond_id, 2);
 	fprintf(
 		ctx->dst,
-		"\tadr %s, %s\n",
-		regNames64[op.dst_reg], module->datablocks.data[op.symbol_id].name
+		"\tadr %s, \"%s::%s\"\n",
+		regNames64[op.dst_reg], getDataBlockSubmodule(module, block)->name, block->name
 	);
 }
 
@@ -290,12 +291,13 @@ void compileOpSetbNative(Module* module, int index, CompCtx* ctx)
 void compileOpSetmNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
+	MemBlock* block = module->memblocks.data + op.symbol_id;
 	compileCondition(ctx->dst, op.cond_id, 2);
 	fprintf(
 		ctx->dst,
-		"\tadrp %1$s, %2$s@PAGE\n"
-		"\tadd %1$s, %1$s, %2$s@PAGEOFF",
-		regNames64[op.dst_reg], module->memblocks.data[op.symbol_id].name
+		"\tadrp %1$s, \"%2$s::%3$s\"@PAGE\n"
+		"\tadd %1$s, %1$s, \"%2$s::%3$s\"@PAGEOFF\n",
+		regNames64[op.dst_reg], getMemBlockSubmodule(module, block)->name, block->name
 	);
 }
 
@@ -525,20 +527,22 @@ void compileOpShrsrNative(Module* module, int index, CompCtx* ctx)
 void compileOpProcNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
+	const sbuf module_name = SBUF(getOpSubmodule(module, module->execblock.data + index)->name);
 	fprintf(
 		ctx->dst,
-		"%s:\n"
+		"\"%.*s::%s\":\n"
 		"\tstp fp, lr, [sp, -16]!\n"
 		"\tmov fp, sp\n",
-		op.mark_name
+		unpack(module_name), op.mark_name
 	);
 }
 
 void compileOpCallNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
+	Op* proc = module->execblock.data + op.symbol_id;
 	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tbl %s\n", module->execblock.data[op.symbol_id].mark_name);
+	fprintf(ctx->dst, "\tbl \"%s::%s\"\n", getOpSubmodule(module, proc)->name, proc->mark_name);
 }
 
 void compileOpRetNative(Module* module, int index, CompCtx* ctx)
@@ -635,7 +639,7 @@ void compileOpSetvNative(Module* module, int index, CompCtx* ctx)
 	Op op = module->execblock.data[index];
 
 	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tsub %s, fp, %llu\n", regNames64[op.dst_reg], op.symbol_id);
+	fprintf(ctx->dst, "\tsub %s, fp, %d\n", regNames64[op.dst_reg], op.symbol_id);
 }
 
 void compileOpMulNative(Module* module, int index, CompCtx* ctx)
@@ -702,11 +706,20 @@ void compileOpDivsrNative(Module* module, int index, CompCtx* ctx)
 void compileOpExtprocNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->execblock.data[index];
+	Submodule* submodule = getOpSubmodule(module, module->execblock.data + index);
+	char proc_name[strlen(submodule->name) + strlen(op.mark_name) + 3];
+	if (sbufeq(submodule->name, ".")) {
+		snprintf(proc_name, sizeof(proc_name), "%s", op.mark_name);
+	} else {
+		snprintf(proc_name, sizeof(proc_name), "%s::%s", submodule->name, op.mark_name);
+	}
 	fprintf(
-		ctx->dst, 
-		".global %1$s\n"
-		"%1$s:\n",
-		op.mark_name
+		ctx->dst,
+		".global \"%1$s\"\n"
+		"\"%1$s\":\n"
+		"\tstp fp, lr, [sp, -16]!\n"
+		"\tmov fp, sp\n",
+		proc_name
 	);
 }
 
@@ -1126,13 +1139,13 @@ void compileByteCode(Module* src, FILE* dst)
 
 	fprintf(dst, ".bss\n");
 	array_foreach(MemBlock, block, src->memblocks, 
-		fprintf(dst, "\t%s: .zero %lld\n", block.name, block.size);
+		fprintf(dst, "\t\"%s::%s\": .zero %lld\n", getMemBlockSubmodule(src, src->memblocks.data + _block)->name, block.name, block.size);
 	);
 
 	fprintf(dst, ".text\n");
 	if (src->datablocks.length) {
 		array_foreach(DataBlock, block, src->datablocks,
-			fprintf(dst, "\t%s: .ascii \"", block.name);
+			fprintf(dst, "\t\"%s::%s\": .ascii \"", getDataBlockSubmodule(src, src->datablocks.data + _block)->name, block.name);
 			array_foreach(DataPiece, piece, block.pieces,
 				switch (piece.type) {
 					case PIECE_BYTES:
@@ -1157,7 +1170,7 @@ void compileByteCode(Module* src, FILE* dst)
 						abort();
 				}
 			);
-			fprintf(dst, "\"\n");
+			fprintf(dst, "\"\n.align 4\n");
 		);
 	}
 

@@ -193,12 +193,16 @@ declChain(Expr);
 defChain(Expr);
 
 
+// for `FuncDecl::attrs`
+#define FUNCATTR_EXTERNAL 0b1
+
 typedef struct {
-    TokenLoc loc;
-    char* name;
-    Expr args;
-    TypeDef return_type;
-    Expr body;
+	TokenLoc loc;
+	char* name;
+	Expr args;
+	TypeDef return_type;
+	Expr body;
+	int attrs;
 } FuncDecl;
 declChain(FuncDecl);
 defChain(FuncDecl);
@@ -2819,6 +2823,7 @@ void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
             }
 
             if (sbufeq(new_func->name, "main")) {
+		new_func->attrs |= FUNCATTR_EXTERNAL;
                 if (new_func->return_type.kind != KIND_VOID) raiseMainProcRetTypeMismatchError(dst, func_name_spec.loc, new_func->return_type);
                 int main_proc_n_args = getSubexprsCount(&new_func->args) - 1;
                 if (main_proc_n_args != 0) raiseMainProcArgCountMismatchError(dst, token.loc, main_proc_n_args);
@@ -2860,7 +2865,7 @@ int compileRegCaching(ASTCompilerCtx* ctx, regstate_t state)
 {
     for (uint8_t i = 0; i < 8; i++) {
         if (state & (1 << i)) {
-            fprintf(ctx->dst, "\tpushv .rc%d_%hhd 8 r%hhd\n", reg_cache_counter, i, i);
+            fprintf(ctx->dst, "\tpushv \".rc%d_%hhd\" 8 r%hhd\n", reg_cache_counter, i, i);
         }
     }
 
@@ -2964,7 +2969,7 @@ void compileExprString(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
         sbufArray_append(&ctx->data_blocks, expr.string);
     }
 
-    fprintf(ctx->dst, "\tsetd r%d "STR_PREFIX"%d\n", dst_reg, str_index);
+    fprintf(ctx->dst, "\tsetd r%d . \""STR_PREFIX"%d\"\n", dst_reg, str_index);
 }
 
 void compileExprInt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
@@ -2990,8 +2995,8 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                 int element_reg, cache_id;
                 getRegister(ctx, &reg_state, dst_reg, &element_reg, &cache_id);
 
-                fprintf(ctx->dst, "\tvar %s %d\n", name, array_size);
-                fprintf(ctx->dst, "\tsetv r%d %s\n", dst_reg, name);
+                fprintf(ctx->dst, "\tvar \"%s\" %d\n", name, array_size);
+                fprintf(ctx->dst, "\tsetv r%d \"%s\"\n", dst_reg, name);
 
                 if (initializer_size == 1) {
                     int iter_reg, iter_cache_id;
@@ -3001,12 +3006,12 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                     expr_compilers[initializer->type](ctx, *initializer, reg_state | (1 << dst_reg) | (1 << iter_reg), element_reg);
 
                     fprintf(ctx->dst, "\tset r%d %d\n", iter_reg, var_type.n_items);
-                    fprintf(ctx->dst, "\tmark .ai%d\n", ++array_init_counter);
+                    fprintf(ctx->dst, "\tmark \".ai%d\"\n", ++array_init_counter);
                     fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size * 8, dst_reg, element_reg);
                     fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
                     fprintf(ctx->dst, "\tsub r%d r%d 1\n", iter_reg, iter_reg);
                     fprintf(ctx->dst, "\tcmp r%d 0\n", iter_reg);
-                    fprintf(ctx->dst, "\tgoto:neq .ai%d\n", array_init_counter);
+                    fprintf(ctx->dst, "\tgoto:neq \".ai%d\"\n", array_init_counter);
 
                     freeRegister(ctx, &reg_state, iter_reg, iter_cache_id);
                 } else {
@@ -3020,13 +3025,13 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                 freeRegister(ctx, &reg_state, element_reg, cache_id);
             } else {
                 if (array_size <= 8) {
-                    fprintf(ctx->dst, "\tpushv %s %d rZ\n", name, array_size);
+                    fprintf(ctx->dst, "\tpushv \"%s\" %d rZ\n", name, array_size);
                 } else {
                     int iter_reg, cache_id, step = 1;
                     getRegister(ctx, &reg_state, dst_reg, &iter_reg, &cache_id);
 
-                    fprintf(ctx->dst, "\tvar %s %d\n", name, array_size);
-                    fprintf(ctx->dst, "\tsetv r%d %s\n", dst_reg, name);
+                    fprintf(ctx->dst, "\tvar \"%s\" %d\n", name, array_size);
+                    fprintf(ctx->dst, "\tsetv r%d \"%s\"\n", dst_reg, name);
 
                     if (array_size % 8 == 0) {
                         step = 8;
@@ -3039,12 +3044,12 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
                     fprintf(
                         ctx->dst,
                         "\tset r%1$d %2$d\n"
-                        "\tmark .ai%6$d\n"
+                        "\tmark \".ai%6$d\"\n"
                         "\tstr%3$d r%4$d rZ\n"
                         "\tadd r%4$d r%4$d %5$d\n"
                         "\tsub r%1$d r%1$d %5$d\n"
                         "\tcmp r%1$d 0\n"
-                        "\tgoto:neq .ai%6$d\n",
+                        "\tgoto:neq \".ai%6$d\"\n",
                         iter_reg, array_size,
                         step * 8, dst_reg, step, ++array_init_counter
                     );
@@ -3054,10 +3059,10 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
             }
         } else {
             expr_compilers[initializer->type](ctx, *initializer, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tpushv %s %d r%d\n", name, size, dst_reg);
+            fprintf(ctx->dst, "\tpushv \"%s\" %d r%d\n", name, size, dst_reg);
         }
     } else {
-        fprintf(ctx->dst, "\tvar %s %d\n", name, var_type.kind == KIND_ARRAY ? var_type.n_items * getTypeSize(*var_type.base) : size);
+        fprintf(ctx->dst, "\tvar \"%s\" %d\n", name, var_type.kind == KIND_ARRAY ? var_type.n_items * getTypeSize(*var_type.base) : size);
     }
 }
 
@@ -3068,7 +3073,7 @@ void compileExprAssign(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
     int field_size = getTypeSize(getExprValueType(ctx->ast, *expr.arg2));
     expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
     if (expr.arg1->type == EXPR_GET_VAR) {
-        fprintf(ctx->dst, "\tstrv %s r%d\n", getSubexpr(expr.arg1->arg1, 0)->name, dst_reg);
+        fprintf(ctx->dst, "\tstrv \"%s\" r%d\n", getSubexpr(expr.arg1->arg1, 0)->name, dst_reg);
     } else if (expr.arg1->type == EXPR_DEREF) {
         int ptr_reg, cache_id;
         getRegister(ctx, &reg_state, dst_reg, &ptr_reg, &cache_id);
@@ -3096,9 +3101,9 @@ void compileExprGetVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 {
     compileSrcRef(ctx, expr.loc);
     if (getSubexpr(expr.arg1, 1)->var_type->kind == KIND_ARRAY) {
-        fprintf(ctx->dst, "\tsetv r%d %s\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
+        fprintf(ctx->dst, "\tsetv r%d \"%s\"\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
     } else {
-        fprintf(ctx->dst, "\tldvs r%d %s\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
+        fprintf(ctx->dst, "\tldvs r%d \"%s\"\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
     }
 }
 
@@ -3126,7 +3131,7 @@ void compileExprProcCall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, i
         expr_compilers[subexpr.type](ctx, subexpr, (1 << i) - 1, i);
         i++;
     );
-    fprintf(ctx->dst, "\tcall %s\n", ((FuncDecl*)getSubexpr(&expr, 0)->arg1)->name);
+    fprintf(ctx->dst, "\tcall . \"%s\"\n", ((FuncDecl*)getSubexpr(&expr, 0)->arg1)->name);
 
     if (dst_reg != 0) fprintf(ctx->dst, "\tsetr r%d r0\n", dst_reg);
     compileRegUncaching(ctx, reg_cache_state, cache_id);
@@ -3585,44 +3590,44 @@ void compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst
     switch (expr.arg1->type) {
         case EXPR_LOGICAL_EQ:
             _compileExprLogicalEq(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:neq .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:neq \".else%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_NEQ:
             _compileExprLogicalNeq(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:equ .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:equ \".else%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_LT:
             _compileExprLogicalLt(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:ges .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:ges \".else%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_GT:
             _compileExprLogicalGt(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:les .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:les \".else%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_LE:
             _compileExprLogicalLe(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:gts .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:gts \".else%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_GE:
             _compileExprLogicalGe(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:lts .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:lts \".else%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_AND:
             _compileExprLogicalAnd(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:equ .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:equ \".else%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_OR:
             _compileExprLogicalOr(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:equ .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:equ \".else%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_NOT:
             _compileExprLogicalNot(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:neq .else%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:neq \".else%d\"\n", block_id);
             break;
         case EXPR_CAST:
             if (expr.arg1->var_type->kind == KIND_BOOL) {
                 expr_compilers[expr.arg1->arg1->type](ctx, *expr.arg1->arg1, reg_state, dst_reg);
-                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:equ .else%d\n", dst_reg, block_id);
+                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:equ \".else%d\"\n", dst_reg, block_id);
                 break;
             }
         default:
@@ -3630,12 +3635,12 @@ void compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst
     }
     if (expr.arg3->type != EXPR_VOID) {
         expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
-        fprintf(ctx->dst, "\tgoto .end%d\n\tmark .else%d\n", block_id, block_id);
+        fprintf(ctx->dst, "\tgoto \".end%d\"\n\tmark \".else%d\"\n", block_id, block_id);
         expr_compilers[expr.arg3->type](ctx, *expr.arg3, reg_state, dst_reg);
-        fprintf(ctx->dst, "\tmark .end%d\n", block_id);
+        fprintf(ctx->dst, "\tmark \".end%d\"\n", block_id);
     } else {
         expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
-        fprintf(ctx->dst, "\tmark .else%d\n", block_id);
+        fprintf(ctx->dst, "\tmark \".else%d\"\n", block_id);
     }
 }
 
@@ -3647,48 +3652,48 @@ void compileExprWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int 
     compileSrcRef(ctx, expr.loc);
     int block_id = block_counter++;
 
-    fprintf(ctx->dst, "\tmark .start%d\n", block_id);
+    fprintf(ctx->dst, "\tmark \".start%d\"\n", block_id);
     switch (expr.arg1->type) {
         case EXPR_LOGICAL_EQ:
             _compileExprLogicalEq(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:neq .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:neq \".end%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_NEQ:
             _compileExprLogicalNeq(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:equ .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:equ \".end%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_LT:
             _compileExprLogicalLt(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:ges .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:ges \".end%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_GT:
             _compileExprLogicalGt(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:les .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:les \".end%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_LE:
             _compileExprLogicalLe(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:gts .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:gts \".end%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_GE:
             _compileExprLogicalGe(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:lts .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:lts \".end%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_AND:
             _compileExprLogicalAnd(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:equ .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:equ \".end%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_OR:
             _compileExprLogicalOr(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:equ .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:equ \".end%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_NOT:
             _compileExprLogicalNot(ctx, *expr.arg1, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:neq .end%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:neq \".end%d\"\n", block_id);
             break;
         case EXPR_CAST:
             if (expr.arg1->var_type->kind == KIND_BOOL) {
                 expr_compilers[expr.arg1->arg1->type](ctx, *expr.arg1->arg1, reg_state, dst_reg);
-                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:equ .end%d\n", dst_reg, block_id);
+                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:equ \".end%d\"\n", dst_reg, block_id);
                 break;
             }
         default:
@@ -3696,7 +3701,7 @@ void compileExprWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int 
     }
 
     expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
-    fprintf(ctx->dst, "\tgoto .start%d\n\tmark .end%d\n", block_id, block_id);
+    fprintf(ctx->dst, "\tgoto \".start%d\"\n\tmark \".end%d\"\n", block_id, block_id);
 }
 
 void compileExprDoWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
@@ -3704,50 +3709,50 @@ void compileExprDoWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
     compileSrcRef(ctx, expr.loc);
     int block_id = block_counter++;
 
-    fprintf(ctx->dst, "\tmark .start%d\n", block_id);
+    fprintf(ctx->dst, "\tmark \".start%d\"\n", block_id);
     expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg);
 
     switch (expr.arg2->type) {
         case EXPR_LOGICAL_EQ:
             _compileExprLogicalEq(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:equ .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:equ \".start%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_NEQ:
             _compileExprLogicalNeq(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:neq .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:neq \".start%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_LT:
             _compileExprLogicalLt(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:lts .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:lts \".start%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_GT:
             _compileExprLogicalGt(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:gts .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:gts \".start%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_LE:
             _compileExprLogicalLe(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:les .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:les \".start%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_GE:
             _compileExprLogicalGe(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:ges .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:ges \".start%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_AND:
             _compileExprLogicalAnd(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:neq .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:neq \".start%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_OR:
             _compileExprLogicalOr(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:neq .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:neq \".start%d\"\n", block_id);
             break;
         case EXPR_LOGICAL_NOT:
             _compileExprLogicalNot(ctx, *expr.arg2, reg_state, dst_reg);
-            fprintf(ctx->dst, "\tgoto:equ .start%d\n", block_id);
+            fprintf(ctx->dst, "\tgoto:equ \".start%d\"\n", block_id);
             break;
         case EXPR_CAST:
             if (expr.arg2->var_type->kind == KIND_BOOL) {
                 expr_compilers[expr.arg2->arg1->type](ctx, *expr.arg2->arg1, reg_state, dst_reg);
-                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:neq .start%d\n", dst_reg, block_id);
+                fprintf(ctx->dst, "\tcmp r%d 0\n\tgoto:neq \".start%d\"\n", dst_reg, block_id);
                 break;
             }
         default:
@@ -3759,7 +3764,7 @@ void compileExprGetRef(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 {
     compileSrcRef(ctx, expr.loc);
 
-    fprintf(ctx->dst, "\tsetv r%d %s\n", dst_reg, getSubexpr(expr.arg1->arg1, 0)->name);
+    fprintf(ctx->dst, "\tsetv r%d \"%s\"\n", dst_reg, getSubexpr(expr.arg1->arg1, 0)->name);
 }
 
 void compileExprDeref(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
@@ -3861,11 +3866,11 @@ bool compileAST(AST* src, FILE* dst)
     fputs("exec {\n", dst);
     chain_foreach(FuncDecl, func, src->functions,
         compileSrcRef(&ctx, func.loc);
-        fprintf(dst, "\tproc %s\n", func.name);
+        fprintf(dst, "\t%sproc \"%s\"\n", func.attrs & FUNCATTR_EXTERNAL ? "ext" : "",func.name);
 
         int i = 0;
         for (ExprNode* iter = getSubexprs(&func.args)->start->next; iter != NULL; iter = iter->next) {
-            fprintf(dst, "\tpushv %s %d r%d\n", getSubexpr(&iter->value, 0)->name, getTypeSize(*getSubexpr(&iter->value, 1)->var_type), i++);
+            fprintf(dst, "\tpushv \"%s\" %d r%d\n", getSubexpr(&iter->value, 0)->name, getTypeSize(*getSubexpr(&iter->value, 1)->var_type), i++);
         }
 
         expr_compilers[func.body.type](&ctx, func.body, 0, 0);
@@ -3877,7 +3882,7 @@ bool compileAST(AST* src, FILE* dst)
     if (ctx.data_blocks.length) {
         fputs("data {\n", dst);
         array_foreach(sbuf, literal, ctx.data_blocks, 
-            fprintf(dst, "\t"STR_PREFIX"%d \"", _literal);
+            fprintf(dst, "\t\""STR_PREFIX"%d\" \"", _literal);
             fputsbufesc(dst, literal, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
             fputs("\\0\"\n", dst);
         );

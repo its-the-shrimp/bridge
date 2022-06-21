@@ -89,7 +89,7 @@ typedef enum {
 #define OPF_USES_NEW_VAR_SIZE 512
 #define OPF_USES_VAR_SIZE 1024
 #define OPF_USES_COND_ARG 2048
-#define OPF_VOLATILE 4096
+#define OPF_USES_MODULE_ID 4096
 
 #define OPF_IS_2REG_IMM (OPF_USES_DST_REG | OPF_USES_SRC_REG | OPF_USES_VALUE)
 #define OPF_IS_3REG (OPF_USES_DST_REG | OPF_USES_SRC_REG | OPF_USES_SRC2_REG)
@@ -102,14 +102,14 @@ const static unsigned short op_flags[N_OPS] = {
 	[OP_MARK] = OPF_UNCONDITIONAL,
 	[OP_SET] = OPF_USES_DST_REG | OPF_USES_VALUE,
 	[OP_SETR] = OPF_IS_2REG,
-	[OP_SETD] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID,
+	[OP_SETD] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID,
 	[OP_SETB] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID,
-	[OP_SETM] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID,
+	[OP_SETM] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID,
 	[OP_ADD] = OPF_IS_2REG_IMM, 
 	[OP_ADDR] = OPF_IS_3REG,
 	[OP_SUB] = OPF_IS_2REG_IMM,
 	[OP_SUBR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	[OP_SYS] = OPF_USES_SYSCALL_ID | OPF_VOLATILE, // uses Op::syscall_id
+	[OP_SYS] = OPF_USES_SYSCALL_ID, // uses Op::syscall_id
 	[OP_GOTO] = OPF_USES_OP_OFFSET, // uses Op::op_offset
 	[OP_CMP] = OPF_USES_SRC_REG | OPF_USES_VALUE, // uses Op::src_reg and Op::value
 	[OP_CMPR] = OPF_USES_SRC_REG | OPF_USES_SRC2_REG, // uses Op::src_reg and Op::src2_reg
@@ -127,9 +127,9 @@ const static unsigned short op_flags[N_OPS] = {
 	[OP_SHRS] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
 	[OP_SHRSR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	[OP_PROC] = OPF_USES_MARK_NAME, // uses Op::mark_name
-	[OP_CALL] = OPF_USES_SYMBOL_ID | OPF_VOLATILE, // uses Op::symbol_id
-	[OP_RET] = OPF_VOLATILE,
-	[OP_ENDPROC] = OPF_UNCONDITIONAL | OPF_VOLATILE,
+	[OP_CALL] = OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID, // uses Op::symbol_id
+	[OP_RET] = 0,
+	[OP_ENDPROC] = OPF_UNCONDITIONAL,
 	[OP_LD64] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
 	[OP_STR64] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
 	[OP_LD32] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
@@ -364,15 +364,16 @@ static sbuf conditionNames[N_CONDS] = { _conditionNames };
 
 typedef struct {
 	int8_t type;
-	uint8_t dst_reg;
-	uint8_t src_reg;
-	uint8_t var_size;
-	uint8_t cond_id;
-	uint8_t cond_arg;
-	uint8_t src2_reg;
+	uint8_t dst_reg:4;
+	uint8_t src_reg:4;
+	uint8_t var_size:4;
+	uint8_t cond_id:4;
+	uint8_t cond_arg:4;
+	uint8_t src2_reg:4;
+	uint32_t module_id;
 	union {
 		uint64_t value;
-		int64_t symbol_id;
+		int32_t symbol_id;
 		int64_t new_var_size;
 		int64_t op_offset;
 		char* mark_name;
@@ -417,6 +418,7 @@ typedef enum {
 	PIECE_INT32,
 	PIECE_INT64,
 	PIECE_TEXT,
+	PIECE_ADDR,
 	N_PIECE_TYPES
 } DataPieceType;
 
@@ -444,15 +446,24 @@ typedef struct {
 } Var;
 
 typedef struct {
+	int es_offset;
+	int es_length;
+	int ds_offset;
+	int ds_length;
+	int ms_offset;
+	int ms_length;
+	char* name;
+	bool direct;
+} Submodule;
+declArray(Submodule);
+
+typedef struct {
 	OpArray execblock;
 	MemBlockArray memblocks;
 	DataBlockArray datablocks;
 	int64_t entry_opid;
 	int64_t stack_size;
-	strArray submodules;
-	int _root_db_start;
-	int _root_mb_start;
-	int _root_eb_start;
+	SubmoduleArray submodules;
 } Module;
 
 // special value for error reporting
@@ -477,18 +488,17 @@ typedef enum {
 	VBRB_ERR_MEM_BLOCK_NOT_FOUND,
 	VBRB_ERR_INVALID_REG_ID,
 	VBRB_ERR_UNKNOWN_BUILTIN,
-	VBRB_ERR_NON_PROC_CALL,
+	VBRB_ERR_UNCONDITIONAL_OP,
 	VBRB_ERR_UNKNOWN_VAR_NAME,
 	VBRB_ERR_UNCLOSED_PROC,
 	VBRB_ERR_UNKNOWN_CONDITION,
 	VBRB_ERR_INVALID_MODULE_NAME,
 	VBRB_ERR_MODULE_NOT_FOUND,
 	VBRB_ERR_MODULE_NOT_LOADED,
-	VBRB_ERR_PREPROCESSOR_FAILURE,
+	VBRB_ERR_INVALID_NAME,
 	VBRB_ERR_NO_VAR,
 	VBRB_ERR_DELNV_TOO_FEW_VARS,
 	VBRB_ERR_VAR_TOO_LARGE,
-	VBRB_ERR_INVALID_GOTO_ARG,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -546,7 +556,10 @@ typedef bool (*ExecCallback) (ExecEnv*, Module*, const Op*);
 
 void writeModule(Module* src, FILE* dst);
 FILE* findModule(char* name, char* search_paths[]);
-Module* mergeModule(Module* src, Module* dst);
+Submodule* getOpSubmodule(Module* module, Op* op);
+Submodule* getDataBlockSubmodule(Module* module, DataBlock* block);
+Submodule* getMemBlockSubmodule(Module* module, MemBlock* block);
+Module* mergeModule(Module* restrict src, Module* dst, char* src_name);
 void resolveModule(Module* dst, bool for_exec);
 BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);

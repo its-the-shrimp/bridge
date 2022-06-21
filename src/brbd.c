@@ -84,22 +84,22 @@ void printOpVar(Module* module, Op* op, FILE* dst)
 
 void printRegSymbolIdOp(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%c %%%lld", regchar(op->dst_reg), op->symbol_id);
+	fprintf(dst, "r%c %%%d", regchar(op->dst_reg), op->symbol_id);
 }
 
 void printSymbolIdOp(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "%lld", op->symbol_id);
+	fprintf(dst, "%d", op->symbol_id);
 }
 
 void printOpLdv(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%c %lld%%%hhu", regchar(op->dst_reg), op->symbol_id, op->var_size);
+	fprintf(dst, "r%c %d%%%hhu", regchar(op->dst_reg), op->symbol_id, op->var_size);
 }
 
 void printOpStrv(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "%lld%%%hhu r%c", op->symbol_id, op->var_size, regchar(op->dst_reg));
+	fprintf(dst, "%d%%%hhu r%c", op->symbol_id, op->var_size, regchar(op->dst_reg));
 }
 
 void printOpPopv(Module* module, Op* op, FILE* dst)
