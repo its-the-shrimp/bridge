@@ -90,6 +90,7 @@ typedef enum {
 #define OPF_USES_VAR_SIZE 1024
 #define OPF_USES_COND_ARG 2048
 #define OPF_USES_MODULE_ID 4096
+#define OPF_REQ_NAME_RESOLUTION 8192
 
 #define OPF_IS_2REG_IMM (OPF_USES_DST_REG | OPF_USES_SRC_REG | OPF_USES_VALUE)
 #define OPF_IS_3REG (OPF_USES_DST_REG | OPF_USES_SRC_REG | OPF_USES_SRC2_REG)
@@ -102,9 +103,9 @@ const static unsigned short op_flags[N_OPS] = {
 	[OP_MARK] = OPF_UNCONDITIONAL,
 	[OP_SET] = OPF_USES_DST_REG | OPF_USES_VALUE,
 	[OP_SETR] = OPF_IS_2REG,
-	[OP_SETD] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID,
+	[OP_SETD] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID | OPF_REQ_NAME_RESOLUTION,
 	[OP_SETB] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID,
-	[OP_SETM] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID,
+	[OP_SETM] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID | OPF_REQ_NAME_RESOLUTION,
 	[OP_ADD] = OPF_IS_2REG_IMM, 
 	[OP_ADDR] = OPF_IS_3REG,
 	[OP_SUB] = OPF_IS_2REG_IMM,
@@ -126,8 +127,8 @@ const static unsigned short op_flags[N_OPS] = {
 	[OP_SHRR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	[OP_SHRS] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
 	[OP_SHRSR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
-	[OP_PROC] = OPF_USES_MARK_NAME, // uses Op::mark_name
-	[OP_CALL] = OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID, // uses Op::symbol_id
+	[OP_PROC] = OPF_USES_MARK_NAME | OPF_REQ_NAME_RESOLUTION, // uses Op::mark_name
+	[OP_CALL] = OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID | OPF_REQ_NAME_RESOLUTION, // uses Op::symbol_id
 	[OP_RET] = 0,
 	[OP_ENDPROC] = OPF_UNCONDITIONAL,
 	[OP_LD64] = OPF_IS_2REG, // uses Op::dst_reg and Op::src_reg
@@ -146,12 +147,12 @@ const static unsigned short op_flags[N_OPS] = {
 	[OP_DIVR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
 	[OP_DIVS] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
 	[OP_DIVSR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg 
-	[OP_EXTPROC] = OPF_USES_MARK_NAME | OPF_UNCONDITIONAL, // uses Op::mark_name
+	[OP_EXTPROC] = OPF_USES_MARK_NAME | OPF_UNCONDITIONAL | OPF_REQ_NAME_RESOLUTION, // uses Op::mark_name
 	[OP_LDV] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::src_reg, Op::symbol_id and Op::var_size
 	[OP_STRV] = OPF_USES_SRC_REG | OPF_USES_SYMBOL_ID | OPF_USES_VAR_SIZE, // uses Op::dst_reg, Op::symbol_id and Op::var_size
 	[OP_POPV] = OPF_USES_DST_REG | OPF_USES_VAR_SIZE | OPF_UNCONDITIONAL, // uses Op::dst_reg, Op::var_size
 	[OP_PUSHV] = OPF_USES_SRC_REG | OPF_USES_VAR_SIZE | OPF_UNCONDITIONAL, // uses Op::src_reg and Op::var_size
-	[OP_ATF] = OPF_USES_MARK_NAME | OPF_UNCONDITIONAL, // uses Op::mark_name
+	[OP_ATF] = OPF_USES_MARK_NAME | OPF_UNCONDITIONAL | OPF_REQ_NAME_RESOLUTION, // uses Op::mark_name
 	[OP_ATL] = OPF_USES_SYMBOL_ID | OPF_UNCONDITIONAL, // uses Op::symbol_id
 	[OP_SETC] = OPF_USES_DST_REG | OPF_USES_COND_ARG | OPF_USES_DST_REG, // uses Op::cond_arg and Op::dst_reg
 	[OP_DELNV] = OPF_USES_SYMBOL_ID | OPF_UNCONDITIONAL, // uses Op::symbol_id
@@ -271,11 +272,8 @@ static sbuf syscallNames[] = { _syscallNames };
 typedef enum {
 	BRB_ERR_OK,
 	BRB_ERR_NO_MEMORY,
-	BRB_ERR_NO_BLOCK_NAME,
-	BRB_ERR_NO_BLOCK_SIZE,
-	BRB_ERR_NO_BLOCK_SPEC,
 	BRB_ERR_NO_OPCODE,
-	BRB_ERR_NO_MARK_NAME,
+	BRB_ERR_UNRESOLVED_NAMES,
 	BRB_ERR_NO_OP_ARG,
 	BRB_ERR_INVALID_OPCODE,
 	BRB_ERR_NO_DATA_SEGMENT,
@@ -418,15 +416,31 @@ typedef enum {
 	PIECE_INT32,
 	PIECE_INT64,
 	PIECE_TEXT,
-	PIECE_ADDR,
+	PIECE_DB_ADDR,
+	PIECE_MB_ADDR,
 	N_PIECE_TYPES
 } DataPieceType;
+
+static const sbuf dataPieceNames[N_PIECE_TYPES] = {
+	[PIECE_INT16] = CSBUF(".int16"),
+	[PIECE_INT32] = CSBUF(".int32"),
+	[PIECE_INT64] = CSBUF(".int64"),
+	[PIECE_DB_ADDR] = CSBUF(".db_addr"),
+	[PIECE_MB_ADDR] = CSBUF(".mb_addr")
+};
 
 typedef struct {
 	DataPieceType type;
 	union {
-		sbuf data; // for PIECE_LITERAL
+		sbuf data; // for PIECE_BYTES or PIECE_TEXT
 		int64_t integer; // for PIECE_INT*
+		struct { // for PIECE_*_ADDR
+			uint32_t module_id;
+			union {
+				char* mark_name; // if not resolved
+				int64_t symbol_id; // after it's resolved
+			};
+		};
 	};
 } DataPiece;
 declArray(DataPiece);
@@ -458,9 +472,9 @@ typedef struct {
 declArray(Submodule);
 
 typedef struct {
-	OpArray execblock;
-	MemBlockArray memblocks;
-	DataBlockArray datablocks;
+	OpArray seg_exec;
+	MemBlockArray seg_memory;
+	DataBlockArray seg_data;
 	int64_t entry_opid;
 	int64_t stack_size;
 	SubmoduleArray submodules;
@@ -499,6 +513,7 @@ typedef enum {
 	VBRB_ERR_NO_VAR,
 	VBRB_ERR_DELNV_TOO_FEW_VARS,
 	VBRB_ERR_VAR_TOO_LARGE,
+	VBRB_ERR_INVALID_DATA_BLOCK_FMT,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -507,14 +522,14 @@ typedef struct vbrb_error {
 	BRP* prep;
 	Token loc;
 	union {
-		struct { // for VBRB_ERR_INVALID_ARG
+		struct { // for VBRB_ERR_INVALID_ARG or VBRB_ERR_INVALID_DATA_BLOCK_FMT
 			int8_t arg_id;
 			uint8_t op_type;
+#			define data_piece_type op_type
 			uint8_t expected_token_type;
 		};
 		int64_t item_size;
 		char* mark_name;
-		char* module_name;
 		int var_count;
 		BRBLoadError load_error;
 		Var var;
@@ -538,8 +553,8 @@ typedef struct execEnv {
 	void* stack_brk;
 	void* stack_head;
 	void* prev_stack_head;
-	sbufArray memblocks;
-	sbufArray datablocks;
+	sbufArray seg_memory;
+	sbufArray seg_data;
 	uint8_t exitcode;
 	int op_id;
 	uint64_t* registers;
@@ -564,7 +579,7 @@ void resolveModule(Module* dst, bool for_exec);
 BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);
 void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level);
-void printLoadError(BRBLoadError err);
+void printLoadError(FILE* dst, BRBLoadError err);
 void initExecEnv(ExecEnv* env, Module* module, char** args);
 bool addDefaultCallback(ExecEnv* env, ExecCallback callback);
 bool addCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback);

@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
 	char* module_search_paths[] = { ".", NULL };
 	BRBLoadError err = loadModule(input_fd, &module, module_search_paths, BRB_EXECUTABLE);
 	if (err.code) {
-		printLoadError(err);
+		printLoadError(stderr, err);
 		return 1;
 	}
 	if (module.entry_opid < 0) {
