@@ -288,13 +288,19 @@ typedef enum {
 	BRB_ERR_NO_LOAD_SEGMENT,
 	BRB_ERR_MODULE_NOT_FOUND,
 	BRB_ERR_INVALID_BLOCK,
+	BRB_ERR_UNRESOLVED_MB_REF,
+	BRB_ERR_UNRESOLVED_DB_REF,
+	BRB_ERR_UNRESOLVED_PROC_REF,
 	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
 typedef struct {
 	BRBLoadErrorCode code;
 	union {
-		char* module_name; // for BRB_ERR_MODULE_NOT_FOUND
+		struct { // for BRB_ERR_UNRESOLVED_*_REF
+			char* module_name; // also for BRB_ERR_MODULE_NOT_FOUND
+			char* mark_name;
+		};
 		int32_t opcode; // for BRB_ERR_INVALID_OPCODE and BRB_ERR_NO_OP_ARG
 		uint8_t cond_id; // for BRB_ERR_INVALID_COND_ID
 	};
@@ -448,6 +454,7 @@ declArray(DataPiece);
 typedef struct {
 	char* name;
 	DataPieceArray pieces;
+	bool is_mutable;
 } DataBlock;
 declArray(DataBlock);
 
@@ -514,6 +521,7 @@ typedef enum {
 	VBRB_ERR_DELNV_TOO_FEW_VARS,
 	VBRB_ERR_VAR_TOO_LARGE,
 	VBRB_ERR_INVALID_DATA_BLOCK_FMT,
+	VBRB_ERR_INVALID_DATA_PIECE_USE,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -575,7 +583,7 @@ Submodule* getOpSubmodule(Module* module, Op* op);
 Submodule* getDataBlockSubmodule(Module* module, DataBlock* block);
 Submodule* getMemBlockSubmodule(Module* module, MemBlock* block);
 Module* mergeModule(Module* restrict src, Module* dst, char* src_name);
-void resolveModule(Module* dst, bool for_exec);
+BRBLoadError resolveModule(Module* dst, bool for_exec);
 BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);
 void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level);

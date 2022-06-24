@@ -204,7 +204,7 @@ void writeDataBlock(ModuleWriter* writer, DataBlock block)
 {
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `writeDataBlock`");
 
-	writeName(writer, block.name, 0);
+	writeName(writer, block.name, block.is_mutable);
 	writeInt(writer->dst, block.pieces.length, 0);
 	for (int i = 0; i < block.pieces.length; ++i) {
 		DataPiece* piece = block.pieces.data + i;
@@ -600,6 +600,7 @@ BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
 {
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `loadDataBlock`");
 
+	block->is_mutable = loadHalfByte(loader->src, loader->n_fetched);
 	block->name = (char*)loadInt(loader->src, loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 
@@ -650,7 +651,7 @@ typedef BRBLoadError (*OpLoader) (ModuleLoader*, Op*);
  
 void printLoadError(FILE* dst, BRBLoadError err)
 {
-	static_assert(N_BRB_ERRORS == 18, "not all BRB errors are handled\n");
+	static_assert(N_BRB_ERRORS == 21, "not all BRB errors are handled\n");
 	switch (err.code) {
 		case BRB_ERR_OK: break;
 		case BRB_ERR_NO_MEMORY:
@@ -706,6 +707,15 @@ void printLoadError(FILE* dst, BRBLoadError err)
 			break;
 		case BRB_ERR_INVALID_BLOCK:
 			fprintf(dst, "BRB loading error: invalid block structure\n");
+			break;
+		case BRB_ERR_UNRESOLVED_DB_REF:
+			fprintf(dst, "data block `%s` was not found in module `%s`\n", err.mark_name, err.module_name);
+			break;
+		case BRB_ERR_UNRESOLVED_MB_REF:
+			fprintf(dst, "memory block `%s` was not found in module `%s`\n", err.mark_name, err.module_name);
+			break;
+		case BRB_ERR_UNRESOLVED_PROC_REF:
+			fprintf(dst, "procedure `%s` was not found in module `%s`\n", err.mark_name, err.module_name);
 			break;
 		case N_BRB_ERRORS:
 			fprintf(dst, "unreachable\n");
@@ -1113,9 +1123,10 @@ Module* mergeModule(Module* restrict src, Module* dst, char* src_name)
 fieldArray getUnresolvedNames(Module* module)
 {
 	fieldArray res = {0};
+	Submodule root = getRootSubmodule(module, ".");
 	for (
-		DataBlock* block = module->seg_data.data;
-		block - module->seg_data.data < module->seg_data.length;
+		DataBlock* block = module->seg_data.data + root.ds_offset;
+		block - module->seg_data.data < root.ds_offset + root.ds_length;
 		++block
 	) {
 		fieldArray_append(&res, &block->name);
@@ -1130,16 +1141,16 @@ fieldArray getUnresolvedNames(Module* module)
 	}
 
 	for (
-		MemBlock* block = module->seg_memory.data;
-		block - module->seg_memory.data < module->seg_memory.length;
+		MemBlock* block = module->seg_memory.data + root.ms_offset;
+		block - module->seg_memory.data < root.ms_offset + root.ms_length;
 		++block
 	) {
 		fieldArray_append(&res, &block->name);
 	}
 
 	for (
-		Op* op = module->seg_exec.data;
-		op - module->seg_exec.data < module->seg_exec.length;
+		Op* op = module->seg_exec.data + root.es_offset;
+		op - module->seg_exec.data < root.es_offset + root.es_length;
 		++op
 	) {
 		if (op_flags[op->type] & OPF_REQ_NAME_RESOLUTION)
@@ -1262,7 +1273,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		};
 		name[--name_length] = '\0';
 
-		for (int64_t i1 = 0; i1 < unresolved.length; ++i1) {
+		for (unsigned int i1 = 0; i1 < unresolved.length; ++i1) {
 			if (*unresolved.data[i1] == (char*)i) {
 				*unresolved.data[i1] = name;
 				fieldArray_pop(&unresolved, i1);
@@ -1278,7 +1289,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 	return (BRBLoadError){0};
 }
 
-void resolveModule(Module* dst, bool for_exec)
+BRBLoadError resolveModule(Module* dst, bool for_exec)
 {
 	Submodule *submodule, *root = SubmoduleArray_append(&dst->submodules, getRootSubmodule(dst, "."));
 
@@ -1304,10 +1315,15 @@ void resolveModule(Module* dst, bool for_exec)
 						if (sbufeq(block_iter->name, piece->mark_name)) {
 							piece->symbol_id = block_iter - dst->seg_data.data;
 							submodule = NULL;
+							break;
 						}
 					}
 
-					assert(submodule == NULL, "");
+					if (submodule) return (BRBLoadError){
+						.code = BRB_ERR_UNRESOLVED_DB_REF,
+						.module_name = submodule->name,
+						.mark_name = piece->mark_name
+					};
 					break;
 				case PIECE_MB_ADDR:
 					submodule = dst->submodules.data + piece->module_id;
@@ -1319,10 +1335,15 @@ void resolveModule(Module* dst, bool for_exec)
 						if (sbufeq(block_iter->name, piece->mark_name)) {
 							piece->symbol_id = block_iter - dst->seg_memory.data;
 							submodule = NULL;
+							break;
 						}
 					}
 
-					assert(submodule == NULL, "");
+					if (submodule) return (BRBLoadError){
+						.code = BRB_ERR_UNRESOLVED_MB_REF,
+						.module_name = submodule->name,
+						.mark_name = piece->mark_name
+					};
 					break;
 				default:
 					break;
@@ -1339,23 +1360,32 @@ void resolveModule(Module* dst, bool for_exec)
 				for (int64_t db_i = submodule->ds_offset; db_i < submodule->ds_offset + submodule->ds_length; db_i++) {
 					if (sbufeq(op->mark_name, dst->seg_data.data[db_i].name)) {
 						op->symbol_id = db_i;
-						op = NULL;
+						submodule = NULL;
 						break;
 					}
 				}
-				assert(op == NULL, "internal bug: could not resolve location of the data block, referred to by `setd` operation");
+
+				if (submodule) return (BRBLoadError){
+					.code = BRB_ERR_UNRESOLVED_DB_REF,
+					.module_name = submodule->name,
+					.mark_name = op->mark_name
+				};
 				break;
 			case OP_SETM:
 				submodule = dst->submodules.data + op->module_id;
 				for (int64_t mb_i = submodule->ms_offset; mb_i < submodule->ms_offset + submodule->ms_length; mb_i++) {
 					if (sbufeq(op->mark_name, dst->seg_memory.data[mb_i].name)) {
 						op->symbol_id = mb_i;
-						op = NULL;
+						submodule = NULL;
 						break;
 					}
 				}
 
-				assert(op == NULL, "internal bug: could not resolve location of the memory block, referred to by `setm` operation");
+				if (submodule) return (BRBLoadError){
+					.code = BRB_ERR_UNRESOLVED_MB_REF,
+					.module_name = submodule->name,
+					.mark_name = op->mark_name
+				};
 				break;
 			case OP_CALL:
 				submodule = dst->submodules.data + op->module_id;
@@ -1365,13 +1395,17 @@ void resolveModule(Module* dst, bool for_exec)
 					if (proc->type == OP_PROC || proc->type == OP_EXTPROC) {
 						if (sbufeq(proc->mark_name, op->mark_name)) {
 							op->symbol_id = proc_index;
-							op = NULL;
+							submodule = NULL;
 							break;
 						}
 					}
 				}
 
-				assert(op == NULL, "internal bug: could not resolve location of the procedure, referred to by `call` operation");
+				if (submodule) return (BRBLoadError){
+					.code = BRB_ERR_UNRESOLVED_PROC_REF,
+					.module_name = submodule->name,
+					.mark_name = op->mark_name
+				};
 				break;
 			default:
 				break;
@@ -1380,26 +1414,27 @@ void resolveModule(Module* dst, bool for_exec)
 
 
 //  resolving entry
+	dst->entry_opid = -1;
 	if (for_exec) {
-		dst->entry_opid = -1;
-		for (int i = root->es_offset; i < dst->seg_exec.length; i++) {
-			Op* op = dst->seg_exec.data + i;
-			if (op->type == OP_PROC || op->type == OP_EXTPROC) {
+		for (Op* op = dst->seg_exec.data + root->es_offset; op - dst->seg_exec.data < root->es_offset + root->es_length; ++op) {
+			if (op->type == OP_EXTPROC) {
 				if (sbufeq(op->mark_name, "main")) {
-					dst->entry_opid = i;
+					dst->entry_opid = op - dst->seg_exec.data;
 					break;
 				}
 			}
 		}
+		if (dst->entry_opid < 0) return (BRBLoadError){.code = BRB_ERR_NO_ENTRY};
 	}
+
+	return (BRBLoadError){0};
 }
 
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags)
 {
 	BRBLoadError err = preloadModule(src, dst, search_paths);
 	if (err.code) return err;
-	resolveModule(dst, flags & BRB_EXECUTABLE);
-	return (BRBLoadError){0};
+	return resolveModule(dst, flags & BRB_EXECUTABLE);
 }
 
 typedef int Symbol;
@@ -2328,6 +2363,7 @@ sbuf allocateDataBlock(DataBlock block)
 			case PIECE_DB_ADDR:
 			case PIECE_MB_ADDR:
 				res += 8;
+				break;
 			case PIECE_NONE:
 			case N_PIECE_TYPES:
 			default:

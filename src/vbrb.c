@@ -111,6 +111,7 @@ typedef enum {
 	KW_INT64,
 	KW_DB_ADDR,
 	KW_MB_ADDR,
+	KW_MUT,
 	N_VBRB_KWS
 } VBRBKeyword;
 static_assert(N_OPS == 70, "Some BRB operations have unmatched keywords");
@@ -131,7 +132,7 @@ char* getVBRBTokenTypeName(TokenType type)
 }
 
 void printVBRBError(FILE* dst, VBRBError err) {
-	static_assert(N_VBRB_ERRORS == 29, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 30, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
 		fprintTokenLoc(stderr, err.loc.loc);
 		fprintf(dst, "error: ");
@@ -280,6 +281,9 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				fprintTokenStr(dst, err.loc, err.prep);
 				fputc('\n', dst);
 				break;
+			case VBRB_ERR_INVALID_DATA_PIECE_USE:
+				fprintf(dst, "`%.*s` data piece can only be used in mutable data blocks\n", unpack(dataPieceNames[err.data_piece_type]));
+				break;
 		}
 	}
 }
@@ -302,7 +306,7 @@ typedef struct {
 } CompilerCtx;
 typedef VBRBError (*OpCompiler) (CompilerCtx*, Module*);
 
-VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece)
+VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool is_mutable)
 {
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `getDataPiece`");
 
@@ -340,6 +344,12 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece)
 		case KW_MB_ADDR:
 			arg = fetchToken(ctx->prep);
 			piece->type = spec.keyword_id - KW_DB_ADDR + PIECE_DB_ADDR;
+			if (!is_mutable) return (VBRBError){
+				.prep = ctx->prep,
+				.code = VBRB_ERR_INVALID_DATA_PIECE_USE,
+				.loc = spec,
+				.data_piece_type = piece->type
+			};
 			if (!isWordToken(arg)) return (VBRBError){
 				.prep = ctx->prep,
 				.code = VBRB_ERR_INVALID_DATA_BLOCK_FMT,
@@ -1293,7 +1303,10 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 		BRP_KEYWORD("load"),
 		BRP_KEYWORD(".int16"),
 		BRP_KEYWORD(".int32"),
-		BRP_KEYWORD(".int64")
+		BRP_KEYWORD(".int64"),
+		BRP_KEYWORD(".db_addr"),
+		BRP_KEYWORD(".mb_addr"),
+		BRP_KEYWORD("mut")
 	);
 	setInput(obj, src_name, src);
 	
@@ -1342,10 +1355,14 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 
 				Token block_name, block_spec;
 				DataBlock* block;
+				bool is_mutable = false;
 				while (true) {
 					block_name = fetchToken(obj);
 					if (getTokenSymbolId(block_name) == SYMBOL_SEGMENT_END) {
 						break;
+					} else if (getTokenKeywordId(block_name) == KW_MUT && !is_mutable) {
+						is_mutable = true;
+						continue;
 					} else if (block_name.type != TOKEN_STRING) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
@@ -1361,7 +1378,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 						.loc = block_name
 					};
 
-					if (!(block = DataBlockArray_append(&dst->seg_data, (DataBlock){0}))) {
+					if (!(block = DataBlockArray_append(&dst->seg_data, (DataBlock){.is_mutable = is_mutable}))) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
 							.prep = obj,
@@ -1383,7 +1400,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 									.code = VBRB_ERR_NO_MEMORY
 								};
 							}
-							VBRBError err = getDataPiece(&compctx, dst, piece);
+							VBRBError err = getDataPiece(&compctx, dst, piece, block->is_mutable);
 							if (err.code) return err;
 						}
 						fetchToken(obj);
@@ -1396,9 +1413,10 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 								.code = VBRB_ERR_NO_MEMORY
 							};
 						}
-						VBRBError err = getDataPiece(&compctx, dst, piece);
+						VBRBError err = getDataPiece(&compctx, dst, piece, block->is_mutable);
 						if (err.code) return err;
 					}
+					is_mutable = false;
 				}
 
 				break;
@@ -1407,7 +1425,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
 					delCompilerCtx(&compctx);
 					return (VBRBError){
-                        .prep = obj,
+                    				.prep = obj,
 						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
 						.loc = block_start
 					};
@@ -1464,7 +1482,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
 					delCompilerCtx(&compctx);
 					return (VBRBError){
-                        .prep = obj,
+                    				.prep = obj,
 						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
 						.loc = block_start
 					};
@@ -1510,7 +1528,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 						if (!inRange(getTokenKeywordId(cond_spec), KW_COND_NON, KW_COND_NON + N_CONDS)) {
 							delCompilerCtx(&compctx);
 							return (VBRBError){
-                                .prep = obj,
+                            					.prep = obj,
 								.code = VBRB_ERR_UNKNOWN_CONDITION,
 								.loc = cond_spec
 							};
@@ -1576,7 +1594,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 			} default: {
 				delCompilerCtx(&compctx);
 				return (VBRBError){
-                    .prep = obj,
+                			.prep = obj,
 					.code = VBRB_ERR_UNKNOWN_SEGMENT_SPEC,
 					.loc = segment_spec
 				};
@@ -1585,7 +1603,12 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 	}
 	OpArray_append(&dst->seg_exec, (Op){ .type = OP_END });
 	
-	resolveModule(dst, flags & BRB_EXECUTABLE);
+	BRBLoadError resolution_err = resolveModule(dst, flags & BRB_EXECUTABLE);
+	if (resolution_err.code) return (VBRBError){
+		.code = VBRB_ERR_MODULE_NOT_LOADED,
+		.loc = (Token){ .type = TOKEN_WORD, .word = "." },
+		.load_error = resolution_err
+	};
 	delCompilerCtx(&compctx);
 	return (VBRBError){ .prep = obj };
 }

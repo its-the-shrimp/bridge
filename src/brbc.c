@@ -267,11 +267,20 @@ void compileOpSetdNative(Module* module, int index, CompCtx* ctx)
 	Op op = module->seg_exec.data[index];
 	DataBlock* block = module->seg_data.data + op.symbol_id;
 	compileCondition(ctx->dst, op.cond_id, 2);
-	fprintf(
-		ctx->dst,
-		"\tadr %s, \"%s::%s\"\n",
-		regNames64[op.dst_reg], getDataBlockSubmodule(module, block)->name, block->name
-	);
+	if (block->is_mutable) {
+		fprintf(
+			ctx->dst,
+			"\tadrp %1$s, \"%2$s::%3$s\"@PAGE\n"
+			"\tadd %1$s, %1$s, \"%2$s::%3$s\"@PAGEOFF\n",
+			regNames64[op.dst_reg], getDataBlockSubmodule(module, block)->name, block->name
+	       );
+	} else {
+		fprintf(
+			ctx->dst,
+			"\tadr %s, \"%s::%s\"\n",
+			regNames64[op.dst_reg], getDataBlockSubmodule(module, block)->name, block->name
+	       );
+	}
 }
 
 void compileOpSetbNative(Module* module, int index, CompCtx* ctx)
@@ -1137,53 +1146,87 @@ void compileByteCode(Module* src, FILE* dst)
 {
 	CompCtx ctx = {.dst = dst};
 
-	fprintf(dst, ".bss\n");
-	array_foreach(MemBlock, block, src->seg_memory, 
-		fprintf(dst, "\t\"%s::%s\": .zero %lld\n", getMemBlockSubmodule(src, src->seg_memory.data + _block)->name, block.name, block.size);
-	);
+	if (src->seg_memory.length) {
+		fprintf(dst, ".bss\n");
+		for (MemBlock* block = src->seg_memory.data; block - src->seg_memory.data < src->seg_memory.length; ++block) {
+			fprintf(dst, "\t\"%s::%s\": .zero %lld\n", getMemBlockSubmodule(src, block)->name, block->name, block->size);
+		}
+	}
 
-	fprintf(dst, ".text\n");
 	if (src->seg_data.length) {
-		array_foreach(DataBlock, block, src->seg_data,
-			fprintf(dst, "\"%s::%s\":\n", getDataBlockSubmodule(src, src->seg_data.data + _block)->name, block.name);
-			array_foreach(DataPiece, piece, block.pieces,
-				switch (piece.type) {
+		fputs(".data\n", dst);
+		for (DataBlock* block = src->seg_data.data; block - src->seg_data.data < src->seg_data.length; ++block) {
+			if (!block->is_mutable) continue;
+			fprintf(dst, "\"%s::%s\":\n", getDataBlockSubmodule(src, block)->name, block->name);
+			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
+				switch (piece->type) {
 					case PIECE_BYTES:
 					case PIECE_TEXT:
 						fputs("\t.ascii \"", dst);
-						fputsbufesc(dst, piece.data, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
+						fputsbufesc(dst, piece->data, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
 						fputs("\"\n", dst);
 						break;
 					case PIECE_INT16:
 					case PIECE_INT32:
 					case PIECE_INT64:
-						fprintf(dst, ".%dbyte %lld\n", 2 << (piece.type - PIECE_INT16), piece.integer);
+						fprintf(dst, "\t.%dbyte %lld\n", 2 << (piece->type - PIECE_INT16), piece->integer);
 						break;
 					case PIECE_DB_ADDR:
 						fprintf(
 							dst,
-							".8byte \"%s::%s\"\n",
-							src->submodules.data[piece.module_id].name,
-							src->seg_data.data[piece.symbol_id].name
+							".quad \"%s::%s\"\n",
+							src->submodules.data[piece->module_id].name,
+							src->seg_data.data[piece->symbol_id].name
 						);
 						break;
 					case PIECE_MB_ADDR:
 						fprintf(
 							dst,
-							".8byte \"%s::%s\"\n",
-							src->submodules.data[piece.module_id].name,
-							src->seg_memory.data[piece.symbol_id].name
+							".quad \"%s::%s\"\n",
+							src->submodules.data[piece->module_id].name,
+							src->seg_memory.data[piece->symbol_id].name
 						);
 						break;
 					case PIECE_NONE:
 					case N_PIECE_TYPES:
 					default:
-						eprintf("internal compiler bug: invalid block piece type %d\n", piece.type);
+						eprintf("internal compiler bug: invalid block piece type %d\n", piece->type);
 						abort();
 				}
-			);
+			}
 			fprintf(dst, ".align 4\n");
-		);
+		}
+	}
+
+	fprintf(dst, ".text\n");
+	if (src->seg_data.length) {
+		for (DataBlock* block = src->seg_data.data; block - src->seg_data.data < src->seg_data.length; ++block) {
+			if (block->is_mutable) continue;
+			fprintf(dst, "\"%s::%s\":\n", getDataBlockSubmodule(src, block)->name, block->name);
+			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
+				switch (piece->type) {
+					case PIECE_BYTES:
+					case PIECE_TEXT:
+						fputs("\t.ascii \"", dst);
+						fputsbufesc(dst, piece->data, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
+						fputs("\"\n", dst);
+						break;
+					case PIECE_INT16:
+					case PIECE_INT32:
+					case PIECE_INT64:
+						fprintf(dst, ".%dbyte %lld\n", 2 << (piece->type - PIECE_INT16), piece->integer);
+						break;
+					case PIECE_DB_ADDR:
+					case PIECE_MB_ADDR:
+					case PIECE_NONE:
+					case N_PIECE_TYPES:
+					default:
+						eprintf("internal compiler bug: invalid block piece type %d\n", piece->type);
+						abort();
+				}
+			}
+			fprintf(dst, ".align 4\n");
+		}
 	} else {
 		fprintf(dst, ".align 4\n");
 	}
