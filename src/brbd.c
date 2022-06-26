@@ -230,16 +230,16 @@ static bool program_exited;
 
 bool handler(ExecEnv* env, Module* module, const Op* op)
 {
-    for (int i = 0; i < n_breakpoints; i++) {
-        if (breakpoints[i] == env->op_id) {
-            if (last_breakpoint == breakpoints[i]) last_breakpoint = -1;
-            else {
+	for (int i = 0; i < n_breakpoints; i++) {
+		if (breakpoints[i] == env->op_id) {
+			if (last_breakpoint == breakpoints[i]) last_breakpoint = -1;
+			else {
 				last_breakpoint = breakpoints[i];
 				return true;
 			}
-        }
-    }
-    return false;
+		}
+	}
+	return false;
 }
 
 bool opEndCallback(ExecEnv* env, Module* module, const Op* op)
@@ -256,20 +256,20 @@ bool opSysCallback(ExecEnv* env, Module* module, const Op* op)
 
 void printUsageMsg(FILE* dst, char* exec_name)
 {
-    fprintf(
-        dst,
-        "brbd - BRB debugger\n"
-        "usage: %s [options] <file> [module args...]\n"
-        "options:\n"
-        "\t-h    Output this message and exit\n",
-        exec_name
-    );
+	fprintf(
+		dst,
+		"brbd - BRB debugger\n"
+		"usage: %s [options] <file> [module args...]\n"
+		"options:\n"
+		"\t-h    Output this message and exit\n",
+		exec_name
+	);
 }
 
 
 int main(int argc, char* argv[])
 {
-    char **module_argv, *input_name;
+	char **module_argv, *input_name;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
 			for (argv[i]++; *argv[i]; argv[i]++) {
@@ -314,7 +314,7 @@ int main(int argc, char* argv[])
 	addCallBack(&env, OP_END, opEndCallback);
 	addCallBack(&env, OP_SYS, opSysCallback);
  
-    	sbuf cmd = smalloc(256);
+		sbuf cmd = smalloc(256);
 	sbuf cmd_original = cmd;
 	while (true) {
 		cmd = cmd_original;
@@ -480,7 +480,7 @@ int main(int argc, char* argv[])
 
 			if (cmd.length > 0)
 				printf("invalid command `%.*s`\n", unpack(cmd));
-    }
+	}
 
-    return env.exitcode;
+	return env.exitcode;
 }

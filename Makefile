@@ -21,11 +21,10 @@ ifeq ("$(wildcard $(GLOBAL)/brbd)", "")
 	sudo ln -sF $(PWD)/$(BIN)/brbd $(GLOBAL)/brbd
 endif
 
-libbrb: src/brb.c src/vbrb.c src/core.c
-	cc -Wno-tautological-constant-out-of-range-compare -Wno-nullability-completeness -O3 -c -o $(LIB)/core.o -I include $(SRC)/core.c
-	cc -c -o $(LIB)/brb.o -I include -Wno-nullability-completeness -O3 $(SRC)/brb.c
-	cc -c -o $(LIB)/vbrb.o -I include -O3 -Wno-nullability-completeness $(SRC)/vbrb.c
-	cc -shared -o $(LIB)/libbrb.dylib $(LIB)/core.o $(LIB)/vbrb.o $(LIB)/brb.o
+libbrb: src/brb_*.c
+	cc -c $(SRC)/brb_*.c -Wno-initializer-overrides -I include
+	cc -shared -o $(LIB)/libbrb.dylib brb_*.o
+	rm brb_*.o
 
 brs: src/brs.c
 	cc $(UTILFLAGS) -o $(BIN)/brs $(SRC)/brs.c

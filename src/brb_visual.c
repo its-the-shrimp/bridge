@@ -1,4 +1,5 @@
 #include <brb.h>
+#include "brb_load.h"
 
 declArray(Var);
 defArray(Var);
@@ -409,7 +410,7 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 VBRBError getRegIdArg(CompilerCtx* ctx, Token src, uint8_t* dst, char op_type, char arg_id)
 {
 	if (src.type != TOKEN_WORD) return (VBRBError){
-        .prep = ctx->prep,
+		.prep = ctx->prep,
 		.code = VBRB_ERR_INVALID_ARG,
 		.loc = src,
 		.op_type = op_type,
@@ -417,7 +418,7 @@ VBRBError getRegIdArg(CompilerCtx* ctx, Token src, uint8_t* dst, char op_type, c
 		.expected_token_type = TOKEN_REG_ID
 	};
 	if (strlen(src.word) != 2 || src.word[0] != 'r') return (VBRBError){
-        .prep = ctx->prep,
+		.prep = ctx->prep,
 		.code = VBRB_ERR_INVALID_ARG,
 		.loc = src,
 		.op_type = op_type,
@@ -454,7 +455,7 @@ VBRBError getCondArg(CompilerCtx* ctx, Token src, uint8_t* dst, char op_type, ch
 VBRBError getIntArg(CompilerCtx* ctx, Token src, uint64_t* dst, char op_type, char arg_id)
 {
 	if (src.type != TOKEN_INT) return (VBRBError){
-        .prep = ctx->prep,
+		.prep = ctx->prep,
 		.code = VBRB_ERR_INVALID_ARG,
 		.loc = src,
 		.op_type = op_type,
@@ -525,7 +526,7 @@ VBRBError compileOpMark(CompilerCtx* ctx, Module* dst)
 	Token name_spec = fetchToken(ctx->prep);
 	if (name_spec.type != TOKEN_STRING) {
 		return (VBRBError){
-            .prep = ctx->prep,
+			.prep = ctx->prep,
 			.code = VBRB_ERR_INVALID_ARG,
 			.loc = name_spec,
 			.op_type = OP_MARK,
@@ -692,7 +693,7 @@ VBRBError compileOpSetb(CompilerCtx* ctx, Module* dst)
 	Token arg = fetchToken(ctx->prep);
 	if (!isWordToken(arg)) {
 		return (VBRBError){
-            .prep = ctx->prep,
+			.prep = ctx->prep,
 			.code = VBRB_ERR_INVALID_ARG,
 			.loc = arg,
 			.arg_id = 1,
@@ -703,7 +704,7 @@ VBRBError compileOpSetb(CompilerCtx* ctx, Module* dst)
 	op->symbol_id = getBRBuiltinValue(getTokenWord(ctx->prep, arg));
 	if (op->symbol_id == -1) {
 		return (VBRBError){
-            .prep = ctx->prep,
+			.prep = ctx->prep,
 			.code = VBRB_ERR_UNKNOWN_BUILTIN,
 			.loc = arg
 		};
@@ -721,7 +722,7 @@ VBRBError compileOpSyscall(CompilerCtx* ctx, Module* dst)
 		!inRange(arg.keyword_id, N_OPS, N_OPS + N_SYS_OPS)
 	) {
 		return (VBRBError){
-            .prep = ctx->prep,
+			.prep = ctx->prep,
 			.code = VBRB_ERR_UNKNOWN_SYSCALL,
 			.loc = arg
 		};
@@ -827,7 +828,7 @@ VBRBError compileOpCall(CompilerCtx* ctx, Module* dst)
 
 	Token name_spec = fetchToken(ctx->prep);
 	if (name_spec.type != TOKEN_STRING) return (VBRBError){
-        .prep = ctx->prep,
+		.prep = ctx->prep,
 		.code = VBRB_ERR_INVALID_ARG,
 		.loc = name_spec,
 		.op_type = OP_CALL,
@@ -881,7 +882,7 @@ VBRBError compileOpProc(CompilerCtx* ctx, Module* dst)
 	Op* op = arrayhead(dst->seg_exec);
 	if (ctx->in_proc) {
 		return (VBRBError){
-            .prep = ctx->prep,
+			.prep = ctx->prep,
 			.code = VBRB_ERR_UNCLOSED_PROC,
 			.loc = ctx->op_token
 		};
@@ -890,7 +891,7 @@ VBRBError compileOpProc(CompilerCtx* ctx, Module* dst)
 
 	Token name_spec = fetchToken(ctx->prep);
 	if (name_spec.type != TOKEN_STRING) return (VBRBError){
-        .prep = ctx->prep,
+		.prep = ctx->prep,
 		.code = VBRB_ERR_INVALID_ARG,
 		.loc = name_spec,
 		.op_type = op->type,
@@ -1277,10 +1278,10 @@ OpCompiler op_compilers[] = {
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 
-VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags)
+VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags)
 {
-    BRP* obj = malloc(sizeof(BRP));
-    initBRP(obj, NULL, BRP_ESC_STR_LITERALS);
+	BRP* obj = malloc(sizeof(BRP));
+	initBRP(obj, NULL, BRP_ESC_STR_LITERALS);
 	setSymbols(
 		obj,
 		BRP_SYMBOL("{"),
@@ -1425,7 +1426,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
 					delCompilerCtx(&compctx);
 					return (VBRBError){
-                    				.prep = obj,
+									.prep = obj,
 						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
 						.loc = block_start
 					};
@@ -1439,7 +1440,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 					} else if (block_name.type != TOKEN_STRING) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                            				.prep = obj,
+											.prep = obj,
 							.code = VBRB_ERR_BLOCK_NAME_EXPECTED,
 							.loc = block_name
 						};
@@ -1455,7 +1456,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 					if (block_spec.type != TOKEN_INT) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                            				.prep = obj,
+											.prep = obj,
 							.code = VBRB_ERR_BLOCK_SIZE_EXPECTED,
 							.loc = block_spec
 						};
@@ -1470,7 +1471,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 					)) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                       					.prep = obj,
+					   					.prep = obj,
 							.code = VBRB_ERR_NO_MEMORY,
 							.loc = block_spec
 						};
@@ -1482,7 +1483,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
 					delCompilerCtx(&compctx);
 					return (VBRBError){
-                    				.prep = obj,
+									.prep = obj,
 						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
 						.loc = block_start
 					};
@@ -1496,7 +1497,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 					if (!(new_op = OpArray_append(&dst->seg_exec, (Op){0}))) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                            				.prep = obj,
+											.prep = obj,
 							.code = VBRB_ERR_NO_MEMORY,
 							.loc = segment_spec
 						};
@@ -1506,7 +1507,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 					if (!inRange(kw_id, 0, N_OPS)) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                       					.prep = obj,
+					   					.prep = obj,
 							.code = VBRB_ERR_INVALID_OP,
 							.loc = op_name
 						};
@@ -1528,7 +1529,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 						if (!inRange(getTokenKeywordId(cond_spec), KW_COND_NON, KW_COND_NON + N_CONDS)) {
 							delCompilerCtx(&compctx);
 							return (VBRBError){
-                            					.prep = obj,
+												.prep = obj,
 								.code = VBRB_ERR_UNKNOWN_CONDITION,
 								.loc = cond_spec
 							};
@@ -1548,7 +1549,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
 					delCompilerCtx(&compctx);
 					return (VBRBError){
-                    				.prep = obj,
+									.prep = obj,
 						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
 						.loc = block_start
 					};
@@ -1560,7 +1561,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 					if (!isWordToken(module_name_spec)) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                            				.prep = obj,
+											.prep = obj,
 							.code = VBRB_ERR_INVALID_MODULE_NAME,
 							.loc = module_name_spec
 						};
@@ -1571,7 +1572,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 					if (!module_fd) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                        				.prep = obj,
+										.prep = obj,
 							.code = VBRB_ERR_MODULE_NOT_FOUND,
 							.loc = module_name_spec
 						};
@@ -1582,7 +1583,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 					if (err.code) {
 						delCompilerCtx(&compctx);
 						return (VBRBError){
-                      					.prep = obj,
+					  					.prep = obj,
 							.code = VBRB_ERR_MODULE_NOT_LOADED,
 							.loc = module_name_spec,
 							.load_error = err
@@ -1594,7 +1595,7 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 			} default: {
 				delCompilerCtx(&compctx);
 				return (VBRBError){
-                			.prep = obj,
+							.prep = obj,
 					.code = VBRB_ERR_UNKNOWN_SEGMENT_SPEC,
 					.loc = segment_spec
 				};
@@ -1615,5 +1616,5 @@ VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_pat
 
 void cleanupVBRBCompiler(VBRBError status)
 {
-    delBRP(status.prep);
+	delBRP(status.prep);
 }

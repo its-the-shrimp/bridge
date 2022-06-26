@@ -36,10 +36,10 @@ void* reverseByteOrder(void* src, long length);
 #define _s(x) #x
 
 #define _assert(expr, msg, file, line, f_name) { \
-    if (!(expr)) { \
-        fprintf(stderr, "Asssertion failed at "_s(file)":"_s(line)", in function "_s(f_name)":\n\t%s\n", (msg)); \
-        abort(); \
-    } \
+	if (!(expr)) { \
+		fprintf(stderr, "Asssertion failed at "_s(file)":"_s(line)", in function "_s(f_name)":\n\t%s\n", (msg)); \
+		abort(); \
+	} \
 }
 
 #define assert(expr, msg) _assert(expr, msg, __FILE__, __LINE__, __func__)

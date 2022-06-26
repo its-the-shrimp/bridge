@@ -544,7 +544,7 @@ typedef struct vbrb_error {
 	};
 } VBRBError;
 
-VBRBError compileModule(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags);
+VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags);
 void printVBRBError(FILE* dst, VBRBError err);
 void cleanupVBRBCompiler(VBRBError status);
 
@@ -577,21 +577,27 @@ typedef bool (*ExecCallback) (ExecEnv*, Module*, const Op*);
 
 #define getCurStackSize(execenv_p, module_p) (int64_t)((execenv_p)->stack_brk + (module_p)->stack_size - (execenv_p)->stack_head)
 
+// implemented in `src/brb_write.c`
 void writeModule(Module* src, FILE* dst);
+// implemented in `src/brb_core.c`
 FILE* findModule(char* name, char* search_paths[]);
 Submodule* getOpSubmodule(Module* module, Op* op);
 Submodule* getDataBlockSubmodule(Module* module, DataBlock* block);
 Submodule* getMemBlockSubmodule(Module* module, MemBlock* block);
 Module* mergeModule(Module* restrict src, Module* dst, char* src_name);
-BRBLoadError resolveModule(Module* dst, bool for_exec);
-BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);
+Submodule getRootSubmodule(Module* module, char* name);
+// implemented in `src/brb_load.c`
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);
-void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level);
 void printLoadError(FILE* dst, BRBLoadError err);
+// implemented in `src/brb_optimize.c`
+void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level);
+// implemented in `src/brb_exec.c`
 void initExecEnv(ExecEnv* env, Module* module, char** args);
 bool addDefaultCallback(ExecEnv* env, ExecCallback callback);
 bool addCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback);
 void execOp(ExecEnv* env, Module* module);
 void execModule(ExecEnv* env, Module* module, volatile bool* interruptor);
+// implemented in `src/brb_compile.c`
+void compileModule(Module* src, FILE* dst);
 
 #endif // _BRB_
