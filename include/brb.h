@@ -424,6 +424,7 @@ typedef enum {
 	PIECE_TEXT,
 	PIECE_DB_ADDR,
 	PIECE_MB_ADDR,
+	PIECE_ZERO,
 	N_PIECE_TYPES
 } DataPieceType;
 
@@ -432,7 +433,8 @@ static const sbuf dataPieceNames[N_PIECE_TYPES] = {
 	[PIECE_INT32] = CSBUF(".int32"),
 	[PIECE_INT64] = CSBUF(".int64"),
 	[PIECE_DB_ADDR] = CSBUF(".db_addr"),
-	[PIECE_MB_ADDR] = CSBUF(".mb_addr")
+	[PIECE_MB_ADDR] = CSBUF(".mb_addr"),
+	[PIECE_ZERO] = CSBUF(".zero")
 };
 
 typedef struct {
@@ -447,6 +449,7 @@ typedef struct {
 				int64_t symbol_id; // after it's resolved
 			};
 		};
+		int64_t n_bytes; // for PIECE_ZERO
 	};
 } DataPiece;
 declArray(DataPiece);

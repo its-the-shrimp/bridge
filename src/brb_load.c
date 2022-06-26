@@ -111,7 +111,7 @@ void load2Ints(FILE* fd, int64_t* x, int64_t* y, long* n_fetched)
 
 BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
 {
-	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `loadDataBlock`");
+	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `loadDataBlock`");
 
 	block->is_mutable = loadHalfByte(loader->src, loader->n_fetched);
 	block->name = (char*)loadInt(loader->src, loader->n_fetched);
@@ -139,7 +139,8 @@ BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
 				break;
 			case PIECE_TEXT:
 				piece->data = (sbuf){0};
-				getdelim(&piece->data.data, (size_t*)&piece->data.length, '\0', loader->src);
+				if (getdelim(&piece->data.data, (size_t*)&piece->data.length, '\0', loader->src) < 0)
+					return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 				break;
 			case PIECE_INT16:
 			case PIECE_INT32:
@@ -148,10 +149,14 @@ BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
 				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 				break;
 			case PIECE_DB_ADDR:
-			case PIECE_MB_ADDR: {
+			case PIECE_MB_ADDR:
 				load2Ints(loader->src, (int64_t*)&piece->module_id, (int64_t*)&piece->mark_name, loader->n_fetched);
+				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 				break;
-			}				
+			case PIECE_ZERO:
+				piece->n_bytes = loadInt(loader->src, loader->n_fetched);
+				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
+				break;
 			default:
 				return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 		}

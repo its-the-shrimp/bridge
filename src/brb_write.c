@@ -190,7 +190,7 @@ void writeName(ModuleWriter* writer, char* name, uint8_t hb)
 
 void writeDataBlock(ModuleWriter* writer, DataBlock block)
 {
-	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `writeDataBlock`");
+	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `writeDataBlock`");
 
 	writeName(writer, block.name, block.is_mutable);
 	writeInt(writer->dst, block.pieces.length, 0);
@@ -213,6 +213,9 @@ void writeDataBlock(ModuleWriter* writer, DataBlock block)
 				break;
 			case PIECE_MB_ADDR:
 				write2Ints(writer->dst, piece->module_id, getNameId(writer, writer->src->seg_memory.data[piece->symbol_id].name));
+				break;
+			case PIECE_ZERO:
+				writeInt(writer->dst, piece->n_bytes, 0);
 				break;
 			case PIECE_NONE:
 			case N_PIECE_TYPES:

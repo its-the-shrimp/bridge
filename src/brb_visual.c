@@ -113,6 +113,7 @@ typedef enum {
 	KW_DB_ADDR,
 	KW_MB_ADDR,
 	KW_MUT,
+	KW_ZERO,
 	N_VBRB_KWS
 } VBRBKeyword;
 static_assert(N_OPS == 70, "Some BRB operations have unmatched keywords");
@@ -309,7 +310,7 @@ typedef VBRBError (*OpCompiler) (CompilerCtx*, Module*);
 
 VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool is_mutable)
 {
-	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `getDataPiece`");
+	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `getDataPiece`");
 
 	Token spec = fetchToken(ctx->prep);
 	if (spec.type == TOKEN_STRING) {
@@ -321,6 +322,10 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 		} else {
 			piece->type = PIECE_BYTES;
 		}
+		return (VBRBError){ .prep = ctx->prep };
+	} else if (spec.type == TOKEN_INT) {
+		piece->type = PIECE_ZERO;
+		piece->n_bytes = spec.value;
 		return (VBRBError){ .prep = ctx->prep };
 	}
 
@@ -396,6 +401,19 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 				.loc = arg
 			};
 			piece->mark_name = arg.string.data;
+			break;
+		case KW_ZERO:
+			piece->type = PIECE_ZERO;
+			arg = fetchToken(ctx->prep);
+			if (arg.type != TOKEN_INT) return (VBRBError){
+				.prep = ctx->prep,
+				.code = VBRB_ERR_INVALID_DATA_BLOCK_FMT,
+				.loc = arg,
+				.data_piece_type = piece->type,
+				.arg_id = 0,
+				.expected_token_type = TOKEN_INT
+			};
+			piece->n_bytes = arg.value;
 			break;
 		default:
 			return (VBRBError){
@@ -1307,7 +1325,8 @@ VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths
 		BRP_KEYWORD(".int64"),
 		BRP_KEYWORD(".db_addr"),
 		BRP_KEYWORD(".mb_addr"),
-		BRP_KEYWORD("mut")
+		BRP_KEYWORD("mut"),
+		BRP_KEYWORD(".zero")
 	);
 	setInput(obj, src_name, src);
 	

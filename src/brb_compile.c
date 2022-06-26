@@ -1147,10 +1147,23 @@ void compileModule(Module* src, FILE* dst)
 		}
 	}
 
+#	define CUR_SEG_BSS 1
+#	define CUR_SEG_DATA 2
+#	define CUR_SEG_TEXT 3
+	char cur_seg = 0;
+	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `compileModule`");
 	if (src->seg_data.length) {
-		fputs(".data\n", dst);
 		for (DataBlock* block = src->seg_data.data; block - src->seg_data.data < src->seg_data.length; ++block) {
-			if (!block->is_mutable) continue;
+			if (block->is_mutable && block->pieces.length == 1 && block->pieces.data->type == PIECE_ZERO && cur_seg != CUR_SEG_BSS) {
+				fputs(".bss\n", dst);
+				cur_seg = CUR_SEG_BSS;
+			} else if (block->is_mutable && cur_seg != CUR_SEG_DATA) {
+				fputs(".data\n", dst);
+				cur_seg = CUR_SEG_DATA;
+			} else if (cur_seg != CUR_SEG_TEXT) {
+				fputs(".text\n", dst);
+				cur_seg = CUR_SEG_TEXT;
+			}
 			fprintf(dst, "\"%s::%s\":\n", getDataBlockSubmodule(src, block)->name, block->name);
 			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
 				switch (piece->type) {
@@ -1168,7 +1181,7 @@ void compileModule(Module* src, FILE* dst)
 					case PIECE_DB_ADDR:
 						fprintf(
 							dst,
-							".quad \"%s::%s\"\n",
+							"\t.quad \"%s::%s\"\n",
 							src->submodules.data[piece->module_id].name,
 							src->seg_data.data[piece->symbol_id].name
 						);
@@ -1176,11 +1189,14 @@ void compileModule(Module* src, FILE* dst)
 					case PIECE_MB_ADDR:
 						fprintf(
 							dst,
-							".quad \"%s::%s\"\n",
+							"\t.quad \"%s::%s\"\n",
 							src->submodules.data[piece->module_id].name,
 							src->seg_memory.data[piece->symbol_id].name
 						);
 						break;
+					case PIECE_ZERO:
+						fprintf(dst, "\t.zero %lld\n", piece->n_bytes);
+						break;
 					case PIECE_NONE:
 					case N_PIECE_TYPES:
 					default:
@@ -1190,40 +1206,8 @@ void compileModule(Module* src, FILE* dst)
 			}
 			fprintf(dst, ".align 4\n");
 		}
-	}
-
-	fprintf(dst, ".text\n");
-	if (src->seg_data.length) {
-		for (DataBlock* block = src->seg_data.data; block - src->seg_data.data < src->seg_data.length; ++block) {
-			if (block->is_mutable) continue;
-			fprintf(dst, "\"%s::%s\":\n", getDataBlockSubmodule(src, block)->name, block->name);
-			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
-				switch (piece->type) {
-					case PIECE_BYTES:
-					case PIECE_TEXT:
-						fputs("\t.ascii \"", dst);
-						fputsbufesc(dst, piece->data, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
-						fputs("\"\n", dst);
-						break;
-					case PIECE_INT16:
-					case PIECE_INT32:
-					case PIECE_INT64:
-						fprintf(dst, ".%dbyte %lld\n", 2 << (piece->type - PIECE_INT16), piece->integer);
-						break;
-					case PIECE_DB_ADDR:
-					case PIECE_MB_ADDR:
-					case PIECE_NONE:
-					case N_PIECE_TYPES:
-					default:
-						eprintf("internal compiler bug: invalid block piece type %d\n", piece->type);
-						abort();
-				}
-			}
-			fprintf(dst, ".align 4\n");
-		}
-	} else {
-		fprintf(dst, ".align 4\n");
-	}
+		if (cur_seg != CUR_SEG_TEXT) fprintf(dst, ".text\n.align 4\n");
+	} else fprintf(dst, ".text\n.align 4\n");
 
 
 	if (src->entry_opid >= 0) {

@@ -19,9 +19,6 @@ typedef enum {
 	KW_RETURN,
 	KW_CAST,
 	KW_BOOL,
-	KW_AND,
-	KW_OR,
-	KW_NOT,
 	KW_IF,
 	KW_ELSE,
 	KW_WHILE,
@@ -50,6 +47,9 @@ typedef enum {
 	SYMBOL_NEQ,
 	SYMBOL_LE,
 	SYMBOL_GE,
+	SYMBOL_NOT,
+	SYMBOL_OR,
+	SYMBOL_AND,
 	SYMBOL_ASSIGNMENT,
 	SYMBOL_PLUS,
 	SYMBOL_MINUS,
@@ -215,16 +215,17 @@ typedef struct {
 } AST;
 
 // flags for parseExpr desribing how the expression will be used
-#define EXPRTERM_FULL        0b1
-#define EXPRTERM_ARG         0b10
-#define EXPRTERM_BRACKET     0b100
-#define EXPRTERM_SQBRACKET   0b1000
-#define EXPRTERM_ARRAY_ARG   0b10000
-#define EXPRTYPE_EVALUATABLE 0b100000
-#define EXPRTYPE_VOIDABLE    0b1000000
-#define EXPRTYPE_LOGICAL     0b10000000
-#define EXPRTERM             (EXPRTERM_FULL | EXPRTERM_ARG | EXPRTERM_BRACKET | EXPRTERM_SQBRACKET | EXPRTERM_ARRAY_ARG)
-#define EXPRTYPE             (EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE | EXPRTYPE_LOGICAL)
+#define EXPRTERM_FULL         0b1
+#define EXPRTERM_ARG          0b10
+#define EXPRTERM_BRACKET      0b100
+#define EXPRTERM_SQBRACKET    0b1000
+#define EXPRTERM_ARRAY_ARG    0b10000
+#define EXPRTERM_DOWHILE_BODY 0b100000
+#define EXPRTYPE_EVALUATABLE  0b1000000
+#define EXPRTYPE_VOIDABLE     0b10000000
+#define EXPRTYPE_LOGICAL      0b100000000
+#define EXPRTERM              (EXPRTERM_FULL | EXPRTERM_ARG | EXPRTERM_BRACKET | EXPRTERM_SQBRACKET | EXPRTERM_ARRAY_ARG | EXPRTERM_DOWHILE_BODY)
+#define EXPRTYPE              (EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE | EXPRTYPE_LOGICAL)
 
 #define VARIADIC -1
 #define NULLARY 0
@@ -805,6 +806,7 @@ bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
 	int64_t symbol_id = getTokenSymbolId(token);
 	if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF || expr->type == EXPR_WHILE) && symbol_id == SYMBOL_BLOCK_END) return true; 
 	if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
+	if (flags & EXPRTERM_DOWHILE_BODY) return symbol_id == SYMBOL_SEMICOLON || getTokenKeywordId(token) == KW_WHILE;
 	if (flags & EXPRTERM_ARG) {
 		if (symbol_id == SYMBOL_ARGSPEC_END || symbol_id == SYMBOL_COMMA) return true;
 		if (symbol_id == SYMBOL_SEMICOLON)
@@ -1790,22 +1792,7 @@ bool parseKwCast(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* 
 	return false;
 }
 
-bool parseKwAndOr(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
-{
-	dst->loc = token.loc;
-	if (setExprType(ast, dst, parent_expr, EXPR_LOGICAL_AND + token.keyword_id - KW_AND)) {
-		unfetchToken(ast->prep, token);
-		return true;
-	}
-
-	dst->arg2 = calloc(1, sizeof(Expr));
-	token = peekToken(ast->prep);
-	parseExpr(ast, dst->arg2, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
-
-	return false;
-}
-
-bool parseKwNot(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolNot(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_LOGICAL_NOT)) {
@@ -1940,12 +1927,11 @@ bool parseKwDo(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* fu
 	dst->loc = token.loc;
 
 	dst->arg1 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_FULL);
+	parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_DOWHILE_BODY);
 	fetchToken(ast->prep);
 
 	token = fetchToken(ast->prep);
-	if (getTokenKeywordId(token) != KW_WHILE) raiseUnexpectedTokenError(ast, token, NULL, keywordToken(KW_WHILE));
-	token = fetchToken(ast->prep);
+	if (getTokenKeywordId(token) == KW_WHILE) token = fetchToken(ast->prep);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, keywordToken(SYMBOL_ARGSPEC_START));
 	
 	dst->arg2 = calloc(1, sizeof(Expr));
@@ -2118,7 +2104,9 @@ bool parseComparisonOperatorSymbol(AST* ast, Token token, Expr* dst, Expr* paren
 		[SYMBOL_LT] = EXPR_LOGICAL_LT,
 		[SYMBOL_GT] = EXPR_LOGICAL_GT,
 		[SYMBOL_LE] = EXPR_LOGICAL_LE,
-		[SYMBOL_GE] = EXPR_LOGICAL_GE
+		[SYMBOL_GE] = EXPR_LOGICAL_GE,
+		[SYMBOL_OR] = EXPR_LOGICAL_OR,
+		[SYMBOL_AND] = EXPR_LOGICAL_AND
 	};
 
 	dst->loc = token.loc;
@@ -2237,9 +2225,6 @@ void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* fu
 				[KW_RETURN] = parseKwReturn,
 				[KW_CAST] = parseKwCast,
 				[KW_BOOL] = parseInvalidKw,
-				[KW_AND] = parseKwAndOr,
-				[KW_OR] = parseKwAndOr,
-				[KW_NOT] = parseKwNot,
 				[KW_IF] = parseKwIf,
 				[KW_ELSE] = parseInvalidKw,
 				[KW_WHILE] = parseKwWhile,
@@ -2259,6 +2244,9 @@ void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* fu
 				[SYMBOL_NEQ] = parseComparisonOperatorSymbol,
 				[SYMBOL_LE] = parseComparisonOperatorSymbol,
 				[SYMBOL_GE] = parseComparisonOperatorSymbol,
+				[SYMBOL_NOT] = parseSymbolNot,
+				[SYMBOL_OR] = parseComparisonOperatorSymbol,
+				[SYMBOL_AND] = parseComparisonOperatorSymbol,
 				[SYMBOL_ASSIGNMENT] = parseSymbolAssignment,
 				[SYMBOL_PLUS] = parseBinaryExprSymbol,
 				[SYMBOL_MINUS] = parseBinaryExprSymbol,
@@ -4034,7 +4022,7 @@ int main(int argc, char* argv[])
 		eprintf("error: could not initialize the preprocessor due to memory shortage\n");
 		return 1;
 	}
-	static_assert(N_SYMBOLS == 35, "not all symbols are handled");
+	static_assert(N_SYMBOLS == 38, "not all symbols are handled");
 	setSymbols(
 		&prep,
 		BRP_SYMBOL("("),
@@ -4056,6 +4044,9 @@ int main(int argc, char* argv[])
 		BRP_SYMBOL("!="),
 		BRP_SYMBOL("<="),
 		BRP_SYMBOL(">="),
+		BRP_SYMBOL("!"),
+		BRP_SYMBOL("||"),
+		BRP_SYMBOL("&&"),
 		BRP_SYMBOL("="),
 		BRP_SYMBOL("+"),
 		BRP_SYMBOL("-"),
@@ -4076,7 +4067,7 @@ int main(int argc, char* argv[])
 		BRP_HIDDEN_SYMBOL("\t"),
 		BRP_HIDDEN_SYMBOL("\n")
 	);
-	static_assert(N_KWS == 18, "not all keywords are handled");
+	static_assert(N_KWS == 15, "not all keywords are handled");
 	setKeywords(
 		&prep,
 		BRP_KEYWORD("void"),
@@ -4089,9 +4080,6 @@ int main(int argc, char* argv[])
 		BRP_KEYWORD("return"),
 		BRP_KEYWORD("cast"),
 		BRP_KEYWORD("bool"),
-		BRP_KEYWORD("and"),
-		BRP_KEYWORD("or"),
-		BRP_KEYWORD("not"),
 		BRP_KEYWORD("if"),
 		BRP_KEYWORD("else"),
 		BRP_KEYWORD("while"),

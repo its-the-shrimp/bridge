@@ -827,7 +827,7 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 		fprintf(ctx.temp_out, "}\n");
 	}
 
-	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `optimizeModule`");
+	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `optimizeModule`");
 
 	if (ctx.used_db.length) {
 		fprintf(ctx.temp_out, "data {\n");
@@ -864,6 +864,9 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 							module->submodules.data[piece->module_id].name,
 							module->seg_memory.data[piece->symbol_id].name
 						);
+						break;
+					case PIECE_ZERO:
+						fprintf(ctx.temp_out, ".zero %lld ", piece->n_bytes);
 						break;
 					case PIECE_NONE:
 					case N_PIECE_TYPES:

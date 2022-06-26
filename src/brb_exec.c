@@ -3,7 +3,7 @@
 
 sbuf allocateDataBlock(DataBlock block)
 {
-	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `allocateDataBlock`");
+	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `allocateDataBlock`");
 
 	sbuf_size_t res = 0;
 	for (int i = 0; i < block.pieces.length; ++i) {
@@ -24,6 +24,9 @@ sbuf allocateDataBlock(DataBlock block)
 			case PIECE_MB_ADDR:
 				res += 8;
 				break;
+			case PIECE_ZERO:
+				res += piece->n_bytes;
+				break;
 			case PIECE_NONE:
 			case N_PIECE_TYPES:
 			default:
@@ -36,7 +39,7 @@ sbuf allocateDataBlock(DataBlock block)
 
 void assembleDataBlock(ExecEnv* env, DataBlock block, sbuf dst)
 {
-	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `assembleDataBlock`");
+	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `assembleDataBlock`");
 
 	int64_t offset = 0;
 	for (DataPiece* piece = block.pieces.data; piece - block.pieces.data < block.pieces.length; ++piece) {
@@ -66,6 +69,10 @@ void assembleDataBlock(ExecEnv* env, DataBlock block, sbuf dst)
 			case PIECE_MB_ADDR:
 				*(char**)(dst.data + offset) = env->seg_memory.data[piece->symbol_id].data;
 				offset += 8;
+				break;
+			case PIECE_ZERO:
+				memset(dst.data + offset, 0, piece->n_bytes);
+				offset += piece->n_bytes;
 				break;
 			case PIECE_NONE:
 			case N_PIECE_TYPES:
