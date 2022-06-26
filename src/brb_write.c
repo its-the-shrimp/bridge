@@ -3,7 +3,6 @@
 
 defArray(Op);
 defArray(DataBlock);
-defArray(MemBlock);
 defArray(DataPiece);
 defArray(str);
 defArray(Submodule);
@@ -190,7 +189,7 @@ void writeName(ModuleWriter* writer, char* name, uint8_t hb)
 
 void writeDataBlock(ModuleWriter* writer, DataBlock block)
 {
-	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `writeDataBlock`");
+	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `writeDataBlock`");
 
 	writeName(writer, block.name, block.is_mutable);
 	writeInt(writer->dst, block.pieces.length, 0);
@@ -210,9 +209,6 @@ void writeDataBlock(ModuleWriter* writer, DataBlock block)
 				break;
 			case PIECE_DB_ADDR:
 				write2Ints(writer->dst, piece->module_id, getNameId(writer, writer->src->seg_data.data[piece->symbol_id].name));
-				break;
-			case PIECE_MB_ADDR:
-				write2Ints(writer->dst, piece->module_id, getNameId(writer, writer->src->seg_memory.data[piece->symbol_id].name));
 				break;
 			case PIECE_ZERO:
 				writeInt(writer->dst, piece->n_bytes, 0);
@@ -258,12 +254,6 @@ void writeOpSetd(ModuleWriter* writer, Op op)
 {
 	writeInt(writer->dst, op.module_id, 0);
 	writeName(writer, writer->src->seg_data.data[op.symbol_id].name, op.dst_reg);
-}
-
-void writeOpSetm(ModuleWriter* writer, Op op)
-{
-	writeInt(writer->dst, op.module_id, 0);
-	writeName(writer, writer->src->seg_memory.data[op.symbol_id].name, op.dst_reg);
 }
 
 void writeOpSyscall(ModuleWriter* writer, Op op)
@@ -354,7 +344,6 @@ const OpWriter op_writers[] = {
 	[OP_SETR] = &write2RegOp,
 	[OP_SETD] = &writeOpSetd,
 	[OP_SETB] = &writeRegSymbolIdOp,
-	[OP_SETM] = &writeOpSetm,
 	[OP_ADD] = &write2RegImmOp,
 	[OP_ADDR] = &write3RegOp,
 	[OP_SUB] = &write2RegImmOp,
@@ -469,11 +458,6 @@ void writeModule(Module* src, FILE* dst)
 	writeInt(dst, root->ds_length, 0);
 	for (int i = root->ds_offset; i < src->seg_data.length; i++) {
 		writeDataBlock(&writer, src->seg_data.data[i]);
-	}
-//  dumping memory blocks
-	writeInt(dst, root->ms_length, 0);
-	for (int i = root->ms_offset; i < src->seg_memory.length; i++) {
-		writeMemoryBlock(&writer, src->seg_memory.data[i].name, src->seg_memory.data[i].size);
 	}
 //  dumping operations
 	writeInt(dst, root->es_length, 0);

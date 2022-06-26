@@ -19,17 +19,12 @@ void print2RegOp(Module* module, Op* op, FILE* dst)
 
 void printOpSetd(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "r%c %s", regchar(op->dst_reg), module->seg_data.data[op->symbol_id].name);
+	fprintf(dst, "r%c %s \"%s\"", regchar(op->dst_reg), module->submodules.data[op->module_id].name, module->seg_data.data[op->symbol_id].name);
 }
 
 void printOpSetb(Module* module, Op* op, FILE* dst)
 {
 	fprintf(dst, "r%c %s", regchar(op->dst_reg), builtins[op->symbol_id].name);
-}
-
-void printOpSetm(Module* module, Op* op, FILE* dst)
-{
-	fprintf(dst, "r%c %s", regchar(op->dst_reg), module->seg_memory.data[op->symbol_id].name);
 }
 
 void print2RegImmOp(Module* module, Op* op, FILE* dst)
@@ -49,7 +44,7 @@ void printOpSys(Module* module, Op* op, FILE* dst)
 
 void printOpGoto(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "%%%lld", op->op_offset);
+	fprintf(dst, "\".m%lld\"", op - module->seg_exec.data - op->op_offset);
 }
 
 void printOpCmp(Module* module, Op* op, FILE* dst)
@@ -64,7 +59,7 @@ void printOpCmpr(Module* module, Op* op, FILE* dst)
 
 void printOpMark(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, ".m%ld", op - module->seg_exec.data);
+	fprintf(dst, "\".m%ld\"", op - module->seg_exec.data);
 }
 
 void printMarkOp(Module* module, Op* op, FILE* dst)
@@ -74,7 +69,7 @@ void printMarkOp(Module* module, Op* op, FILE* dst)
 
 void printOpCall(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "%s", module->seg_exec.data[op->symbol_id].mark_name);
+	fprintf(dst, "%s \"%s\"", module->submodules.data[op->module_id].name, module->seg_exec.data[op->symbol_id].mark_name);
 }
 
 void printOpVar(Module* module, Op* op, FILE* dst)
@@ -125,7 +120,6 @@ const OpPrinter op_printers[] = {
 	[OP_SETR] = &print2RegOp,
 	[OP_SETD] = &printOpSetd,
 	[OP_SETB] = &printOpSetb,
-	[OP_SETM] = &printOpSetm,
 	[OP_ADD] = &print2RegImmOp,
 	[OP_ADDR] = &print3RegOp,
 	[OP_SUB] = &print2RegImmOp,

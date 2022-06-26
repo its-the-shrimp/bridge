@@ -1,7 +1,7 @@
 LIB = $(PWD)/build/lib
 BIN = build/bin
 SRC = src
-UTILFLAGS = -I include -L $(LIB) -lbrb -O3 -Wno-nullability-completeness
+UTILFLAGS = -I include -L $(LIB) -lbrb -O3 -Wno-nullability-completeness -ferror-limit=1
 GLOBAL = /usr/local/bin
 
 main: libbrb brs brbx brbc brc brbd
@@ -22,7 +22,7 @@ ifeq ("$(wildcard $(GLOBAL)/brbd)", "")
 endif
 
 libbrb: src/brb_*.c
-	cc -c $(SRC)/brb_*.c -Wno-initializer-overrides -I include
+	cc -c $(SRC)/brb_*.c -Wno-initializer-overrides -I include -ferror-limit=1
 	cc -shared -o $(LIB)/libbrb.dylib brb_*.o
 	rm brb_*.o
 

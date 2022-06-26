@@ -86,29 +86,6 @@ void optimizeOpSetb(Module* module, OptimizerCtx* ctx, Op* op)
 	fprintf(ctx->temp_out, "\tsetb:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], builtins[op->symbol_id].name);
 }
 
-void optimizeOpSetm(Module* module, OptimizerCtx* ctx, Op* op)
-{
-	if (op->dst_reg == ZEROREG_ID) return;
-	if (op->symbol_id >= arrayhead(module->submodules)->ms_offset) {
-		int mb_iter = 0;
-		for (; mb_iter < ctx->used_db.length; ++mb_iter) {
-			if (ctx->used_db.data[mb_iter] == op->symbol_id) break;
-		}
-
-		if (mb_iter >= ctx->used_mb.length)
-			SymbolArray_append(&ctx->used_mb, op->symbol_id);
-	}
-
-	fprintf(
-		ctx->temp_out,
-		"\tsetm:%s %s %s \"%s\"\n",
-		conditionNames[op->cond_id].data,
-		BRBRegNames[op->dst_reg],
-		module->submodules.data[op->module_id].name,
-		module->seg_memory.data[op->symbol_id].name
-	);
-}
-
 void optimizeOpAdd(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->value == 0 && op->dst_reg == op->src_reg || op->dst_reg == ZEROREG_ID) return; 
@@ -727,7 +704,6 @@ static Optimizer optimizers[N_OPS] = {
 	[OP_SETR] = optimizeOpSetr,
 	[OP_SETD] = optimizeOpSetd,
 	[OP_SETB] = optimizeOpSetb,
-	[OP_SETM] = optimizeOpSetm,
 	[OP_ADD] = optimizeOpAdd,
 	[OP_ADDR] = optimizeOpAddr,
 	[OP_SUB] = optimizeOpSub,
@@ -800,7 +776,6 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 
 	OptimizerCtx ctx = {
 		.used_db = SymbolArray_new(-module->seg_data.length),
-		.used_mb = SymbolArray_new(-module->seg_memory.length),
 		.vars = SymbolArray_new(0),
 		.frame_size = 0,
 		.temp_out = open_memstream(&temp_buf.data, (size_t*)&temp_buf.length)
@@ -827,7 +802,7 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 		fprintf(ctx.temp_out, "}\n");
 	}
 
-	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `optimizeModule`");
+	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `optimizeModule`");
 
 	if (ctx.used_db.length) {
 		fprintf(ctx.temp_out, "data {\n");
@@ -857,14 +832,6 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 							module->seg_data.data[piece->symbol_id].name
 						);
 						break;
-					case PIECE_MB_ADDR:
-						fprintf(
-							ctx.temp_out,
-							".mb_addr %s \"%s\" ",
-							module->submodules.data[piece->module_id].name,
-							module->seg_memory.data[piece->symbol_id].name
-						);
-						break;
 					case PIECE_ZERO:
 						fprintf(ctx.temp_out, ".zero %lld ", piece->n_bytes);
 						break;
@@ -879,17 +846,7 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 		fprintf(ctx.temp_out, "}\n");
 	}
 
-	if (ctx.used_mb.length) {
-		fprintf(ctx.temp_out, "memory {\n");
-		for (int i = 0; i < ctx.used_mb.length; ++i) {
-			MemBlock* block = module->seg_memory.data + ctx.used_mb.data[i];
-			fprintf(ctx.temp_out, "\t\"%s\" %lld\n", block->name, block->size);
-		}
-		fprintf(ctx.temp_out, "}\n");
-	}
-
 	DataBlockArray_clear(&module->seg_data);
-	MemBlockArray_clear(&module->seg_memory);
 	OpArray_clear(&module->seg_exec);
 	SubmoduleArray_clear(&module->submodules);
 

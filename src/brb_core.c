@@ -178,18 +178,6 @@ Submodule* getDataBlockSubmodule(Module* module, DataBlock* block)
 	return NULL;
 }
 
-Submodule* getMemBlockSubmodule(Module* module, MemBlock* block)
-{
-	int index = block - module->seg_memory.data;
-	
-	for (Submodule* submodule = module->submodules.data; submodule - module->submodules.data < module->submodules.length; ++submodule) {
-		if (inRange(index, submodule->ms_offset, submodule->ms_offset + submodule->ms_length)) 
-			return submodule;
-	}
-	assert(false, "`block` does not belong to `module`");
-	return NULL;
-}
-
 Submodule getRootSubmodule(Module* module, char* name)
 {
 	if (module->submodules.length) {
@@ -202,8 +190,6 @@ Submodule getRootSubmodule(Module* module, char* name)
 		return (Submodule){
 			.ds_offset = last->ds_offset + last->ds_length,
 			.ds_length = module->seg_data.length - last->ds_offset - last->ds_length,
-			.ms_offset = last->ms_offset + last->ms_length,
-			.ms_length = module->seg_memory.length - last->ms_offset - last->ms_length,
 			.es_offset = last->es_offset + last->es_length,
 			.es_length = module->seg_exec.length - last->es_offset - last->es_length,
 			.name = name,
@@ -213,8 +199,6 @@ Submodule getRootSubmodule(Module* module, char* name)
 		return (Submodule){
 			.ds_offset = 0,
 			.ds_length = module->seg_data.length,
-			.ms_offset = 0,
-			.ms_length = module->seg_memory.length,
 			.es_offset = 0,
 			.es_length = module->seg_exec.length,
 			.name = name,
@@ -232,7 +216,6 @@ Module* mergeModule(Module* restrict src, Module* dst, char* src_name)
 		++submodule
 	) {
 		submodule->ds_offset += dst->seg_data.length;
-		submodule->ms_offset += dst->seg_memory.length;
 		submodule->es_offset += dst->seg_exec.length;
 		if (submodule - src->submodules.data != src->submodules.length - 1)
 			submodule->direct = false;
@@ -244,12 +227,10 @@ Module* mergeModule(Module* restrict src, Module* dst, char* src_name)
 	}
 
 	DataBlockArray_extend(&dst->seg_data, src->seg_data);
-	MemBlockArray_extend(&dst->seg_memory, src->seg_memory);
 	OpArray_extend(&dst->seg_exec, src->seg_exec);
 	SubmoduleArray_extend(&dst->submodules, src->submodules);
 
 	DataBlockArray_clear(&src->seg_data);
-	MemBlockArray_clear(&src->seg_memory);
 	OpArray_clear(&src->seg_exec);
 	SubmoduleArray_clear(&src->submodules);
 

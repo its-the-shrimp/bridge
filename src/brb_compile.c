@@ -291,19 +291,6 @@ void compileOpSetbNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpSetmNative(Module* module, int index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	MemBlock* block = module->seg_memory.data + op.symbol_id;
-	compileCondition(ctx->dst, op.cond_id, 2);
-	fprintf(
-		ctx->dst,
-		"\tadrp %1$s, \"%2$s::%3$s\"@PAGE\n"
-		"\tadd %1$s, %1$s, \"%2$s::%3$s\"@PAGEOFF\n",
-		regNames64[op.dst_reg], getMemBlockSubmodule(module, block)->name, block->name
-	);
-}
-
 void compileOpAddNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
@@ -1063,7 +1050,6 @@ OpNativeCompiler native_op_compilers[] = {
 	[OP_SETR] = &compileOpSetrNative,
 	[OP_SETD] = &compileOpSetdNative,
 	[OP_SETB] = &compileOpSetbNative,
-	[OP_SETM] = &compileOpSetmNative,
 	[OP_ADD] = &compileOpAddNative,
 	[OP_ADDR] = &compileOpAddrNative,
 	[OP_SUB] = &compileOpSubNative,
@@ -1139,19 +1125,11 @@ void compileModule(Module* src, FILE* dst)
 // 		x26 - errno
 {
 	CompCtx ctx = {.dst = dst};
-
-	if (src->seg_memory.length) {
-		fprintf(dst, ".bss\n");
-		for (MemBlock* block = src->seg_memory.data; block - src->seg_memory.data < src->seg_memory.length; ++block) {
-			fprintf(dst, "\t\"%s::%s\": .zero %lld\n", getMemBlockSubmodule(src, block)->name, block->name, block->size);
-		}
-	}
-
 #	define CUR_SEG_BSS 1
 #	define CUR_SEG_DATA 2
 #	define CUR_SEG_TEXT 3
 	char cur_seg = 0;
-	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `compileModule`");
+	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `compileModule`");
 	if (src->seg_data.length) {
 		for (DataBlock* block = src->seg_data.data; block - src->seg_data.data < src->seg_data.length; ++block) {
 			if (block->is_mutable && block->pieces.length == 1 && block->pieces.data->type == PIECE_ZERO && cur_seg != CUR_SEG_BSS) {
@@ -1184,14 +1162,6 @@ void compileModule(Module* src, FILE* dst)
 							"\t.quad \"%s::%s\"\n",
 							src->submodules.data[piece->module_id].name,
 							src->seg_data.data[piece->symbol_id].name
-						);
-						break;
-					case PIECE_MB_ADDR:
-						fprintf(
-							dst,
-							"\t.quad \"%s::%s\"\n",
-							src->submodules.data[piece->module_id].name,
-							src->seg_memory.data[piece->symbol_id].name
 						);
 						break;
 					case PIECE_ZERO:

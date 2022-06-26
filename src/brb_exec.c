@@ -3,7 +3,7 @@
 
 sbuf allocateDataBlock(DataBlock block)
 {
-	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `allocateDataBlock`");
+	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `allocateDataBlock`");
 
 	sbuf_size_t res = 0;
 	for (int i = 0; i < block.pieces.length; ++i) {
@@ -21,7 +21,6 @@ sbuf allocateDataBlock(DataBlock block)
 				break;
 			case PIECE_INT64:
 			case PIECE_DB_ADDR:
-			case PIECE_MB_ADDR:
 				res += 8;
 				break;
 			case PIECE_ZERO:
@@ -39,7 +38,7 @@ sbuf allocateDataBlock(DataBlock block)
 
 void assembleDataBlock(ExecEnv* env, DataBlock block, sbuf dst)
 {
-	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `assembleDataBlock`");
+	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `assembleDataBlock`");
 
 	int64_t offset = 0;
 	for (DataPiece* piece = block.pieces.data; piece - block.pieces.data < block.pieces.length; ++piece) {
@@ -66,10 +65,6 @@ void assembleDataBlock(ExecEnv* env, DataBlock block, sbuf dst)
 				*(char**)(dst.data + offset) = env->seg_data.data[piece->symbol_id].data;
 				offset += 8;
 				break;
-			case PIECE_MB_ADDR:
-				*(char**)(dst.data + offset) = env->seg_memory.data[piece->symbol_id].data;
-				offset += 8;
-				break;
 			case PIECE_ZERO:
 				memset(dst.data + offset, 0, piece->n_bytes);
 				offset += piece->n_bytes;
@@ -87,16 +82,9 @@ void initExecEnv(ExecEnv* env, Module* module, char** args)
 	env->exec_callbacks = NULL;
 	env->stack_brk = malloc(module->stack_size);
 	env->exitcode = 0;
-	env->seg_memory = sbufArray_new(module->seg_memory.length * -1);
 	env->op_id = module->entry_opid;
 	env->registers = calloc(N_REGS, sizeof(uint64_t));
 	env->prev_stack_head = env->stack_head = env->stack_brk + module->stack_size;
-
-	env->seg_memory = sbufArray_new(-module->seg_memory.length);
-	env->seg_memory.length = module->seg_memory.length;
-	array_foreach(MemBlock, block, module->seg_memory,
-		env->seg_memory.data[_block] = scalloc(block.size);
-	);
 
 	env->seg_data = sbufArray_new(-module->seg_data.length);
 	env->seg_data.length = module->seg_data.length;
@@ -274,14 +262,6 @@ bool handleOpSetb(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = builtins[op.symbol_id].value;
-	env->op_id++;
-	return false;
-}
-
-bool handleOpSetm(ExecEnv* env, Module* module)
-{
-	Op op = module->seg_exec.data[env->op_id];
-	env->registers[op.dst_reg] = (int64_t)env->seg_memory.data[op.symbol_id].data;
 	env->op_id++;
 	return false;
 }
@@ -779,7 +759,6 @@ ExecHandler op_handlers[] = {
 	[OP_SETR] = &handleOpSetr,
 	[OP_SETD] = &handleOpSetd,
 	[OP_SETB] = &handleOpSetb,
-	[OP_SETM] = &handleOpSetm,
 	[OP_ADD] = &handleOpAdd,
 	[OP_ADDR] = &handleOpAddr,
 	[OP_SUB] = &handleOpSub,

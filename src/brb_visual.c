@@ -19,7 +19,6 @@ typedef enum {
 	KW_SETR,
 	KW_SETD,
 	KW_SETB,
-	KW_SETM,
 	KW_ADD,
 	KW_ADDR,
 	KW_SUB,
@@ -105,18 +104,16 @@ typedef enum {
 	KW_STACKSIZE,
 	KW_EXEC,
 	KW_DATA,
-	KW_MEMORY,
 	KW_LOAD,
 	KW_INT16,
 	KW_INT32,
 	KW_INT64,
 	KW_DB_ADDR,
-	KW_MB_ADDR,
 	KW_MUT,
 	KW_ZERO,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 70, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 69, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 typedef struct {
@@ -134,7 +131,7 @@ char* getVBRBTokenTypeName(TokenType type)
 }
 
 void printVBRBError(FILE* dst, VBRBError err) {
-	static_assert(N_VBRB_ERRORS == 30, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 29, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
 		fprintTokenLoc(stderr, err.loc.loc);
 		fprintf(dst, "error: ");
@@ -219,9 +216,6 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				break;
 			case VBRB_ERR_DATA_BLOCK_NOT_FOUND:
 				fprintf(dst, "data block `%s` not found\n", err.loc.string.data);
-				break;
-			case VBRB_ERR_MEM_BLOCK_NOT_FOUND:
-				fprintf(dst, "memory block `%s` not found\n", getTokenWord(err.prep, err.loc));
 				break;
 			case VBRB_ERR_INVALID_REG_ID:
 				fprintf(dst, "invalid register index %d\n", err.loc.word[1] - '0');
@@ -310,7 +304,7 @@ typedef VBRBError (*OpCompiler) (CompilerCtx*, Module*);
 
 VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool is_mutable)
 {
-	static_assert(N_PIECE_TYPES == 9, "not all data piece types are handled in `getDataPiece`");
+	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `getDataPiece`");
 
 	Token spec = fetchToken(ctx->prep);
 	if (spec.type == TOKEN_STRING) {
@@ -347,7 +341,6 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 			piece->integer = arg.value;
 			break;
 		case KW_DB_ADDR:
-		case KW_MB_ADDR:
 			arg = fetchToken(ctx->prep);
 			piece->type = spec.keyword_id - KW_DB_ADDR + PIECE_DB_ADDR;
 			if (!is_mutable) return (VBRBError){
@@ -639,62 +632,6 @@ VBRBError compileOpSetd(CompilerCtx* ctx, Module* dst)
 			.loc = datablock_name_spec
 		};
 	op->mark_name = datablock_name_spec.string.data;
-
-	return (VBRBError){ .prep = ctx->prep };
-}
-
-VBRBError compileOpSetm(CompilerCtx* ctx, Module* dst)
-{
-	Op* op = arrayhead(dst->seg_exec);
-
-	uint8_t dst_reg;
-	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &dst_reg, op->type, 0);
-	if (err.code != VBRB_ERR_OK) return err;
-	op->dst_reg = dst_reg;
-
-	Token module_name_spec = fetchToken(ctx->prep);
-	if (!isWordToken(module_name_spec)) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = module_name_spec,
-		.op_type = OP_SETM,
-		.arg_id = 1,
-		.expected_token_type = TOKEN_WORD
-	};
-	const sbuf module_name = SBUF(getTokenWord(ctx->prep, module_name_spec));
-	if (sbufeq(module_name, CSBUF("."))) {
-		op->module_id = dst->submodules.length;
-	} else {
-		for (Submodule* submodule = dst->submodules.data; submodule - dst->submodules.data < dst->submodules.length; ++submodule) {
-			if (sbufeq(submodule->name, module_name)) {
-				op->module_id = submodule - dst->submodules.data;
-				module_name_spec.type = TOKEN_NONE;
-				break;
-			}
-		}
-		if (module_name_spec.type) return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_MODULE_NOT_FOUND,
-			.loc = module_name_spec
-		};
-	}
-
-	Token name_spec = fetchToken(ctx->prep);
-	if (name_spec.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = name_spec,
-		.op_type = OP_SETM,
-		.arg_id = 2,
-		.expected_token_type = TOKEN_STRING
-	};
-	if (memchr(name_spec.string.data, '\0', name_spec.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = name_spec
-		};
-	op->mark_name = name_spec.string.data;
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -1230,7 +1167,6 @@ OpCompiler op_compilers[] = {
 	[OP_SETR] = &compile2RegOp,
 	[OP_SETD] = &compileOpSetd,
 	[OP_SETB] = &compileOpSetb,
-	[OP_SETM] = &compileOpSetm,
 	[OP_ADD] = &compile2RegImmOp,
 	[OP_ADDR] = &compile3RegOp,
 	[OP_SUB] = &compile2RegImmOp,
@@ -1318,13 +1254,11 @@ VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths
 		BRP_KEYWORD("stacksize"),
 		BRP_KEYWORD("exec"),
 		BRP_KEYWORD("data"),
-		BRP_KEYWORD("memory"),
 		BRP_KEYWORD("load"),
 		BRP_KEYWORD(".int16"),
 		BRP_KEYWORD(".int32"),
 		BRP_KEYWORD(".int64"),
 		BRP_KEYWORD(".db_addr"),
-		BRP_KEYWORD(".mb_addr"),
 		BRP_KEYWORD("mut"),
 		BRP_KEYWORD(".zero")
 	);
@@ -1332,7 +1266,6 @@ VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths
 	
 	dst->entry_opid = -1;
 	dst->seg_exec = OpArray_new(0);
-	dst->seg_memory = MemBlockArray_new(0);
 	dst->seg_data = DataBlockArray_new(0);
 	dst->submodules = SubmoduleArray_new(0);
 	dst->stack_size = DEFAULT_STACK_SIZE;
@@ -1439,63 +1372,6 @@ VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths
 					is_mutable = false;
 				}
 
-				break;
-			} case KW_MEMORY: {
-				Token block_start = fetchToken(obj);
-				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
-					delCompilerCtx(&compctx);
-					return (VBRBError){
-									.prep = obj,
-						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
-						.loc = block_start
-					};
-				}
-
-				Token block_name, block_spec;
-				while (true) {
-					block_name = fetchToken(obj);
-					if (getTokenSymbolId(block_name) == SYMBOL_SEGMENT_END) {
-						break;
-					} else if (block_name.type != TOKEN_STRING) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-											.prep = obj,
-							.code = VBRB_ERR_BLOCK_NAME_EXPECTED,
-							.loc = block_name
-						};
-					}
-
-					if (memchr(block_name.string.data, '\0', block_name.string.length)) return (VBRBError){
-						.prep = obj,
-						.code = VBRB_ERR_INVALID_NAME,
-						.loc = block_name
-					};
-
-					block_spec = fetchToken(obj);
-					if (block_spec.type != TOKEN_INT) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-											.prep = obj,
-							.code = VBRB_ERR_BLOCK_SIZE_EXPECTED,
-							.loc = block_spec
-						};
-					}
-
-					if (!MemBlockArray_append(
-						&dst->seg_memory,
-						(MemBlock){
-							.name = getTokenWord(obj, block_name),
-							.size = block_spec.value
-						}
-					)) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-					   					.prep = obj,
-							.code = VBRB_ERR_NO_MEMORY,
-							.loc = block_spec
-						};
-					}
-				}
 				break;
 			} case KW_EXEC: {
 				Token block_start = fetchToken(obj);

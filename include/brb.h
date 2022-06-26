@@ -11,7 +11,7 @@ typedef enum {
 	OP_SETR, // uses Op::dst_reg and Op::src_reg
 	OP_SETD, // uses Op::dst_reg and Op::symbol_id
 	OP_SETB, // uses Op::dst_reg and Op::symbol_id
-	OP_SETM, // uses Op::dst_reg and Op::symbol_id
+// free space
 	OP_ADD, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_ADDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_SUB, // uses Op::dst_reg, Op::src_reg and Op::value
@@ -105,7 +105,6 @@ const static unsigned short op_flags[N_OPS] = {
 	[OP_SETR] = OPF_IS_2REG,
 	[OP_SETD] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID | OPF_REQ_NAME_RESOLUTION,
 	[OP_SETB] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID,
-	[OP_SETM] = OPF_USES_DST_REG | OPF_USES_SYMBOL_ID | OPF_USES_MODULE_ID | OPF_REQ_NAME_RESOLUTION,
 	[OP_ADD] = OPF_IS_2REG_IMM, 
 	[OP_ADDR] = OPF_IS_3REG,
 	[OP_SUB] = OPF_IS_2REG_IMM,
@@ -178,7 +177,6 @@ const static unsigned short op_flags[N_OPS] = {
 	BRP_KEYWORD("setr"), \
 	BRP_KEYWORD("setd"), \
 	BRP_KEYWORD("setb"), \
-	BRP_KEYWORD("setm"), \
 	BRP_KEYWORD("add"), \
 	BRP_KEYWORD("addr"), \
 	BRP_KEYWORD("sub"), \
@@ -277,7 +275,6 @@ typedef enum {
 	BRB_ERR_NO_OP_ARG,
 	BRB_ERR_INVALID_OPCODE,
 	BRB_ERR_NO_DATA_SEGMENT,
-	BRB_ERR_NO_MEMORY_SEGMENT,
 	BRB_ERR_NO_EXEC_SEGMENT,
 	BRB_ERR_NO_NAME_SEGMENT,
 	BRB_ERR_NO_NAME_SPEC,
@@ -288,7 +285,6 @@ typedef enum {
 	BRB_ERR_NO_LOAD_SEGMENT,
 	BRB_ERR_MODULE_NOT_FOUND,
 	BRB_ERR_INVALID_BLOCK,
-	BRB_ERR_UNRESOLVED_MB_REF,
 	BRB_ERR_UNRESOLVED_DB_REF,
 	BRB_ERR_UNRESOLVED_PROC_REF,
 	N_BRB_ERRORS
@@ -408,13 +404,6 @@ static const BRBuiltin builtins[N_BUILTINS] = {
 	}
 };
 
-typedef struct {
-	char* name;
-	int64_t size;
-} MemBlock;
-declArray(MemBlock);
-
-
 typedef enum {
 	PIECE_NONE,
 	PIECE_BYTES,
@@ -423,7 +412,6 @@ typedef enum {
 	PIECE_INT64,
 	PIECE_TEXT,
 	PIECE_DB_ADDR,
-	PIECE_MB_ADDR,
 	PIECE_ZERO,
 	N_PIECE_TYPES
 } DataPieceType;
@@ -433,7 +421,6 @@ static const sbuf dataPieceNames[N_PIECE_TYPES] = {
 	[PIECE_INT32] = CSBUF(".int32"),
 	[PIECE_INT64] = CSBUF(".int64"),
 	[PIECE_DB_ADDR] = CSBUF(".db_addr"),
-	[PIECE_MB_ADDR] = CSBUF(".mb_addr"),
 	[PIECE_ZERO] = CSBUF(".zero")
 };
 
@@ -474,8 +461,6 @@ typedef struct {
 	int es_length;
 	int ds_offset;
 	int ds_length;
-	int ms_offset;
-	int ms_length;
 	char* name;
 	bool direct;
 } Submodule;
@@ -483,7 +468,6 @@ declArray(Submodule);
 
 typedef struct {
 	OpArray seg_exec;
-	MemBlockArray seg_memory;
 	DataBlockArray seg_data;
 	int64_t entry_opid;
 	int64_t stack_size;
@@ -509,7 +493,6 @@ typedef enum {
 	VBRB_ERR_UNKNOWN_SYSCALL,
 	VBRB_ERR_EXEC_MARK_NOT_FOUND,
 	VBRB_ERR_DATA_BLOCK_NOT_FOUND,
-	VBRB_ERR_MEM_BLOCK_NOT_FOUND,
 	VBRB_ERR_INVALID_REG_ID,
 	VBRB_ERR_UNKNOWN_BUILTIN,
 	VBRB_ERR_UNCONDITIONAL_OP,
@@ -564,7 +547,6 @@ typedef struct execEnv {
 	void* stack_brk;
 	void* stack_head;
 	void* prev_stack_head;
-	sbufArray seg_memory;
 	sbufArray seg_data;
 	uint8_t exitcode;
 	int op_id;
@@ -586,7 +568,6 @@ void writeModule(Module* src, FILE* dst);
 FILE* findModule(char* name, char* search_paths[]);
 Submodule* getOpSubmodule(Module* module, Op* op);
 Submodule* getDataBlockSubmodule(Module* module, DataBlock* block);
-Submodule* getMemBlockSubmodule(Module* module, MemBlock* block);
 Module* mergeModule(Module* restrict src, Module* dst, char* src_name);
 Submodule getRootSubmodule(Module* module, char* name);
 // implemented in `src/brb_load.c`
