@@ -125,7 +125,7 @@ int main(int argc, char* argv[])
 
 	Module module;
 	char* search_paths[] = { ".", NULL };
-	BRBLoadError err = loadModule(input_fd, &module, search_paths, BRB_EXECUTABLE);
+	BRBLoadError err = loadModule(input_fd, &module, search_paths);
 	if (err.code) {
 		printLoadError(stderr, err);
 		return 1;
@@ -186,8 +186,7 @@ int main(int argc, char* argv[])
 	} else if (proc_res.exitcode) {
 		eprintf("error: linker exited with code %hhu\n", proc_res.exitcode);
 		sbuf err_output = filecontent(proc_res.err);
-		eprintf("linker output:\n\t\""sbuf_format"\"\n", unpack(err_output));
-		unlink(asm_output_path);
+		eprintf("linker output:\n"sbuf_format"\n", unpack(err_output));
 		unlink(obj_output_path);
 		return 1;
 	}

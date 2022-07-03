@@ -215,14 +215,14 @@ char* getNormPath(char* src)
 	}
 
 	res.length = 0;
-	array_foreach(sbuf, component, components,
+	arrayForeach(sbuf, component, components) {
 	 	if (res.length) {
 			memcpy(res.data + res.length, PATHSEP.data, PATHSEP.length);
 			res.length += PATHSEP.length;
 		}
-		memcpy(res.data + res.length, component.data, component.length);
-		res.length += component.length;
-	);
+		memcpy(res.data + res.length, component->data, component->length);
+		res.length += component->length;
+	}
 	free(components.data);
 	return res.data;
 }
@@ -630,14 +630,14 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 					input->cur_loc.lineno += sbufcount_v(macro.def, nl_arg) + 1;
 				}
 
-				array_foreach(Macro, prev_macro, obj->macros, 
-					if (sbufeq(macro.name, prev_macro.name)) {
+				arrayForeach(Macro, prev_macro, obj->macros) {
+					if (sbufeq(macro.name, prev_macro->name)) {
 						free(macro.name);
 						macro.name = NULL;
-						free(prev_macro.def.data);
-						prev_macro.def = macro.def;
+						free(prev_macro->def.data);
+						prev_macro->def = macro.def;
 					}
-				);
+				}
 				if (macro.name) MacroArray_append(&obj->macros, macro);
 				break;
 			}

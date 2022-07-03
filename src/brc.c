@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <sys/cdefs.h>
 
+defArray(sbuf);
+
 declArray(int);
 defArray(int);
 defArray(str);
@@ -24,6 +26,7 @@ typedef enum {
 	KW_WHILE,
 	KW_FOR,
 	KW_DO,
+	KW_STATIC,
 	N_KWS
 } BRKeyword;
 
@@ -127,11 +130,10 @@ typedef enum {
 	EXPR_OR_ASSIGN, // main, binary, evaluatable
 	EXPR_SHL_ASSIGN, // main, binary, evaluatable
 	EXPR_SHR_ASSIGN, // main, binary, evaluatable
-	EXPR_GET_VAR, // main, unary, evaluatable
+	EXPR_GET, // main, unary, evaluatable
 	EXPR_BLOCK, // main, composite, non-evaluatable
-	EXPR_TYPE, // auxillary
+	EXPR_DECL_INFO, // auxillary
 	EXPR_REF, // auxillary
-	EXPR_PROC_REF, // auxillary
 	EXPR_PROC_CALL, // main, composite, evaluatable
 	EXPR_RETURN, // main, unary, non-evaluatable
 	EXPR_ADD, // main, binary, evaluatable
@@ -164,27 +166,40 @@ typedef enum {
 	EXPR_DEREF, // main, unary, evaluatable
 	EXPR_GET_ITEM, // main, binary, evaluatable
 	EXPR_ARRAY, // main, variadic, evaluatable
+	EXPR_NEW_PROC, // main, variadic, evaluatable
 	N_EXPR_TYPES
 } ExprType;
 
-typedef struct expr {
+// for `Expr::attrs`
+#define ATTR_STATIC   1
+#define ATTR_EXTERNAL 2
+#define ATTR_AUTO_STATIC 4
+// only for procedure declarations
+#define ATTR_NOT_DEFINED 8
+
+typedef struct expr { // in variadic expressions, first 16 bytes (i.e. first 2 argument fields) are used as array of sub-expressions
 	union {
 		struct expr* arg1;
 	};
 	union {
 		struct {
 			union {
-				struct expr* arg2;
+				struct expr* arg2; // for binary expressions
 				int64_t int_literal; // for EXPR_INT
-				TypeDef* var_type; // for EXPR_TYPE
+				struct { // for EXPR_DECL_INFO
+					int attrs;
+					int n_args; // defined if EXPR_DECL_INFO is used as the info about the procedure declaration
+				};
 				char* name; // for EXPR_NAME
 			};
 			union {
 				struct expr* arg3; // for ternary expressions
+				TypeDef* var_type; // for EXPR_DECL_INFO or EXPR_CAST
 				TypeDef* element_type; // for EXPR_ARRAY
+				int n_local_vars; // for EXPR_BLOCK
 			};
 		};
-		sbuf string;
+		sbuf string; // for EXPR_STRING
 	};
 	struct expr* block;
 	TokenLoc loc;
@@ -193,39 +208,24 @@ typedef struct expr {
 declChain(Expr);
 defChain(Expr);
 
-
-// for `FuncDecl::attrs`
-#define FUNCATTR_EXTERNAL 0b1
-
 typedef struct {
-	TokenLoc loc;
-	char* name;
-	Expr args;
-	TypeDef return_type;
-	Expr body;
-	int attrs;
-} FuncDecl;
-declChain(FuncDecl);
-defChain(FuncDecl);
-
-typedef struct {
-	FuncDeclChain functions;
-	Expr globals;
-	BRP* prep;
+	Expr root;
+	BRP* preprocessor;
 } AST;
 
 // flags for parseExpr desribing how the expression will be used
-#define EXPRTERM_FULL         0b1
-#define EXPRTERM_ARG          0b10
-#define EXPRTERM_BRACKET      0b100
-#define EXPRTERM_SQBRACKET    0b1000
-#define EXPRTERM_ARRAY_ARG    0b10000
-#define EXPRTERM_DOWHILE_BODY 0b100000
-#define EXPRTYPE_EVALUATABLE  0b1000000
-#define EXPRTYPE_VOIDABLE     0b10000000
-#define EXPRTYPE_LOGICAL      0b100000000
+#define EXPRTERM_FULL         1
+#define EXPRTERM_ARG          2
+#define EXPRTERM_BRACKET      4
+#define EXPRTERM_SQBRACKET    8
+#define EXPRTERM_ARRAY_ARG    16
+#define EXPRTERM_DOWHILE_BODY 32
+#define EXPRTYPE_EVALUATABLE  64
+#define EXPRTYPE_VOIDABLE     128
+#define EXPRTYPE_LOGICAL      256
+#define EXPRTYPE_DECL       512
 #define EXPRTERM              (EXPRTERM_FULL | EXPRTERM_ARG | EXPRTERM_BRACKET | EXPRTERM_SQBRACKET | EXPRTERM_ARRAY_ARG | EXPRTERM_DOWHILE_BODY)
-#define EXPRTYPE              (EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE | EXPRTYPE_LOGICAL)
+#define EXPRTYPE              (EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE | EXPRTYPE_LOGICAL | EXPRTYPE_DECL)
 
 #define VARIADIC -1
 #define NULLARY 0
@@ -241,11 +241,10 @@ static char expr_arity_table[] = {
 	[EXPR_STRING     ] = NULLARY,
 	[EXPR_INT        ] = NULLARY,
 	[EXPR_NEW_VAR    ] = VARIADIC,
-	[EXPR_GET_VAR    ] = UNARY,
+	[EXPR_GET    ] = UNARY,
 	[EXPR_BLOCK      ] = VARIADIC, // TODO: make blocks evaluate to their "return" value
-	[EXPR_TYPE       ] = NULLARY,
+	[EXPR_DECL_INFO       ] = NULLARY,
 	[EXPR_REF        ] = UNARY,
-	[EXPR_PROC_REF   ] = NULLARY,
 	[EXPR_PROC_CALL  ] = VARIADIC,
 	[EXPR_RETURN     ] = UNARY,
 	[EXPR_NOT        ] = UNARY,
@@ -287,7 +286,8 @@ static char expr_arity_table[] = {
 	[EXPR_GET_REF    ] = UNARY,
 	[EXPR_DEREF      ] = UNARY,
 	[EXPR_GET_ITEM   ] = BINARY,
-	[EXPR_ARRAY      ] = VARIADIC
+	[EXPR_ARRAY      ] = VARIADIC,
+	[EXPR_NEW_PROC   ] = VARIADIC
 };
 static char expr_order_table[] = {
 	[EXPR_INVALID    ] = 0,
@@ -297,11 +297,11 @@ static char expr_order_table[] = {
 	[EXPR_STRING     ] = 0,
 	[EXPR_INT        ] = 0,
 	[EXPR_NEW_VAR    ] = 0,
-	[EXPR_GET_VAR    ] = 0,
+	[EXPR_NEW_PROC   ] = 0,
+	[EXPR_GET    ] = 0,
 	[EXPR_BLOCK      ] = 0, // TODO: make blocks evaluate to their "return" value
-	[EXPR_TYPE       ] = 0,
+	[EXPR_DECL_INFO       ] = 0,
 	[EXPR_REF        ] = 0,
-	[EXPR_PROC_REF   ] = 0,
 	[EXPR_PROC_CALL  ] = 0,
 	[EXPR_CAST       ] = 0,
 	[EXPR_WRAPPER    ] = 0,
@@ -354,43 +354,44 @@ static inline void initExpr(Expr* expr)
 
 static inline ExprChain* getSubexprs(Expr* expr)
 {
-	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get subexpressions of a non-variadic expression");
+	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get subexpressions of a non-variadic expression %d", expr->type);
 	return (ExprChain*)expr;
 }
 
 static inline Expr* addSubexpr(Expr* expr, Expr new)
 {
-	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to add a subexpression to a non-varaidic expression");
+	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to add a subexpression to a non-varaidic expression %d", expr->type);
 	return ExprChain_append(getSubexprs(expr), new);
 }
 
 static inline Expr* getSubexpr(Expr* expr, int id)
 {
-	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get a subexpression of a non-variadic expression");
+	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get a subexpression of a non-variadic expression %d", expr->type);
 	return ExprChain_getref(*getSubexprs(expr), id);
 }
 
 static inline int getSubexprsCount(Expr* expr)
 {
-	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get the amount of subexpressions of a non-variadic expression");
+	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get the subexpressions count of a non-variadic expression %d", expr->type);
 	return ExprChain_length(*getSubexprs(expr));
+}
+
+static char* getDeclName(Expr* decl)
+{
+	assert(decl->type == EXPR_NEW_PROC || decl->type == EXPR_NEW_VAR, "expression of type %d is not a declaration", decl->type);
+	return getSubexpr(decl, 0)->name;
+}
+
+static Expr* getPrevDecl(Expr* decl)
+{
+	assert(decl->type == EXPR_NEW_PROC || decl->type == EXPR_NEW_VAR, "expression of type %d is not a declaration", decl->type);
+	return getSubexpr(decl, 1)->arg1;
 }
 
 const int COUNTER_BASE = __COUNTER__;
 #define BR_ERROR_DEF(error_name, args) \
 const short error_name##Code = (__COUNTER__ - COUNTER_BASE); \
 DEF_WITH_ATTRS(void raise##error_name args, __abortlike)
-
-DEF_WITH_ATTRS(void _reportCompilerBug(const char* func_name, int lineno, const char* msg), __abortlike)
-{
-	eprintf("internal compiler bug in %s on line %d: %s\n", func_name, lineno, msg);
-	abort();
-}
-#define reportCompilerBug(msg, ...) do { \
-	char* _compiler_bug_msg; \
-	asprintf(&_compiler_bug_msg, msg, __VA_ARGS__); \
-	_reportCompilerBug(__func__, __LINE__, _compiler_bug_msg); \
-} while (0)
 
 void fprintType(FILE* dst, TypeDef type)
 {
@@ -409,7 +410,7 @@ void fprintType(FILE* dst, TypeDef type)
 	} else if (type.kind == KIND_ARRAY) {
 		fprintType(dst, *type.base);
 		fprintf(dst, "[%d]", type.n_items);
-	} else reportCompilerBug("unknown type kind: %d", type.kind);
+	} else assert(false, "unknown type kind: %d", type.kind);
 }
 #define printType(type) fprintType(stdout, type)
 
@@ -417,7 +418,7 @@ BR_ERROR_DEF(InvalidGlobalStmtError, (AST* ast, Token token))
 {
 	fprintTokenLoc(stderr, token.loc);
 	eprintf("error %04hx: expected a global statement specifier, instead got ", InvalidGlobalStmtErrorCode);
-	fprintTokenStr(stderr, token, ast->prep);
+	fprintTokenStr(stderr, token, ast->preprocessor);
 	eputc('\n');
 	exit(1);
 }
@@ -503,22 +504,23 @@ BR_ERROR_DEF(TooManyProcArgsError, (AST* ast, TokenLoc loc, int n_args))
 	exit(1);
 }
 
-BR_ERROR_DEF(ArgCountMismatchError, (AST* ast, TokenLoc loc, FuncDecl* func, int n_args))
+BR_ERROR_DEF(ArgCountMismatchError, (AST* ast, TokenLoc loc, Expr* proc, int n_args))
 {
 	fprintTokenLoc(stderr, loc);
+	assert(proc->type == EXPR_NEW_PROC, "`proc` expression must be of type EXPR_NEW_PROC");
 	if (n_args >= 0) {
 		eprintf(
-			"error %04hx: function `%s` expects exactly %d argument(s), instead got %d\n",
-			ArgCountMismatchErrorCode, func->name, getSubexprsCount(&func->args) - 1, n_args
+			"error %04hx: procedure `%s` expects exactly %d argument(s), instead got %d\n",
+			ArgCountMismatchErrorCode, getDeclName(proc), getSubexpr(proc, 2)->n_args, n_args
 		);
 	} else {
 		eprintf(
-			"error %04hx: function `%s` expects exactly %d argument(s), instead got more\n",
-			ArgCountMismatchErrorCode, func->name, getSubexprsCount(&func->args) - 1
+			"error %04hx: procedure `%s` expects exactly %d argument(s), instead got more\n",
+			ArgCountMismatchErrorCode, proc->name, getSubexpr(proc, 2)->n_args
 		);
 	}
-	fprintTokenLoc(stderr, func->loc);
-	eprintf("note: function `%s` is declared here\n", func->name);
+	fprintTokenLoc(stderr, proc->loc);
+	eprintf("note: procedure `%s` is declared here\n", getDeclName(proc));
 	exit(1);
 }
 
@@ -572,7 +574,7 @@ void _raiseUnexpectedTokenError(AST* ast, Token actual, const char* msg, ...)
 			eputs("a word");
 		} else if (iter.type == TOKEN_INT) {
 			eputs("an integer");
-		} else fprintTokenStr(stderr, iter, ast->prep);
+		} else fprintTokenStr(stderr, iter, ast->preprocessor);
 		if (n == n_tokens - 2) {
 			eputs(" or ");
 		} else if (n != n_tokens - 1) eputs(", ");
@@ -584,7 +586,7 @@ void _raiseUnexpectedTokenError(AST* ast, Token actual, const char* msg, ...)
 	} else eputs(", ");
 
 	eputs("instead got ");
-	fprintTokenStr(stderr, actual, ast->prep);
+	fprintTokenStr(stderr, actual, ast->preprocessor);
 	eputc('\n');
 	exit(1);
 }
@@ -638,7 +640,7 @@ BR_ERROR_DEF(AssignmentTypeMismatchError, (AST* ast, TokenLoc loc, Expr* var_dec
 	fprintTokenLoc(stderr, loc);
 	char* var_name = getSubexpr(var_decl, 0)->name;
 	eprintf("error %04hx: variable `%s` expects a value of type `", AssignmentTypeMismatchErrorCode, var_name);
-	fprintType(stderr, *getSubexpr(var_decl, 1)->var_type);
+	fprintType(stderr, *getSubexpr(var_decl, 2)->var_type);
 	eputs("`, instead got a value of type `");
 	fprintType(stderr, entry_type);
 	eputs("`\n");
@@ -647,34 +649,40 @@ BR_ERROR_DEF(AssignmentTypeMismatchError, (AST* ast, TokenLoc loc, Expr* var_dec
 	exit(1);
 }
 
-BR_ERROR_DEF(ReturnTypeMismatchError, (AST* ast, TokenLoc loc, TypeDef entry_type, FuncDecl* func))
+BR_ERROR_DEF(ReturnTypeMismatchError, (AST* ast, TokenLoc loc, TypeDef entry_type, Expr* proc))
 {
 	fprintTokenLoc(stderr, loc);
-	eprintf("error %04hx: function `%s` is declared to return a value of type `", ReturnTypeMismatchErrorCode, func->name);
-	fprintType(stderr, func->return_type);
+	assert(proc->type == EXPR_NEW_PROC, "`proc` expression must be of type EXPR_NEW_PROC");
+	eprintf("error %04hx: procedure `%s` is declared to return a value of type `", ReturnTypeMismatchErrorCode, getDeclName(proc));
+	fprintType(stderr, *getSubexpr(proc, 2)->var_type);
 	eputs("`, instead attempted to return value of type `");
 	fprintType(stderr, entry_type);
 	eputs("`\n");
-	fprintTokenLoc(stderr, func->loc);
-	eprintf("note: function `%s` is declared here\n", func->name);
+	fprintTokenLoc(stderr, proc->loc);
+	eprintf("note: procedure `%s` is declared here\n", getDeclName(proc));
 	exit(1);
 }
 
-BR_ERROR_DEF(ArgTypeMismatchError, (AST* ast, TokenLoc loc, FuncDecl* func, Expr* arg_decl, TypeDef entry_type))
+BR_ERROR_DEF(ArgTypeMismatchError, (AST* ast, TokenLoc loc, Expr* proc, Expr* arg_decl, TypeDef entry_type))
 {
 	fprintTokenLoc(stderr, loc);
-	if (func) {
-		eprintf("error %04hx: argument `%s` of function `%s` expects a value of type `", ArgTypeMismatchErrorCode, getSubexpr(arg_decl, 0)->name, func->name);
-		fprintType(stderr, *getSubexpr(arg_decl, 1)->var_type);
+	if (proc) {
+		eprintf(
+			"error %04hx: argument `%s` of procedure `%s` expects a value of type `",
+			ArgTypeMismatchErrorCode,
+			getSubexpr(arg_decl, 0)->name,
+			getDeclName(proc)
+		);
+		fprintType(stderr, *getSubexpr(arg_decl, 2)->var_type);
 	} else {
 		eprintf("error %04hx: a syscall argument expects a value of a primitive type `", ArgTypeMismatchErrorCode);
 	}
 	eputs("`, instead got value of type `");
 	fprintType(stderr, entry_type);
 	eputs("`\n");
-	if (func) {
-		fprintTokenLoc(stderr, func->loc);
-		eprintf("note: function `%s` is declared here\n", func->name);
+	if (proc) {
+		fprintTokenLoc(stderr, proc->loc);
+		eprintf("note: procedure `%s` is declared here\n", getDeclName(proc));
 	}
 	exit(1);
 }
@@ -707,10 +715,14 @@ BR_ERROR_DEF(InvalidComplexAssignmentError, (AST* ast, TokenLoc loc))
 	exit(1);
 }
 
-BR_ERROR_DEF(NoProcReturnError, (AST* ast, FuncDecl* decl))
+BR_ERROR_DEF(NoProcReturnError, (AST* ast, Expr* decl))
 {
-	fprintTokenLoc(stderr, decl->body.loc);
-	eprintf("error %04hx: the function `%s` is declared to return a value, but its definition does not return a value in all control paths\n", NoProcReturnErrorCode, decl->name);
+	fprintTokenLoc(stderr, getSubexpr(decl, 3)->loc);
+	eprintf(
+		"error %04hx: the procedure `%s` is declared to return a value, but its definition does not return a value in all control paths\n",
+		NoProcReturnErrorCode,
+		getDeclName(decl)
+	);
 	exit(1);
 }
 
@@ -783,6 +795,56 @@ BR_ERROR_DEF(UnexpectedArrayInitError, (AST* ast, TokenLoc loc, TypeDef decl_typ
 	exit(1);
 }
 
+BR_ERROR_DEF(NestedProcError, (AST* ast, TokenLoc loc)) // TODO: allow nested procedures, i.e. closures
+{
+	fprintTokenLoc(stderr, loc);
+	eprintf("error %04hx: nested procedures are not allowed\n", NestedProcErrorCode);
+	exit(1);
+}
+
+BR_ERROR_DEF(NonCallableError, (AST* ast, TokenLoc loc, TypeDef decl_type))
+{
+	fprintTokenLoc(stderr, loc);
+	eprintf("error %04hx: instance of type `", NonCallableErrorCode);
+	fprintType(stderr, decl_type);
+	eprintf("` is not callable\n");
+	exit(1);
+}
+
+BR_ERROR_DEF(TypeSpecExpectedError, (AST* ast, TokenLoc loc))
+{
+	fprintTokenLoc(stderr, loc);
+	eprintf("error %04hx: expected a type specifier after declaration parameters\n", TypeSpecExpectedErrorCode);
+	exit(1);
+}
+
+BR_ERROR_DEF(UnexpectedStaticKwError, (AST* ast, TokenLoc loc, const char* msg))
+{
+	fprintTokenLoc(stderr, loc);
+	eprintf("error %04hx: `static` declaration parameter is not allowed in %s\n", UnexpectedStaticKwErrorCode, msg);
+	exit(1);
+}
+
+BR_ERROR_DEF(NoProcDefError, (AST* ast, Expr proc))
+{
+	fprintTokenLoc(stderr, proc.loc);
+	eprintf("error %04hx: procedure `%s` was declared, but was never defined\n", NoProcDefErrorCode, getDeclName(&proc));
+	exit(1);
+}
+
+BR_ERROR_DEF(NonConstStaticVarInitError, (AST* ast, Expr decl))
+{
+	fprintTokenLoc(stderr, decl.loc);
+	Expr* decl_info = getSubexpr(&decl, 2);
+	eprintf(
+		"error %04hx: variable `%s` is declared %s, thus its initializer is expected to be a compile-time constant\n", 
+		NonConstStaticVarInitErrorCode,
+		getDeclName(&decl),
+		decl_info->attrs & ATTR_AUTO_STATIC ? "in global scope" : "as `static`"
+	);
+	exit(1);
+}
+
 int getTypeSize(TypeDef type)
 {
 	static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in getTypeSize");
@@ -796,7 +858,7 @@ int getTypeSize(TypeDef type)
 		case KIND_BOOL: return 1;
 		case KIND_NONE:
 		default:
-			reportCompilerBug("unknown type kind: %d", type.kind);
+			assert(false, "unknown type kind: %d", type.kind);
 	}
 }
 
@@ -804,7 +866,8 @@ bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
 {
 	static_assert(N_EXPR_TYPES == 54, "not all expression types are handled in isExprTerm");
 	int64_t symbol_id = getTokenSymbolId(token);
-	if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF || expr->type == EXPR_WHILE) && symbol_id == SYMBOL_BLOCK_END) return true; 
+	if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF || expr->type == EXPR_WHILE || expr->type == EXPR_NEW_PROC) && symbol_id == SYMBOL_BLOCK_END)
+		return true; 
 	if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
 	if (flags & EXPRTERM_DOWHILE_BODY) return symbol_id == SYMBOL_SEMICOLON || getTokenKeywordId(token) == KW_WHILE;
 	if (flags & EXPRTERM_ARG) {
@@ -846,7 +909,7 @@ bool _typeMatches(TypeDef field, TypeDef entry)
 		case KIND_BOOL: return entry.kind == KIND_BOOL;
 		case KIND_NONE:
 		default:
-			reportCompilerBug("unknown type kind: %d", field.kind);
+			assert(false, "unknown type kind: %d", field.kind);
 	}
 }
 
@@ -855,13 +918,14 @@ bool typeMatches(TypeDef field, TypeDef entry)
 	return field.kind == KIND_VOID ? false : _typeMatches(field, entry);
 }
 
-bool parseType(AST* ast, TypeDef* dst)
+bool parseType(AST* ast, TypeDef* dst, int* attrs_p, int allowed_attrs, const char* ctx_msg)
 {
 	static_assert(N_TYPE_KINDS == 7, "not all type kinds are handled in parseType");
 	*dst = (TypeDef){0};
+	*attrs_p = 0;
 	bool fetched = false;
 	while (true) {
-		Token token = peekToken(ast->prep);
+		Token token = peekToken(ast->preprocessor);
 		if (token.type == TOKEN_KEYWORD) {
 			switch (token.keyword_id) {
 				case KW_INT8:
@@ -870,7 +934,7 @@ bool parseType(AST* ast, TypeDef* dst)
 				case KW_INT64:
 					if (dst->kind != KIND_NONE) raiseInvalidTypeError(ast, token.loc);
 
-					fetchToken(ast->prep);
+					fetchToken(ast->preprocessor);
 					dst->kind = KIND_INT;
 					fetched = true;
 					dst->size = 1 << (token.keyword_id - KW_INT8);
@@ -878,18 +942,25 @@ bool parseType(AST* ast, TypeDef* dst)
 				case KW_VOID:
 					if (dst->kind != KIND_NONE) raiseInvalidTypeError(ast, token.loc);
 
-					fetchToken(ast->prep);
+					fetchToken(ast->preprocessor);
 					fetched = true;
 					dst->kind = KIND_VOID;
 					break;
 				case KW_BOOL:
 					if (dst->kind != KIND_NONE) raiseInvalidTypeError(ast, token.loc);
 
-					fetchToken(ast->prep);
+					fetchToken(ast->preprocessor);
 					fetched = true;
 					dst->kind = KIND_BOOL;
 					break;
+				case KW_STATIC:
+					if (!(allowed_attrs & ATTR_STATIC)) raiseUnexpectedStaticKwError(ast, token.loc, ctx_msg);
+					*attrs_p |= ATTR_STATIC;
+					fetchToken(ast->preprocessor);
+					fetched = true;
+					break;
 				default:
+					if (fetched && !dst->kind) raiseTypeSpecExpectedError(ast, token.loc);
 					return fetched;
 			}
 		} else if (token.type == TOKEN_SYMBOL) {
@@ -897,7 +968,7 @@ bool parseType(AST* ast, TypeDef* dst)
 				case SYMBOL_STAR: {
 					if (dst->kind == KIND_NONE) return fetched;
 
-					fetchToken(ast->prep);
+					fetchToken(ast->preprocessor);
 					TypeDef* new_base = malloc(sizeof(TypeDef));
 					*new_base = *dst;
 					dst->base = new_base;
@@ -907,13 +978,13 @@ bool parseType(AST* ast, TypeDef* dst)
 					if (dst->kind == KIND_NONE) return fetched;
 					if (dst->kind == KIND_VOID) raiseVoidArrayError(ast, token.loc);
 
-					fetchToken(ast->prep);
-					Token index_spec = fetchToken(ast->prep);
+					fetchToken(ast->preprocessor);
+					Token index_spec = fetchToken(ast->preprocessor);
 					int64_t n_items = 0;
 					if (index_spec.type == TOKEN_INT) {
 						n_items = index_spec.value;
 						if (n_items < 0) raiseNegativeArraySizeError(ast, index_spec.loc, n_items);
-						token = fetchToken(ast->prep);
+						token = fetchToken(ast->preprocessor);
 						if (getTokenSymbolId(token) != SYMBOL_INDEX_END) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_INDEX_END));
 					} else if (getTokenSymbolId(index_spec) != SYMBOL_INDEX_END)
 						raiseUnexpectedTokenError(ast, index_spec, "the array size specifier", symbolToken(SYMBOL_INDEX_END), intToken(0));
@@ -925,9 +996,13 @@ bool parseType(AST* ast, TypeDef* dst)
 					dst->n_items = n_items;
 					break;
 				} default:
+					if (fetched && !dst->kind) raiseTypeSpecExpectedError(ast, token.loc);
 					return fetched;
 			}
-		} else return fetched;
+		} else {
+			if (fetched && !dst->kind) raiseTypeSpecExpectedError(ast, token.loc);
+			return fetched;
+		}
 	}
 }
 
@@ -938,17 +1013,34 @@ bool isExprEvaluatable(ExprType type) {
 		[EXPR_INVALID + 1 ... N_EXPR_TYPES - 1] = true,
 		[EXPR_NAME      ] = false,
 		[EXPR_BLOCK     ] = false, // TODO: make blocks evaluate to their "return" value
-		[EXPR_TYPE      ] = false,
+		[EXPR_DECL_INFO ] = false,
 		[EXPR_REF       ] = false,
-		[EXPR_PROC_REF  ] = false,
 		[EXPR_RETURN    ] = false,
 		[EXPR_IF        ] = false,
 		[EXPR_WHILE     ] = false,
 		[EXPR_DOWHILE   ] = false,
-		[EXPR_NEW_VAR   ] = false
+		[EXPR_NEW_VAR   ] = false,
+		[EXPR_NEW_PROC  ] = false
 	};
 	assert(inRange(type, 0, N_EXPR_TYPES), "unknown expression type was previded");
 	return expr_evaluatability_info[type];
+}
+
+bool isExprConstant(Expr* expr) {
+	static_assert(N_EXPR_TYPES == 54, "not all expression types are handled in isExprEvaluatable");
+
+	switch (expr->type) {
+		case EXPR_INT:
+		case EXPR_STRING:
+			return true;
+		case EXPR_ARRAY:
+			chainForeach(Expr, element, *getSubexprs(expr)) {
+				if (!isExprConstant(element)) return false;
+			}
+			return true;
+		default:
+			return false;
+	}
 }
 
 TypeDef getExprValueType(AST* ast, Expr expr);
@@ -968,8 +1060,10 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
 	}
 	switch (expr.type) {
 		case EXPR_SYSCALL:
-			fprintf(dst, "SYSCALL %s\n", expr.name);
-			chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
+			fprintf(dst, "SYSCALL\n");
+			chainForeach(Expr, subexpr, *getSubexprs(&expr)) {
+				fprintExpr(ast, dst, *subexpr, indent_level + 1);
+			}
 			break;
 		case EXPR_NAME:
 			fprintf(dst, "NAME %s\n", expr.name);
@@ -983,9 +1077,9 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
 		case EXPR_INT:
 			fprintf(dst, "INTEGER %lld\n", expr.int_literal);
 			break;
-		case EXPR_GET_VAR:
+		case EXPR_GET:
 			fputs("GET VARIABLE `", dst);
-			fprintType(dst, *getSubexpr(expr.arg1, 1)->var_type);
+			fprintType(dst, *getSubexpr(expr.arg1, 2)->var_type);
 			fprintf(dst, " %s;`\n", getSubexpr(expr.arg1, 0)->name);
 			break;
 		case EXPR_ASSIGN:
@@ -1040,45 +1134,35 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
 			break;
 		case EXPR_NEW_VAR:
 			fputs("NEW VARIABLE:\n", dst);
-			chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
+			chainForeach(Expr, subexpr, *getSubexprs(&expr)) {
+				fprintExpr(ast, dst, *subexpr, indent_level + 1);
+			}
 			break;
-		case EXPR_TYPE:
+		case EXPR_DECL_INFO:
 			fputs("TYPE ", dst);
 			fprintType(dst, *expr.var_type);
 			fputs(" \n", dst);
 			break;
 		case EXPR_REF:
-			fputs("REF -> `", dst);
-			if (expr.arg1) {
-				assert(expr.arg1->type == EXPR_NEW_VAR, "expected the variable chain to have an expression of type EXPR_NEW_VAR in it");
-				fprintType(dst, *getSubexpr(expr.arg1, 1)->var_type);
-				fprintf(dst, " %s;", getSubexpr(expr.arg1, 0)->name);
-			} else fputs("NULL", dst);
-			fputs("`\n", dst);
+			fprintf(dst, "%sREF\n", expr.arg1 ? "" : "NULL ");
 			break;
-		case EXPR_PROC_REF:
-			fputs("PROCEDURE REF -> `", dst);
-			if (expr.arg1) {
-				fprintType(dst, ((FuncDecl*)expr.arg1)->return_type);
-				fprintf(dst, " %s", ((FuncDecl*)expr.arg1)->name);
-				ExprNode* first_arg = getSubexprs(&((FuncDecl*)expr.arg1)->args)->start->next;
-				if (!first_arg) fputc('(', dst);
-				chain_foreach_from(Expr, arg, *getSubexprs(&((FuncDecl*)expr.arg1)->args), 1, 
-					fputs(_arg == first_arg ? "(" : ", ", dst);
-					fprintType(dst, *getSubexpr(&arg, 1)->var_type);
-					fprintf(dst, " %s", getSubexpr(&arg, 0)->name);
-				);
-				fputs(");", dst);
-			} else fputs("NULL", dst);
-			fputs("`\n", dst);
+		case EXPR_NEW_PROC:
+			fputs("NEW PROCEDURE:\n", dst);
+			chainForeach(Expr, subexpr, *getSubexprs(&expr)) {
+				fprintExpr(ast, dst, *subexpr, indent_level + 1);
+			}
 			break;
 		case EXPR_BLOCK:
 			fputs("BLOCK\n", dst);
-			chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
+			chainForeach(Expr, subexpr, *getSubexprs(&expr)) {
+				fprintExpr(ast, dst, *subexpr, indent_level + 1);
+			}
 			break;
 		case EXPR_PROC_CALL:
 			fputs("CALL:\n", dst);
-			chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
+			chainForeach(Expr, subexpr, *getSubexprs(&expr)) {
+				fprintExpr(ast, dst, *subexpr, indent_level + 1);
+			}
 			break;
 		case EXPR_RETURN:
 			fputs("RETURN:\n", dst);
@@ -1226,45 +1310,43 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
 			break;
 		case EXPR_ARRAY:
 			fputs("ARRAY:\n", dst);
-			chain_foreach(Expr, subexpr, *getSubexprs(&expr), fprintExpr(ast, dst, subexpr, indent_level + 1); );
+			chainForeach(Expr, subexpr, *getSubexprs(&expr)) {
+				fprintExpr(ast, dst, *subexpr, indent_level + 1);
+			}
 			break;
 		case EXPR_INVALID:
 		case N_EXPR_TYPES:
 		default:
-			reportCompilerBug("unknown expression type %d", expr.type);
+			assert(false, "unknown expression type %d", expr.type);
 	}
 }
 #define printExpr(ast, expr, indent_level) fprintExpr(ast, stdout, expr, indent_level)
 
-Expr* getVarDecl(Expr* block, char* name)
+static Expr* getDecl(Expr* block, char* name)
 {
 	for (; block; block = block->block) {
 		assert(block->type == EXPR_BLOCK, "`block` argument is expected to be an expression of type EXPR_BLOCK");
-		for (Expr* expr = getSubexpr(block, 0)->arg1; expr; expr = getSubexpr(expr, 2)->arg1) {
-			assert(expr->type == EXPR_NEW_VAR, "expected the variable chain to have an expression of type EXPR_NEW_VAR in it");
-			if (sbufeq(name, getSubexpr(expr, 0)->name)) return expr;
+		for (Expr* expr = getSubexpr(block, 0)->arg1; expr; expr = getPrevDecl(expr)) {
+			assert(
+				expr->type == EXPR_NEW_VAR || expr->type == EXPR_NEW_PROC,
+				"unexpected expression type %d in the declaration chain",
+				expr->type
+			);
+			if (sbufeq(name, getDeclName(expr))) return expr;
 		}
 	}
 
 	return NULL;
 }
 
-FuncDecl* getFuncDecl(AST* ast, char* name)
-{
-	chain_foreach(FuncDecl, func, ast->functions,
-		if (sbufeq(name, func.name)) return &_func->value;
-	);
-	return NULL;
-}
-
-bool isExprIntLiteral(Expr* expr)
+static bool isExprIntLiteral(Expr* expr)
 {
 	if (expr->type == EXPR_INT) return true;
 	if (expr->type == EXPR_CAST) return isExprIntLiteral(expr->arg1);
 	return false;
 }
 
-int64_t getIntLiteral(Expr* expr)
+static int64_t getIntLiteral(Expr* expr)
 {
 	if (expr->type == EXPR_INT) return expr->int_literal;
 	if (expr->type == EXPR_CAST) {
@@ -1295,7 +1377,7 @@ static void wrapExpr(Expr* expr, ExprType new_expr_type, Expr arg2)
 			*expr->arg1 = arg1;
 			return;
 		default:
-			reportCompilerBug("unknown expression arity type %d", expr_arity_table[new_expr_type]);
+			assert(false, "unknown expression arity type %d", expr_arity_table[new_expr_type]);
 	}
 }
 
@@ -1316,33 +1398,19 @@ void defaultExprTypeSetter(AST* ast, Expr* expr, ExprType new_type)
 	expr->type = new_type;
 }
 
-void setExprNameToExprGetVar(AST* ast, Expr* expr, ExprType new_type)
+void setExprProcCall(AST* ast, Expr* expr, ExprType new_type)
 {
-	Expr* decl = getVarDecl(expr->block, expr->name);
-	if (!decl) raiseUnknownNameError(ast, (Token){ .loc = expr->loc, .type = TOKEN_WORD, .word = expr->name });
-
-	expr->type = EXPR_GET_VAR;
-	expr->arg1 = decl;
-}
-
-void setExprNameToExprFuncCall(AST* ast, Expr* expr, ExprType new_type)
-{
-	FuncDecl* decl = getFuncDecl(ast, expr->name);
-	if (!decl) raiseUnknownNameError(ast, (Token){ .loc = expr->loc, .type = TOKEN_WORD, .word = expr->name });
-
+	if (expr->arg1->type == EXPR_NEW_VAR)
+		raiseNonCallableError(ast, expr->loc, *getSubexpr(expr->arg1, 2)->var_type);
 	expr->type = new_type;
+	Expr new_subexpr = *expr;
+	new_subexpr.type = EXPR_REF;
 	initExpr(expr);
-	addSubexpr(expr, (Expr){
-		.type = EXPR_PROC_REF,
-		.block = expr->block,
-		.loc = expr->loc,
-		.arg1 = (Expr*)decl
-	});
+	addSubexpr(expr, new_subexpr);
 }
 
 void setBinaryExprType(AST* ast, Expr* expr, ExprType new_type)
 {
-	if (expr->type == EXPR_NAME) setExprNameToExprGetVar(ast, expr, EXPR_GET_VAR);
 	wrapExpr(expr, new_type, (Expr){0});
 }
 
@@ -1364,15 +1432,7 @@ DEF_WITH_ATTRS(bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprTyp
 			[EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
 			[EXPR_GET_ITEM] = setBinaryExprType
 		},
-		[EXPR_NAME      ] = {
-			[0 ... N_EXPR_TYPES - 1] = NULL,
-			[EXPR_GET_VAR] = setExprNameToExprGetVar,
-			[EXPR_ASSIGN ... EXPR_SHR_ASSIGN] = setBinaryExprType,
-			[EXPR_PROC_CALL] = setExprNameToExprFuncCall,
-			[EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
-			[EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
-			[EXPR_GET_ITEM] = setBinaryExprType
-		},
+		[EXPR_NAME      ] = {[0 ... N_EXPR_TYPES - 1] = NULL},
 		[EXPR_BUILTIN   ] = {
 			[0 ... N_EXPR_TYPES - 1] = NULL,
 			[EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
@@ -1390,18 +1450,18 @@ DEF_WITH_ATTRS(bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprTyp
 			[EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType
 		},
 		[EXPR_REF       ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
-		[EXPR_PROC_REF  ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
 		[EXPR_NEW_VAR   ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
 		[EXPR_ASSIGN ... EXPR_SHR_ASSIGN] = { [0 ... N_EXPR_TYPES - 1] = NULL },
-		[EXPR_GET_VAR   ] = {
+		[EXPR_GET       ] = {
 			[0 ... N_EXPR_TYPES - 1] = NULL,
 			[EXPR_ASSIGN ... EXPR_SHR_ASSIGN] = setBinaryExprType,
 			[EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
 			[EXPR_LOGICAL_EQ ... EXPR_LOGICAL_OR] = setBinaryExprType,
-			[EXPR_GET_ITEM] = setBinaryExprType
+			[EXPR_GET_ITEM] = setBinaryExprType,
+			[EXPR_PROC_CALL] = setExprProcCall
 		},
 		[EXPR_BLOCK     ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
-		[EXPR_TYPE      ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
+		[EXPR_DECL_INFO      ] = { [0 ... N_EXPR_TYPES - 1] = NULL },
 		[EXPR_PROC_CALL ] = {
 			[0 ... N_EXPR_TYPES - 1] = NULL,
 			[EXPR_ADD ... EXPR_SHR] = setBinaryExprType,
@@ -1458,7 +1518,8 @@ DEF_WITH_ATTRS(bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprTyp
 		[EXPR_ARRAY] = {
 			[0 ... N_EXPR_TYPES - 1] = NULL,
 			[EXPR_GET_ITEM] = setBinaryExprType
-		}
+		},
+		[EXPR_NEW_PROC] = { [0 ... N_EXPR_TYPES - 1] = NULL }
 	};
 
 	ExprTypeSetter setter = override_table[expr->type][new_type];
@@ -1477,9 +1538,8 @@ TypeDef getExprValueType(AST* ast, Expr expr)
 		case EXPR_INVALID:
 		case EXPR_NAME:
 		case EXPR_NEW_VAR:
-		case EXPR_TYPE:
+		case EXPR_DECL_INFO:
 		case EXPR_REF:
-		case EXPR_PROC_REF:
 		case EXPR_BLOCK:
 		case EXPR_RETURN:
 		case EXPR_IF:
@@ -1491,8 +1551,8 @@ TypeDef getExprValueType(AST* ast, Expr expr)
 			return BUILTIN_VAL_TYPE;
 		case EXPR_STRING: return TYPE_STR_LITERAL;
 		case EXPR_INT: return INT_TYPE(4);
-		case EXPR_PROC_CALL: return ((FuncDecl*)getSubexpr(&expr, 0)->arg1)->return_type;
-		case EXPR_GET_VAR: return *getSubexpr(expr.arg1, 1)->var_type;
+		case EXPR_PROC_CALL: return *getSubexpr(getSubexpr(&expr, 0)->arg1, 2)->var_type;
+		case EXPR_GET: return *getSubexpr(expr.arg1, 2)->var_type;
 		case EXPR_ASSIGN:
 		case EXPR_ADD_ASSIGN:
 		case EXPR_SUB_ASSIGN:
@@ -1514,7 +1574,7 @@ TypeDef getExprValueType(AST* ast, Expr expr)
 				case KIND_INT:
 					if (arg2_type.kind == KIND_INT) {
 						return arg1_type.size == arg2_type.size ? INT_TYPE(minInt(arg1_type.size * 2, 8)) : (arg1_type.size > arg2_type.size ? arg1_type : arg2_type);
-					} else reportCompilerBug("unexpected type kind %d", arg2_type.kind);
+					} else assert(false, "unexpected type kind %d", arg2_type.kind);
 					break;
 				case KIND_ARRAY:
 				case KIND_PTR:
@@ -1529,7 +1589,7 @@ TypeDef getExprValueType(AST* ast, Expr expr)
 				case KIND_NONE:
 				case N_TYPE_KINDS:
 				default:
-					reportCompilerBug("unexpected type kind %d", arg1_type.kind);
+					assert(false, "unexpected type kind %d", arg1_type.kind);
 			}
 			break;
 		} case EXPR_SUB:
@@ -1576,20 +1636,13 @@ TypeDef getExprValueType(AST* ast, Expr expr)
 			return ARRAY_TYPE(*expr.element_type, getSubexprsCount(&expr));
 		case N_EXPR_TYPES:
 		default:
-			reportCompilerBug("unknown expression type %d", expr.type);
+			assert(false, "unknown expression type %d", expr.type);
 	}
 }
 
 void printAST(AST* ast)
 {
-	chain_foreach(FuncDecl, func, ast->functions, 
-		printTokenLoc(func.loc);
-		printf("function %s:\n", func.name);
-		puts("arguments:");
-		printExpr(ast, func.args, 0);
-		puts("body:");
-		printExpr(ast, func.body, 0);
-	);
+	printExpr(ast, ast->root, 0);
 }
 
 bool matchType(AST* ast, TypeDef field_type, Expr* expr)
@@ -1616,35 +1669,691 @@ bool matchType(AST* ast, TypeDef field_type, Expr* expr)
 	return false;
 }
 
-void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* func, int flags);
+void removeExprWrappers(Expr* expr)
+{
+	if (expr->type == EXPR_WRAPPER) {
+		Expr new_expr = *expr->arg1;
+		free(expr->arg1);
+		*expr = new_expr;
+	}
 
-bool parseVarDecl(AST* ast, Token token, TypeDef var_type, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+	switch (expr_arity_table[expr->type]) {
+		case VARIADIC:
+			chainForeachFrom(Expr, subexpr, *getSubexprs(expr), 1) {
+				removeExprWrappers(subexpr);
+			}
+			return;
+		case NULLARY:
+			return;
+		case TERNARY:
+			removeExprWrappers(expr->arg3);
+		case BINARY:
+			removeExprWrappers(expr->arg2);
+		case UNARY:
+			if (expr->arg1) removeExprWrappers(expr->arg1);
+			return;
+		default:
+			assert(false, "expression type %d has unknown arity type %d", expr->type, expr_arity_table[expr->type]);
+	}
+}
+
+void makeLogicalExpr(Expr* expr)
+{
+	static bool expr_logicality_table[] = {
+		[0 ... N_EXPR_TYPES - 1] = false,
+		[EXPR_LOGICAL_EQ ... EXPR_LOGICAL_NOT] = true,
+	};
+	if (!expr_logicality_table[expr->type]) {
+		Expr* new_subexpr = malloc(sizeof(Expr));
+		*new_subexpr = *expr;
+		expr->type = EXPR_CAST;
+		expr->arg1 = new_subexpr;
+		expr->var_type = malloc(sizeof(TypeDef));
+		*expr->var_type = BOOL_TYPE;
+	}
+}
+
+bool validateReturnStmt(Expr expr)
+{
+	switch (expr.type) {
+		case EXPR_BLOCK:
+			chainForeach(Expr, subexpr, *getSubexprs(&expr)) {
+				if (validateReturnStmt(*subexpr)) return true;
+			}
+			return false;
+		case EXPR_RETURN:
+			return true;
+		case EXPR_IF:
+			if (expr.arg3) return validateReturnStmt(*expr.arg2) && validateReturnStmt(*expr.arg3);
+		default:
+			return false;
+	}
+}
+
+typedef void (*ExprOptimizer) (AST*, Expr*, Expr*);
+
+static ExprOptimizer expr_optimizers[N_EXPR_TYPES];
+
+static inline void optimizeExpr(AST* ast, Expr* expr, Expr* proc)
+{
+	expr_optimizers[expr->type](ast, expr, proc);
+}
+
+void optimizeExprSyscall(AST* ast, Expr* expr, Expr* proc)
+{
+	for (ExprNode* iter = getSubexprs(expr)->start->next; iter != NULL; iter = iter->next) {
+		optimizeExpr(ast, &iter->value, proc);
+		if (!matchType(ast, BUILTIN_VAL_TYPE, &iter->value))
+			raiseArgTypeMismatchError(ast, iter->value.loc, NULL, NULL, getExprValueType(ast, iter->value));
+	}
+}
+
+void emptyOptimizer(AST* ast, Expr* expr, Expr* proc) {}
+
+void optimizeExprAssign(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (!matchType(ast, getExprValueType(ast, *expr->arg1), expr->arg2))
+		raiseAssignmentTypeMismatchError(ast, expr->loc, expr->arg1->arg1, getExprValueType(ast, *expr->arg2));
+}
+
+void optimizeComplexAssignExpr(AST* ast, Expr* expr, Expr* proc)
+{
+	static ExprType assigners_to_ops[N_EXPR_TYPES] = {
+		[EXPR_ADD_ASSIGN] = EXPR_ADD,
+		[EXPR_SUB_ASSIGN] = EXPR_SUB,
+		[EXPR_MUL_ASSIGN] = EXPR_MUL,
+		[EXPR_DIV_ASSIGN] = EXPR_DIV,
+		[EXPR_AND_ASSIGN] = EXPR_AND,
+		[EXPR_XOR_ASSIGN] = EXPR_XOR,
+		[EXPR_OR_ASSIGN ] = EXPR_OR,
+		[EXPR_SHL_ASSIGN] = EXPR_SHL,
+		[EXPR_SHR_ASSIGN] = EXPR_SHR
+	};
+	wrapExpr(expr->arg2, assigners_to_ops[expr->type], *expr->arg1);
+	swap(expr->arg2->arg1, expr->arg2->arg2, Expr*);
+	expr->type = EXPR_ASSIGN;
+	optimizeExprAssign(ast, expr, proc);
+}
+
+void optimizeExprBlock(AST* ast, Expr* expr, Expr* proc)
+{
+	chainForeachFrom(Expr, subexpr, *getSubexprs(expr), 1) {
+		optimizeExpr(ast, subexpr, proc);
+	}
+}
+
+void optimizeExprReturn(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	if (!matchType(ast, *getSubexpr(proc, 2)->var_type, expr->arg1))
+		raiseReturnTypeMismatchError(ast, expr->loc, getExprValueType(ast, *expr->arg1), proc);
+}
+
+void optimizeExprProcCall(AST* ast, Expr* expr, Expr* proc)
+{
+	ExprNode* arg_iter = getSubexprs(expr)->start;
+	Expr* decl = arg_iter->value.arg1;
+	arg_iter = arg_iter->next; 
+
+	if (getSubexpr(decl, 2)->attrs & ATTR_NOT_DEFINED) raiseNoProcDefError(ast, *decl);
+	ExprNode* decl_iter = getSubexprs(getSubexpr(decl, 3))->start->next;
+
+	int decl_n_args = getSubexpr(decl, 2)->n_args, n_args = getSubexprsCount(expr) - 1;
+	if (decl_n_args != n_args) raiseArgCountMismatchError(ast, expr->loc, decl, n_args);
+
+	while (decl_n_args) {
+		optimizeExpr(ast, &arg_iter->value, proc);
+		if (!matchType(ast, *getSubexpr(&decl_iter->value, 2)->var_type, &arg_iter->value))
+			raiseArgTypeMismatchError(
+				ast,
+				arg_iter->value.loc,
+				decl,
+				&decl_iter->value,
+				getExprValueType(ast, arg_iter->value)
+			);
+		decl_iter = decl_iter->next;
+		arg_iter = arg_iter->next;
+		decl_n_args -= 1;
+	}
+}
+
+void optimizeExprAdd(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
+		int64_t sum = expr->arg1->int_literal + expr->arg2->int_literal;
+		free(expr->arg1);
+		free(expr->arg2);
+		expr->type = EXPR_INT;
+		expr->int_literal = sum;
+	} else if (expr->arg1->type == EXPR_INT && expr->arg1->int_literal == 0) {
+		free(expr->arg1);
+		Expr temp = *expr->arg2;
+		*expr = temp;
+	} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
+		free(expr->arg2);
+		Expr temp = *expr->arg1;
+		*expr = temp;
+	} else {
+		TypeDef arg1_type = getExprValueType(ast, *expr->arg1);
+		TypeDef arg2_type = getExprValueType(ast, *expr->arg2);
+
+		if (isPtrType(arg1_type) && !isPtrType(arg2_type) ? getTypeSize(*arg1_type.base) > 1 : false) {
+			if (expr->arg2->type == EXPR_INT) {
+				expr->arg2->int_literal *= getTypeSize(*arg1_type.base);
+			} else {
+				wrapExpr(expr->arg2, EXPR_MUL, (Expr){
+					.type = EXPR_INT,
+					.block = expr->arg2->block,
+					.loc = expr->arg2->loc,
+					.int_literal = getTypeSize(*arg1_type.base)
+				});
+			}
+		} else if (isPtrType(arg2_type) && !isPtrType(arg1_type) ? getTypeSize(*arg2_type.base) > 1 : false) {
+			if (expr->arg1->type == EXPR_INT) {
+				expr->arg1->int_literal *= getTypeSize(*arg2_type.base);
+			} else {
+				wrapExpr(expr->arg1, EXPR_MUL, (Expr){
+					.type = EXPR_INT,
+					.block = expr->arg1->block,
+					.loc = expr->arg1->loc,
+					.int_literal = getTypeSize(*arg1_type.base)
+				});
+			}
+		}
+	}
+}
+
+void optimizeExprSub(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
+		int64_t diff = expr->arg1->int_literal - expr->arg2->int_literal;
+		free(expr->arg1);
+		free(expr->arg2);
+		expr->type = EXPR_INT;
+		expr->int_literal = diff;
+	} else if (expr->arg1->type == EXPR_INT && expr->arg1->int_literal == 0) {
+		free(expr->arg1);
+		Expr temp = *expr->arg2;
+		*expr = temp;
+	} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
+		free(expr->arg2);
+		Expr temp = *expr->arg1;
+		*expr = temp;
+	} else {
+		TypeDef arg1_type = getExprValueType(ast, *expr->arg1);
+		TypeDef arg2_type = getExprValueType(ast, *expr->arg2);
+
+		if (isPtrType(arg1_type) && isPtrType(arg2_type)) {
+			if (typeMatches(*arg1_type.base, *arg2_type.base) && getTypeSize(*arg1_type.base) > 1) {
+				wrapExpr(expr, EXPR_DIV, (Expr){
+					.type = EXPR_INT,
+					.block = expr->block,
+					.loc = expr->loc,
+					.int_literal = getTypeSize(*arg1_type.base)
+				});
+			}
+		}
+	}
+}
+
+void optimizeExprMul(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
+		int64_t product = expr->arg1->int_literal * expr->arg2->int_literal;
+		free(expr->arg1);
+		free(expr->arg2);
+		expr->type = EXPR_INT;
+		expr->int_literal = product;
+	} else if (expr->arg1->type == EXPR_INT && expr->arg1->int_literal == 1) {
+		free(expr->arg1);
+		Expr temp = *expr->arg2;
+		*expr = temp;
+	} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 1) {
+		free(expr->arg2);
+		Expr temp = *expr->arg1;
+		*expr = temp;
+	}
+}
+
+void optimizeExprDiv(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
+		if (expr->arg2->int_literal == 0) raiseDivByZeroError(ast, expr->loc);
+		int64_t quotient = expr->arg1->int_literal / expr->arg2->int_literal;
+		free(expr->arg1);
+		free(expr->arg2);
+		expr->type = EXPR_INT;
+		expr->int_literal = quotient;
+	} else if (expr->arg2->type == EXPR_INT) {
+		if (expr->arg2->int_literal == 0) raiseDivByZeroError(ast, expr->loc);
+		else if (expr->arg2->int_literal == 1) {
+			free(expr->arg2);
+			Expr temp = *expr->arg1;
+			*expr = temp;
+		}
+	}
+}
+
+void optimizeExprMod(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg2->type == EXPR_INT) {
+		if (expr->arg2->int_literal == 0) raiseModZeroError(ast, expr->loc);
+		if (expr->arg1->type == EXPR_INT) {
+			int64_t remainder = expr->arg1->int_literal % expr->arg2->int_literal;
+			free(expr->arg1);
+			free(expr->arg2);
+			expr->type = EXPR_INT;
+			expr->int_literal = remainder;
+		}
+	}
+}
+
+void optimizeExprAnd(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
+		int64_t res = expr->arg1->int_literal & expr->arg2->int_literal;
+		free(expr->arg1);
+		free(expr->arg2);
+		expr->type = EXPR_INT;
+		expr->int_literal = res;
+	}
+}
+
+void optimizeExprOr(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
+		int64_t res = expr->arg1->int_literal | expr->arg2->int_literal;
+		free(expr->arg1);
+		free(expr->arg2);
+		expr->type = EXPR_INT;
+		expr->int_literal = res;
+	} else if (expr->arg1->type == EXPR_INT && expr->arg1->int_literal == 0) {
+		free(expr->arg1);
+		Expr temp = *expr->arg2;
+		*expr = temp;
+	} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
+		if (expr->arg2->int_literal == 0) raiseDivByZeroError(ast, expr->loc);
+		free(expr->arg2);
+		Expr temp = *expr->arg1;
+		*expr = temp;
+	}
+}
+
+void optimizeExprXor(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
+		int64_t res = expr->arg1->int_literal ^ expr->arg2->int_literal;
+		free(expr->arg1);
+		free(expr->arg2);
+		expr->type = EXPR_INT;
+		expr->int_literal = res;
+	}
+}
+
+void optimizeExprShl(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg2->type == EXPR_INT) {
+		if (expr->arg2->int_literal < 0) raiseNegativeBitShiftError(ast, expr->loc);
+		if (expr->arg1->type == EXPR_INT) {
+			int64_t res = expr->arg1->int_literal << expr->arg2->int_literal;
+			free(expr->arg1);
+			free(expr->arg2);
+			expr->type = EXPR_INT;
+			expr->int_literal = res;
+		}
+	} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
+		free(expr->arg2);
+		Expr temp = *expr->arg1;
+		*expr = temp;
+	}
+}
+
+void optimizeExprShr(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg2->type == EXPR_INT) {
+		if (expr->arg2->int_literal < 0) raiseNegativeBitShiftError(ast, expr->loc);
+		if (expr->arg1->type == EXPR_INT) {
+			int64_t res = expr->arg1->int_literal >> expr->arg2->int_literal;
+			free(expr->arg1);
+			free(expr->arg2);
+			expr->type = EXPR_INT;
+			expr->int_literal = res;
+		}
+	} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
+		free(expr->arg2);
+		Expr temp = *expr->arg1;
+		*expr = temp;
+	}
+}
+
+void optimizeExprNot(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	if (expr->arg1->type == EXPR_INT) {
+		int64_t int_literal = ~expr->arg1->int_literal;
+		free(expr->arg1);
+		expr->int_literal = int_literal;
+		expr->type = EXPR_INT;
+	}
+}
+
+void optimizeUnaryExpr(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+}
+
+void optimizeExprDeref(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	if (!isPtrType(getExprValueType(ast, *expr->arg1))) raiseUndereferrableExprError(ast, expr->loc, getExprValueType(ast, *expr->arg1));
+}
+
+void optimizeExprGetRef(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	if (expr->arg1->type == EXPR_DEREF) {
+		Expr* new_expr = expr->arg1->arg1;
+		free(expr->arg1);
+		expr->arg1 = new_expr;
+	} else if (expr->arg1->type != EXPR_GET) raiseUnreferrableExprError(ast, expr->loc, getExprValueType(ast, *expr->arg1));
+}
+
+void optimizeComparisonExpr(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (!matchType(ast, getExprValueType(ast, *expr->arg1), expr->arg2))
+		raiseComparisonTypeMismatchError(ast, expr->loc, getExprValueType(ast, *expr->arg2), getExprValueType(ast, *expr->arg1));
+}
+
+void optimizeBinaryExpr(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+}
+
+void optimizeControlFlowExpr(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+	if (expr->arg3) optimizeExpr(ast, expr->arg3, proc);
+
+	makeLogicalExpr(expr->type == EXPR_DOWHILE ? expr->arg2 : expr->arg1);
+}
+
+void optimizeExprNewVar(AST* ast, Expr* expr, Expr* proc)
+{
+	if (getSubexprsCount(expr) == 4) {
+		Expr* initializer = getSubexpr(expr, 3);
+		Expr* decl_info = getSubexpr(expr, 2);
+		optimizeExpr(ast, initializer, proc);
+		if (!matchType(ast, *decl_info->var_type, initializer))
+			raiseAssignmentTypeMismatchError(ast, expr->loc, expr, getExprValueType(ast, *initializer));
+	}
+}
+
+void optimizeExprGetItem(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, expr->arg1, proc);
+	optimizeExpr(ast, expr->arg2, proc);
+
+	TypeDef array_type = getExprValueType(ast, *expr->arg1);
+	if (!isPtrType(array_type)) raiseUnindexableExprError(ast, expr->arg1->loc, array_type);
+
+	TypeDef index_type = getExprValueType(ast, *expr->arg2);
+	if (!isIntType(index_type)) raiseInvalidArrayIndexError(ast, expr->arg2->loc, index_type);
+
+	if (isExprIntLiteral(expr->arg2) && array_type.kind == KIND_ARRAY && array_type.n_items > 0) {
+		int64_t index_literal = getIntLiteral(expr->arg2);
+		if (!inRange(index_literal, 0, array_type.n_items)) raiseOutOfBoundsIndexError(ast, expr->arg2->loc, array_type, index_literal);
+	}
+
+	if (expr->arg1->type == EXPR_ARRAY && isExprIntLiteral(expr->arg2)) {
+		Expr temp = *getSubexpr(expr->arg1, getIntLiteral(expr->arg2));
+		ExprChain_clear(getSubexprs(expr->arg1));
+		free(expr->arg2);
+		free(expr->arg1);
+		*expr = temp;
+	} else {
+		Expr* new_subexpr = malloc(sizeof(Expr));
+		*new_subexpr = (Expr){
+			.type = EXPR_ADD,
+			.block = expr->block,
+			.loc = expr->loc,
+			.arg1 = expr->arg1,
+			.arg2 = expr->arg2
+		};
+		expr->type = EXPR_DEREF;
+		expr->arg1 = new_subexpr;
+		optimizeExpr(ast, expr->arg1, proc);
+	}
+}
+
+void optimizeExprArray(AST* ast, Expr* expr, Expr* proc)
+{
+	int index = 0;
+	chainForeach(Expr, item, *getSubexprs(expr)) {
+		optimizeExpr(ast, item, proc);
+		if (!matchType(ast, *expr->element_type, item))
+			raiseElementTypeMismatchError(ast, item->loc, index, *expr->element_type, getExprValueType(ast, *item));
+		index++;
+	}
+}
+
+void optimizeExprNewProc(AST* ast, Expr* expr, Expr* proc)
+{
+	optimizeExpr(ast, getSubexpr(getSubexpr(expr, 3), getSubexpr(expr, 2)->n_args + 1), expr);
+}
+
+static_assert(N_EXPR_TYPES == 54, "not all expressions have any optimizations defined");
+static ExprOptimizer expr_optimizers[N_EXPR_TYPES] = {
+	[EXPR_SYSCALL] = optimizeExprSyscall,
+	[EXPR_BUILTIN] = emptyOptimizer, 
+	[EXPR_STRING] = emptyOptimizer,
+	[EXPR_INT] = emptyOptimizer, 
+	[EXPR_NEW_VAR] = optimizeExprNewVar,
+	[EXPR_ASSIGN] = optimizeExprAssign, 
+	[EXPR_ADD_ASSIGN] = optimizeComplexAssignExpr, 
+	[EXPR_SUB_ASSIGN] = optimizeComplexAssignExpr, 
+	[EXPR_MUL_ASSIGN] = optimizeComplexAssignExpr, 
+	[EXPR_DIV_ASSIGN] = optimizeComplexAssignExpr, 
+	[EXPR_AND_ASSIGN] = optimizeComplexAssignExpr, 
+	[EXPR_XOR_ASSIGN] = optimizeComplexAssignExpr, 
+	[EXPR_OR_ASSIGN] = optimizeComplexAssignExpr,
+	[EXPR_SHL_ASSIGN] = optimizeComplexAssignExpr,
+	[EXPR_SHR_ASSIGN] = optimizeComplexAssignExpr, 
+	[EXPR_GET] = emptyOptimizer, 
+	[EXPR_BLOCK] = optimizeExprBlock, 
+	[EXPR_PROC_CALL] = optimizeExprProcCall, 
+	[EXPR_RETURN] = optimizeExprReturn, 
+	[EXPR_ADD] = optimizeExprAdd, 
+	[EXPR_SUB] = optimizeExprSub, 
+	[EXPR_MUL] = optimizeExprMul, 
+	[EXPR_DIV] = optimizeExprDiv, 
+	[EXPR_MOD] = optimizeExprMod, 
+	[EXPR_AND] = optimizeExprAnd, 
+	[EXPR_OR] = optimizeExprOr, 
+	[EXPR_XOR] = optimizeExprXor, 
+	[EXPR_SHL] = optimizeExprShl, 
+	[EXPR_SHR] = optimizeExprShr, 
+	[EXPR_NOT] = optimizeExprNot, 
+	[EXPR_CAST] = optimizeUnaryExpr, 
+	[EXPR_LOGICAL_EQ] = optimizeComparisonExpr, 
+	[EXPR_LOGICAL_NEQ] = optimizeComparisonExpr, 
+	[EXPR_LOGICAL_LE] = optimizeComparisonExpr, 
+	[EXPR_LOGICAL_GE] = optimizeComparisonExpr, 
+	[EXPR_LOGICAL_LT] = optimizeComparisonExpr, 
+	[EXPR_LOGICAL_GT] = optimizeComparisonExpr, 
+	[EXPR_LOGICAL_AND] = optimizeBinaryExpr, 
+	[EXPR_LOGICAL_OR] = optimizeBinaryExpr, 
+	[EXPR_LOGICAL_NOT] = optimizeBinaryExpr, 
+	[EXPR_IF] = optimizeControlFlowExpr, 
+	[EXPR_VOID] = emptyOptimizer, 
+	[EXPR_WHILE] = optimizeControlFlowExpr, 
+	[EXPR_DOWHILE] = optimizeControlFlowExpr, 
+	[EXPR_GET_REF] = optimizeExprGetRef, 
+	[EXPR_DEREF] = optimizeExprDeref, 
+	[EXPR_GET_ITEM] = optimizeExprGetItem, 
+	[EXPR_ARRAY] = optimizeExprArray, 
+	[EXPR_NEW_PROC] = optimizeExprNewProc
+};
+
+void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, Expr* proc, int flags);
+
+bool parseDecl(AST* ast, Token token, TypeDef var_type, int decl_attrs, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	dst->loc = token.loc;
-	if (setExprType(ast, dst, parent_expr, EXPR_NEW_VAR)) return true;
+	TokenLoc type_loc = token.loc;
 
-	if (var_type.kind == KIND_VOID) raiseVoidVarDeclError(ast, token.loc);
+	token = fetchToken(ast->preprocessor);
+	if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a variable or procedure name", wordToken(NULL));
+	Expr* decl = getDecl(dst->block, token.word);
+	if (decl) raiseNameTakenError(ast, token, decl->loc);
 	initExpr(dst);
 
-	token = fetchToken(ast->prep);
-		if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a variable name", wordToken(NULL));
-		Expr* decl = getVarDecl(dst->block, token.word);
-		if (decl) raiseNameTakenError(ast, token, decl->loc);
+	if (getTokenSymbolId(peekToken(ast->preprocessor)) == SYMBOL_ARGSPEC_START) {
+		if (!(flags & EXPRTYPE_DECL)) raiseNestedProcError(ast, type_loc);
+		if (setExprType(ast, dst, parent_expr, EXPR_NEW_PROC)) return true;
+		fetchToken(ast->preprocessor);
+
+		char* proc_name = addSubexpr(dst, (Expr){
+			.type = EXPR_NAME,
+			.block = dst->block,
+			.loc = token.loc,
+			.name = token.word
+		})->name;
+
+		addSubexpr(dst, (Expr){
+			.type = EXPR_REF,
+			.block = dst->block,
+			.loc = type_loc,
+			.arg1 = getSubexpr(dst->block, 0)->arg1
+		});
+		getSubexpr(dst->block, 0)->arg1 = dst;
+
+		if (var_type.kind == KIND_ARRAY) var_type.kind = KIND_PTR;
+		Expr* proc_info = addSubexpr(dst, (Expr){
+			.type = EXPR_DECL_INFO,
+			.block = dst->block,
+			.loc = type_loc,
+			.var_type = malloc(sizeof(TypeDef)),
+			.attrs = decl_attrs
+		});
+		*proc_info->var_type = var_type;
+
+// fetching procedure prototype specification
+		Expr* proc_args = addSubexpr(dst, (Expr){
+			.type = EXPR_BLOCK,
+			.loc = peekToken(ast->preprocessor).loc,
+			.block = dst->block
+		});
+		initExpr(proc_args);
+		Expr* arg_block_ref = addSubexpr(proc_args, (Expr){
+			.type = EXPR_REF,
+			.loc = proc_args->loc,
+			.block = proc_args,
+			.arg1 = NULL
+		});
+	
+		while (true) {
+			Token type_spec = peekToken(ast->preprocessor);
+			if (parseType(ast, &var_type, &decl_attrs, 0, "a declaration of procedure arguments")) {
+				if (var_type.kind == KIND_ARRAY) var_type.kind = KIND_PTR;
+				token = fetchToken(ast->preprocessor);
+				if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "an argument name", wordToken(NULL));
+
+				Expr* new_arg = addSubexpr(proc_args, (Expr){
+					.type = EXPR_NEW_VAR,
+					.block = proc_args,
+					.loc = type_spec.loc
+				});
+				initExpr(new_arg);
+
+				addSubexpr(new_arg, (Expr){
+					.type = EXPR_NAME,
+					.block = proc_args,
+					.name = token.word,
+					.loc = token.loc
+				});
+
+				addSubexpr(new_arg, (Expr){
+					.type = EXPR_REF,
+					.block = proc_args,
+					.arg1 = arg_block_ref->arg1,
+					.loc = new_arg->loc
+				});
+				arg_block_ref->arg1 = new_arg;
+
+				*addSubexpr(new_arg, (Expr){
+					.type = EXPR_DECL_INFO,
+					.block = proc_args,
+					.var_type = malloc(sizeof(TypeDef)),
+					.loc = new_arg->loc
+				})->var_type = var_type;
+
+				proc_info->n_args += 1;
+			} else {
+				token = fetchToken(ast->preprocessor);
+				if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
+					break;
+				} else if (getTokenSymbolId(token) != SYMBOL_COMMA)
+					raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
+			}
+		}
+
+		if (sbufeq(proc_name, "main")) {
+			proc_info->attrs |= ATTR_EXTERNAL;
+			if (proc_info->var_type->kind != KIND_VOID) raiseMainProcRetTypeMismatchError(ast, type_loc, *proc_info->var_type);
+			if (proc_info->n_args) raiseMainProcArgCountMismatchError(ast, token.loc, proc_info->n_args);
+		}
+		// parsing the procedure body
+		token = peekToken(ast->preprocessor);
+		if (getTokenSymbolId(token) == SYMBOL_SEMICOLON) {
+			proc_info->attrs |= ATTR_NOT_DEFINED;
+		} else {
+			Expr* proc_body = addSubexpr(proc_args, (Expr){0});
+			parseExpr(ast, proc_body, proc_args, proc_args, dst, EXPRTERM_FULL);
+			if (proc_body->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "a procedure definition");
+			removeExprWrappers(proc_body);
+			if (proc_body->type == EXPR_BLOCK) proc_body->n_local_vars = 0;
+			if (proc_info->var_type->kind != KIND_VOID)
+				if (!validateReturnStmt(*proc_body)) raiseNoProcReturnError(ast, dst);
+		}
+	} else {
+		if (setExprType(ast, dst, parent_expr, EXPR_NEW_VAR)) return true;
+		if (var_type.kind == KIND_VOID) raiseVoidVarDeclError(ast, type_loc);
+		if (flags & EXPRTYPE_DECL && !(decl_attrs & ATTR_STATIC))
+			decl_attrs |= ATTR_AUTO_STATIC | ATTR_STATIC;
+
 		addSubexpr(dst, (Expr){
 			.type = EXPR_NAME,
-			.name = token.word,
 			.block = dst->block,
-			.loc = dst->loc
+			.loc = token.loc,
+			.name = token.word
 		});
 
-		TypeDef* new_var_type = malloc(sizeof(TypeDef));
-		*new_var_type = var_type;
-		addSubexpr(dst, (Expr){
-			.type = EXPR_TYPE,
-			.var_type = new_var_type,
-			.block = dst->block,
-			.loc = dst->loc
-		});
 		addSubexpr(dst, (Expr){
 			.type = EXPR_REF,
 			.arg1 = getSubexpr(dst->block, 0)->arg1,
@@ -1652,47 +2361,58 @@ bool parseVarDecl(AST* ast, Token token, TypeDef var_type, Expr* dst, Expr* pare
 			.loc = dst->loc
 		});
 		getSubexpr(dst->block, 0)->arg1 = dst;
+		if (!(decl_attrs & ATTR_STATIC)) dst->block->n_local_vars += 1;
 
-		return false;
+		*addSubexpr(dst, (Expr){
+			.type = EXPR_DECL_INFO,
+			.var_type = malloc(sizeof(TypeDef)),
+			.attrs = decl_attrs,
+			.block = dst->block,
+			.loc = dst->loc
+		})->var_type = var_type;
+
 	}
 
-	bool parseIntLiteral(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
-	{
-		dst->loc = token.loc;
-		if (setExprType(ast, dst, parent_expr, EXPR_INT)) {
-			unfetchToken(ast->prep, token);
-			return true;
-		}
-		dst->int_literal = token.value;
+	return false;
+}
 
-		return false;
+bool parseIntLiteral(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
+{
+	dst->loc = token.loc;
+	if (setExprType(ast, dst, parent_expr, EXPR_INT)) {
+		unfetchToken(ast->preprocessor, token);
+		return true;
+	}
+	dst->int_literal = token.value;
+
+	return false;
+}
+
+bool parseStrLiteral(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
+{
+	dst->loc = token.loc;
+	if (setExprType(ast, dst, parent_expr, EXPR_STRING)) {
+		unfetchToken(ast->preprocessor, token);
+		return true;
+	}
+	dst->string = token.string;
+
+	return false;
+}
+
+typedef bool (*KwParser) (AST*, Token, Expr*, Expr*, Expr*, int);
+
+bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
+{
+	dst->loc = token.loc;
+	if (setExprType(ast, dst, parent_expr, EXPR_SYSCALL)) {
+		unfetchToken(ast->preprocessor, token);
+		return true;
 	}
 
-	bool parseStrLiteral(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
-	{
-		dst->loc = token.loc;
-		if (setExprType(ast, dst, parent_expr, EXPR_STRING)) {
-			unfetchToken(ast->prep, token);
-			return true;
-		}
-		dst->string = token.string;
-
-		return false;
-	}
-
-	typedef bool (*KwParser) (AST*, Token, Expr*, Expr*, FuncDecl*, int);
-
-	bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
-	{
-		dst->loc = token.loc;
-		if (setExprType(ast, dst, parent_expr, EXPR_SYSCALL)) {
-			unfetchToken(ast->prep, token);
-			return true;
-		}
-
-		initExpr(dst);
-		token = fetchToken(ast->prep);
-		if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a syscall name", wordToken(NULL));
+	initExpr(dst);
+	token = fetchToken(ast->preprocessor);
+	if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a syscall name", wordToken(NULL));
 	bool name_vaildated = false;
 	for (int i = 0; i < N_SYS_OPS; i++) {
 		if (sbufeq(syscallNames[i], token.word)) {
@@ -1708,36 +2428,36 @@ bool parseVarDecl(AST* ast, Token token, TypeDef var_type, Expr* dst, Expr* pare
 		.loc = token.loc
 	});
 
-	token = fetchToken(ast->prep);
+	token = fetchToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 
-	token = peekToken(ast->prep);
+	token = peekToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
 		while (true) {
 			Expr* arg = addSubexpr(dst, (Expr){0});
-			parseExpr(ast, arg, dst, dst->block, func, EXPRTERM_ARG | EXPRTYPE_EVALUATABLE);
+			parseExpr(ast, arg, dst, dst->block, proc, EXPRTERM_ARG | EXPRTYPE_EVALUATABLE);
 
-			token = fetchToken(ast->prep);
+			token = fetchToken(ast->preprocessor);
 			if (token.symbol_id == SYMBOL_ARGSPEC_END) {
 				break;
 			} else if (token.symbol_id != SYMBOL_COMMA)
 				raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
 		}
-	} else fetchToken(ast->prep);
+	} else fetchToken(ast->preprocessor);
 	if (getSubexprsCount(dst) > 7) raiseTooManySyscallArgsError(ast, token.loc, getSubexprsCount(dst) - 1);
 
 	return false;
 }
 
-bool parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_BUILTIN)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 
-	token = fetchToken(ast->prep);
+	token = fetchToken(ast->preprocessor);
 	if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a built-in name", wordToken(NULL));
 	bool name_vaildated = false;
 	for (int i = 0; i < N_BUILTINS; i++) {
@@ -1752,82 +2472,83 @@ bool parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDec
 	return false;
 }
 
-bool parseKwReturn(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseKwReturn(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_RETURN)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 
 	dst->arg1 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_FULL | EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE);
+	parseExpr(ast, dst->arg1, dst, dst->block, proc, EXPRTERM_FULL | EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE);
 
 	return false;
 }
 
-bool parseKwCast(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseKwCast(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_CAST)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 	
-	token = fetchToken(ast->prep);
+	token = fetchToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 
 	dst->arg1 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_ARG | EXPRTYPE_EVALUATABLE);
-	token = fetchToken(ast->prep);
+	parseExpr(ast, dst->arg1, dst, dst->block, proc, EXPRTERM_ARG | EXPRTYPE_EVALUATABLE);
+	token = fetchToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_COMMA) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA));
 
-	token = peekToken(ast->prep);
+	token = peekToken(ast->preprocessor);
 	dst->var_type = malloc(sizeof(TypeDef));
-	if (!parseType(ast, dst->var_type)) raiseInvalidTypeError(ast, token.loc);
+	int stub;
+	if (!parseType(ast, dst->var_type, &stub, 0, "a type specifier for a type cast")) raiseInvalidTypeError(ast, token.loc);
 	if (dst->var_type->kind == KIND_VOID) raiseVoidCastError(ast, token.loc);
-	token = fetchToken(ast->prep);
+	token = fetchToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_END));
 
 	return false;
 }
 
-bool parseSymbolNot(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolNot(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_LOGICAL_NOT)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 
 	dst->arg1 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg1, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
+	parseExpr(ast, dst->arg1, dst, dst->block, proc, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
 
 	return false;
 }
 
-bool parseKwIf(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseKwIf(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_IF)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 
-	token = fetchToken(ast->prep);
+	token = fetchToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 
 	dst->arg1 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
-	fetchToken(ast->prep);
+	parseExpr(ast, dst->arg1, dst, dst->block, proc, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
+	fetchToken(ast->preprocessor);
 
 	dst->arg2 = calloc(1, sizeof(Expr));
-	token = peekToken(ast->prep);
-	parseExpr(ast, dst->arg2, dst, dst->block, func, EXPRTERM_FULL);
+	token = peekToken(ast->preprocessor);
+	parseExpr(ast, dst->arg2, dst, dst->block, proc, EXPRTERM_FULL);
 	if (dst->arg2->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "`if` statement");
 
-	Token stmt_term = fetchToken(ast->prep);
-	token = peekToken(ast->prep);
+	Token stmt_term = fetchToken(ast->preprocessor);
+	token = peekToken(ast->preprocessor);
 	dst->arg3 = calloc(1, sizeof(Expr));
 	if (getTokenKeywordId(token) != KW_ELSE) {
 		*dst->arg3 = (Expr){
@@ -1835,58 +2556,58 @@ bool parseKwIf(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* fu
 			.block = dst->block,
 			.loc = stmt_term.loc
 		};
-		unfetchToken(ast->prep, stmt_term);
+		unfetchToken(ast->preprocessor, stmt_term);
 		return false;
 	}
-	fetchToken(ast->prep);
+	fetchToken(ast->preprocessor);
 	
-	token = peekToken(ast->prep);
-	parseExpr(ast, dst->arg3, dst, dst->block, func, EXPRTERM_FULL);
+	token = peekToken(ast->preprocessor);
+	parseExpr(ast, dst->arg3, dst, dst->block, proc, EXPRTERM_FULL);
 	if (dst->arg3->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "`else` statement");
 
 	return false;
 }
 
-bool parseKwWhile(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseKwWhile(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	dst->loc = token.loc;
-	if (getTokenSymbolId(peekToken(ast->prep)) == SYMBOL_ARGSPEC_START) {
+	if (getTokenSymbolId(peekToken(ast->preprocessor)) == SYMBOL_ARGSPEC_START) {
 		if (setExprType(ast, dst, parent_expr, EXPR_WHILE)) {
-			unfetchToken(ast->prep, token);
+			unfetchToken(ast->preprocessor, token);
 			return true;
 		}
-		fetchToken(ast->prep);
+		fetchToken(ast->preprocessor);
 		
 		dst->arg1 = calloc(1, sizeof(Expr));
-		parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
-		fetchToken(ast->prep);
+		parseExpr(ast, dst->arg1, dst, dst->block, proc, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
+		fetchToken(ast->preprocessor);
 
 		dst->arg2 = calloc(1, sizeof(Expr));
-		token = peekToken(ast->prep);
-		parseExpr(ast, dst->arg2, dst, dst->block, func, EXPRTERM_FULL);
+		token = peekToken(ast->preprocessor);
+		parseExpr(ast, dst->arg2, dst, dst->block, proc, EXPRTERM_FULL);
 		if (dst->arg2->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "`while` statement");
 	} else raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 
 	return false;
 }
 
-bool parseKwFor(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseKwFor(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	if (setExprType(ast, dst, parent_expr, EXPR_BLOCK)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 	dst->loc = token.loc;
 
-	token = fetchToken(ast->prep);
+	token = fetchToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 // fetching the initializer
 	initExpr(dst);
 	addSubexpr(dst, (Expr){ .type = EXPR_REF, .loc = token.loc, .block = dst });
-	parseExpr(ast, addSubexpr(dst, (Expr){0}), dst, dst, func, EXPRTERM_FULL | EXPRTYPE_VOIDABLE);
-	fetchToken(ast->prep);
+	parseExpr(ast, addSubexpr(dst, (Expr){0}), dst, dst, proc, EXPRTERM_FULL | EXPRTYPE_VOIDABLE);
+	fetchToken(ast->preprocessor);
 // fetching the terminator
-	token = peekToken(ast->prep);
+	token = peekToken(ast->preprocessor);
 	if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) raiseForLoopTermExpectedError(ast, token);
 	Expr* loop = addSubexpr(dst, (Expr){
 		.type = EXPR_WHILE,
@@ -1895,10 +2616,10 @@ bool parseKwFor(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
 		.arg1 = malloc(sizeof(Expr)),
 		.arg2 = malloc(sizeof(Expr))
 	});
-	parseExpr(ast, loop->arg1, dst, dst, func, EXPRTERM_FULL | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
-	fetchToken(ast->prep);
+	parseExpr(ast, loop->arg1, dst, dst, proc, EXPRTERM_FULL | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
+	fetchToken(ast->preprocessor);
 // fetching the incrementer
-	token = peekToken(ast->prep);
+	token = peekToken(ast->preprocessor);
 	if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) raiseForLoopIncrExpectedError(ast, token);
 	*loop->arg2 = (Expr){
 		.type = EXPR_BLOCK,
@@ -1908,48 +2629,48 @@ bool parseKwFor(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* f
 	initExpr(loop->arg2);
 	addSubexpr(loop->arg2, (Expr){ .type = EXPR_REF, .loc = token.loc, .block = loop->arg2 });
 	Expr* iter = calloc(1, sizeof(Expr));
-	parseExpr(ast, iter, loop->arg2, loop->arg2, func, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE);
-	fetchToken(ast->prep);
+	parseExpr(ast, iter, loop->arg2, loop->arg2, proc, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE);
+	fetchToken(ast->preprocessor);
 // fetching the body
-	parseExpr(ast, addSubexpr(loop->arg2, (Expr){0}), loop->arg2, loop->arg2, func, EXPRTERM_FULL);
+	parseExpr(ast, addSubexpr(loop->arg2, (Expr){0}), loop->arg2, loop->arg2, proc, EXPRTERM_FULL);
 	addSubexpr(loop->arg2, *iter);
 	free(iter);
 
 	return false;
 }
 
-bool parseKwDo(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseKwDo(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	if (setExprType(ast, dst, parent_expr, EXPR_DOWHILE)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 	dst->loc = token.loc;
 
 	dst->arg1 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_DOWHILE_BODY);
-	fetchToken(ast->prep);
+	parseExpr(ast, dst->arg1, dst, dst->block, proc, EXPRTERM_DOWHILE_BODY);
+	fetchToken(ast->preprocessor);
 
-	token = fetchToken(ast->prep);
-	if (getTokenKeywordId(token) == KW_WHILE) token = fetchToken(ast->prep);
+	token = fetchToken(ast->preprocessor);
+	if (getTokenKeywordId(token) == KW_WHILE) token = fetchToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, keywordToken(SYMBOL_ARGSPEC_START));
 	
 	dst->arg2 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg2, dst, dst->block, func, EXPRTERM_BRACKET | EXPRTYPE_LOGICAL | EXPRTYPE_EVALUATABLE);
-	fetchToken(ast->prep);
+	parseExpr(ast, dst->arg2, dst, dst->block, proc, EXPRTERM_BRACKET | EXPRTYPE_LOGICAL | EXPRTYPE_EVALUATABLE);
+	fetchToken(ast->preprocessor);
 
 	return false;
 }
 
-bool parseInvalidKw(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseInvalidKw(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, int flags)
 {
 	raiseInvalidExprError(ast, token.loc);
 	return false;
 }
 
-typedef bool (*SymbolParser) (AST*, Token, Expr*, Expr*, FuncDecl*, int);
+typedef bool (*SymbolParser) (AST*, Token, Expr*, Expr*, Expr*, int);
 
-bool parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	static ExprType symbol_to_expr[N_SYMBOLS] = {
 		[SYMBOL_ASSIGNMENT] = EXPR_ASSIGN,
@@ -1970,46 +2691,46 @@ bool parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 	} else {
 		dst->loc = token.loc;
 		if (setExprType(ast, dst, parent_expr, symbol_to_expr[token.symbol_id])) {
-			unfetchToken(ast->prep, token);
+			unfetchToken(ast->preprocessor, token);
 			return true;
 		}
 		if (flags & EXPRTYPE_EVALUATABLE && !(flags & EXPRTERM_BRACKET)) raiseUnbracketedAssignExprError(ast, token.loc);
 
 		dst->arg2 = malloc(sizeof(Expr));
-		Token entry_loc = peekToken(ast->prep);
+		Token entry_loc = peekToken(ast->preprocessor);
 		parseExpr(ast, dst->arg2, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
 	}
 
 	return false;
 }
 
-bool parseSymbolBlockStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolBlockStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	dst->loc = token.loc;
 
 	if (flags & EXPRTYPE_EVALUATABLE) {
 		if (setExprType(ast, dst, parent_expr, EXPR_ARRAY)) {
-			unfetchToken(ast->prep, token);
+			unfetchToken(ast->preprocessor, token);
 			return true;
 		}
 
 		if (parent_expr->type == EXPR_NEW_VAR) {
-			TypeDef decl_type = *getSubexpr(parent_expr, 1)->var_type;
+			TypeDef decl_type = *getSubexpr(parent_expr, 2)->var_type;
 			if (decl_type.kind != KIND_ARRAY) raiseUnexpectedArrayInitError(ast, token.loc, decl_type);
 			dst->element_type = malloc(sizeof(TypeDef));
 			*dst->element_type = *decl_type.base;
 		}
 
 		initExpr(dst);
-		if (getTokenSymbolId(peekToken(ast->prep)) != SYMBOL_BLOCK_END) {
+		if (getTokenSymbolId(peekToken(ast->preprocessor)) != SYMBOL_BLOCK_END) {
 			while (true) {
 				parseExpr(ast, addSubexpr(dst, (Expr){0}), dst, dst->block, func, EXPRTERM_ARRAY_ARG | EXPRTYPE_EVALUATABLE);
-				if (getTokenSymbolId(fetchToken(ast->prep)) == SYMBOL_BLOCK_END) break;
+				if (getTokenSymbolId(fetchToken(ast->preprocessor)) == SYMBOL_BLOCK_END) break;
 			}
-		} else fetchToken(ast->prep);
+		} else fetchToken(ast->preprocessor);
 	} else {
 		if (setExprType(ast, dst, parent_expr, EXPR_BLOCK)) {
-			unfetchToken(ast->prep, token);
+			unfetchToken(ast->preprocessor, token);
 			return true;
 		}
 
@@ -2017,17 +2738,18 @@ bool parseSymbolBlockStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 		addSubexpr(dst, (Expr){
 			.type = EXPR_REF,
 			.block = dst,
-			.loc = dst->loc
+			.loc = dst->loc,
+			.arg1 = NULL,
 		});
 
 		while (true) {
-			token = peekToken(ast->prep);
+			token = peekToken(ast->preprocessor);
 			if (token.type == TOKEN_NONE) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_BLOCK_END));
 			if (getTokenSymbolId(token) == SYMBOL_BLOCK_END) break;
 
 			Expr* expr = addSubexpr(dst, (Expr){0});
 			parseExpr(ast, expr, dst, dst, func, EXPRTERM_FULL);
-			fetchToken(ast->prep);
+			fetchToken(ast->preprocessor);
 		}
 	}
 
@@ -2035,11 +2757,11 @@ bool parseSymbolBlockStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 	return false;
 }
 
-bool parseBinaryExprSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseBinaryExprSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_ADD + token.symbol_id - SYMBOL_PLUS)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 
@@ -2049,11 +2771,11 @@ bool parseBinaryExprSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 	return false;
 }
 
-bool parseSymbolTilde(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolTilde(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_NOT)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 
@@ -2063,40 +2785,33 @@ bool parseSymbolTilde(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncD
 	return false;
 }
 
-bool parseSymbolArgspecStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolArgspecStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	dst->loc = token.loc;
 	if (dst->type != EXPR_INVALID) {
 		if (setExprType(ast, dst, parent_expr, EXPR_PROC_CALL)) {
-			unfetchToken(ast->prep, token);
+			unfetchToken(ast->preprocessor, token);
 			return true;
 		}
 
-		FuncDecl* def = (FuncDecl*)getSubexpr(dst, 0)->arg1;
-		token = peekToken(ast->prep);
-		int arg_id = 0, expected_arg_count = getSubexprsCount(&def->args) - 1;
-
-		if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) {
+		if (getTokenSymbolId(peekToken(ast->preprocessor)) != SYMBOL_ARGSPEC_END) {
 			while (true) {
 				parseExpr(ast, addSubexpr(dst, (Expr){0}), dst, dst->block, func, EXPRTERM_ARG | EXPRTYPE_EVALUATABLE);
-				arg_id++;
-				token = fetchToken(ast->prep);
-				if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) break;
+				if (getTokenSymbolId(fetchToken(ast->preprocessor)) == SYMBOL_ARGSPEC_END) break;
 			}
-		} else fetchToken(ast->prep);
+		} else fetchToken(ast->preprocessor);
 
-		if (arg_id != expected_arg_count) raiseArgCountMismatchError(ast, token.loc, def, arg_id);
 	} else {
 		dst->type = EXPR_WRAPPER;
 		dst->arg1 = calloc(1, sizeof(Expr));
 		parseExpr(ast, dst->arg1, dst, dst->block, func, EXPRTERM_BRACKET | EXPRTYPE_EVALUATABLE);
-		fetchToken(ast->prep);
+		fetchToken(ast->preprocessor);
 	}
 
 	return false;
 }
 
-bool parseComparisonOperatorSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseComparisonOperatorSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	static ExprType symbol_to_expr[N_SYMBOLS] = {
 		[SYMBOL_EQ] = EXPR_LOGICAL_EQ,
@@ -2111,23 +2826,23 @@ bool parseComparisonOperatorSymbol(AST* ast, Token token, Expr* dst, Expr* paren
 
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, symbol_to_expr[token.symbol_id])) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 
 	dst->arg2 = calloc(1, sizeof(Expr));
-	token = peekToken(ast->prep);
+	token = peekToken(ast->preprocessor);
 	parseExpr(ast, dst->arg2, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
 
 	return false;
 }
 
-bool parseSymbolAmpersand(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolAmpersand(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	if (dst->type == EXPR_INVALID) {
 		dst->loc = token.loc;
 		if (setExprType(ast, dst, parent_expr, EXPR_GET_REF)) {
-			unfetchToken(ast->prep, token);
+			unfetchToken(ast->preprocessor, token);
 			return true;
 		}
 
@@ -2138,12 +2853,12 @@ bool parseSymbolAmpersand(AST* ast, Token token, Expr* dst, Expr* parent_expr, F
 	return false;
 }
 
-bool parseSymbolStar(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolStar(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	if (dst->type == EXPR_INVALID) {
 		dst->loc = token.loc;
 		if (setExprType(ast, dst, parent_expr, EXPR_DEREF)) {
-			unfetchToken(ast->prep, token);
+			unfetchToken(ast->preprocessor, token);
 			return true;
 		}
 
@@ -2154,61 +2869,64 @@ bool parseSymbolStar(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDe
 	return false;
 }
 
-bool parseSymbolIndexStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseSymbolIndexStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	dst->loc = token.loc;
 	if (setExprType(ast, dst, parent_expr, EXPR_GET_ITEM)) {
-		unfetchToken(ast->prep, token);
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
 
 	dst->arg2 = calloc(1, sizeof(Expr));
 	parseExpr(ast, dst->arg2, dst, dst->block, func, EXPRTERM_SQBRACKET | EXPRTYPE_EVALUATABLE);
-	fetchToken(ast->prep);
+	fetchToken(ast->preprocessor);
 	return false;
 }
 
-bool parseInvalidSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseInvalidSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	raiseInvalidExprError(ast, token.loc);
 	return false;
 }
 
-bool parseWord(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseWord(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	dst->loc = token.loc;
-	if (setExprType(ast, dst, parent_expr, EXPR_NAME)) {
-		unfetchToken(ast->prep, token);
+	Expr* decl = getDecl(dst->block, token.word);
+	if (!decl) raiseUnknownNameError(ast, token);
+	if (setExprType(ast, dst, parent_expr, EXPR_GET)) {
+		unfetchToken(ast->preprocessor, token);
 		return true;
 	}
-	dst->name = token.word;
+	dst->arg1 = decl;
 
 	return false;
 }
 
-bool parseEmptyToken(AST* ast, Token token, Expr* dst, Expr* parent_expr, FuncDecl* func, int flags)
+bool parseEmptyToken(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* func, int flags)
 {
 	raiseInvalidExprError(ast, token.loc);
 	return false;
 }
 
-void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* func, int flags)
+void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, Expr* func, int flags)
 {
 	static_assert(N_EXPR_TYPES == 54, "not all expression types are handled in parseExpr");
 	TypeDef new_type;
+	int decl_attrs;
 	Token token;
 
 	dst->block = block;
 	while (true) {
-		token = peekToken(ast->prep);
+		token = peekToken(ast->preprocessor);
 		if (isExprTerm(ast, token, dst, flags)) break;
 
-		if (parseType(ast, &new_type)) {
-			parseVarDecl(ast, token, new_type, dst, parent_expr, func, flags);
+		if (parseType(ast, &new_type, &decl_attrs, ATTR_STATIC, "a variable or procedure declaration")) {
+			parseDecl(ast, token, new_type, decl_attrs, dst, parent_expr, func, flags);
 			continue;
 		}
 		
-		fetchToken(ast->prep);
+		fetchToken(ast->preprocessor);
 		if (token.type == TOKEN_INT) {
 			if (parseIntLiteral(ast, token, dst, parent_expr, func, flags)) break;
 		} else if (token.type == TOKEN_STRING) {
@@ -2229,7 +2947,8 @@ void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* fu
 				[KW_ELSE] = parseInvalidKw,
 				[KW_WHILE] = parseKwWhile,
 				[KW_FOR] = parseKwFor,
-				[KW_DO] = parseKwDo
+				[KW_DO] = parseKwDo,
+				[KW_STATIC] = parseInvalidSymbol
 			};
 			if (kw_parsers[token.keyword_id](ast, token, dst, parent_expr, func, flags)) break;
 		} else if (token.type == TOKEN_SYMBOL) {
@@ -2275,582 +2994,65 @@ void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, FuncDecl* fu
 			};
 			if (symbol_parsers[token.symbol_id](ast, token, dst, parent_expr, func, flags)) break;
 		} else if (token.type == TOKEN_WORD) {
-			if (parseWord(ast, token, dst, parent_expr, func, flags)) break;
+			if (getTokenSymbolId(peekToken(ast->preprocessor)) == SYMBOL_ARGSPEC_START && (flags & EXPRTYPE_DECL)) {
+				unfetchToken(ast->preprocessor, token);
+				if (parseDecl(
+					ast,
+					(Token){.type = TOKEN_KEYWORD, .loc = token.loc, .keyword_id = KW_VOID},
+					VOID_TYPE,
+					0,
+					dst,
+					parent_expr,
+					func,
+					flags
+				)) break;
+			} else {
+				if (parseWord(ast, token, dst, parent_expr, func, flags)) break;
+			}
 		} else if (token.type == TOKEN_NONE) {
 			if (parseEmptyToken(ast, token, dst, parent_expr, func, flags)) break;
 		} else
-			reportCompilerBug("invalid token type %hhd", token.type);
+			assert(false, "invalid token type %hhd", token.type);
 	}
 
-	if (dst->type == EXPR_NAME) (void)setExprType(ast, dst, parent_expr, EXPR_GET_VAR);
+	if (dst->type == EXPR_NAME) (void)setExprType(ast, dst, parent_expr, EXPR_GET);
 	if (dst->type == EXPR_INVALID && flags & EXPRTYPE_VOIDABLE) dst->type = EXPR_VOID;
 	if (!isExprEvaluatable(dst->type) && flags & EXPRTYPE_EVALUATABLE) raiseNoValueExprError(ast, token.loc);
 }
 
-void removeExprWrappers(Expr* expr)
-{
-	if (expr->type == EXPR_WRAPPER) {
-		Expr new_expr = *expr->arg1;
-		free(expr->arg1);
-		*expr = new_expr;
-	}
-
-	switch (expr_arity_table[expr->type]) {
-		case VARIADIC:
-			chain_foreach_from(Expr, subexpr, *getSubexprs(expr), 1, 
-				removeExprWrappers(&_subexpr->value);
-			);
-			return;
-		case NULLARY:
-			return;
-		case TERNARY:
-			removeExprWrappers(expr->arg3);
-		case BINARY:
-			removeExprWrappers(expr->arg2);
-		case UNARY:
-			if (expr->arg1) removeExprWrappers(expr->arg1);
-			return;
-		default:
-			reportCompilerBug("expression type %d has unknown arity type %d", expr->type, expr_arity_table[expr->type]);
-	}
-}
-
-void makeLogicalExpr(Expr* expr)
-{
-	static bool expr_logicality_table[] = {
-		[0 ... N_EXPR_TYPES - 1] = false,
-		[EXPR_LOGICAL_EQ ... EXPR_LOGICAL_NOT] = true,
-	};
-	if (!expr_logicality_table[expr->type]) {
-		Expr* new_subexpr = malloc(sizeof(Expr));
-		*new_subexpr = *expr;
-		expr->type = EXPR_CAST;
-		expr->arg1 = new_subexpr;
-		expr->var_type = malloc(sizeof(TypeDef));
-		*expr->var_type = BOOL_TYPE;
-	}
-}
-
-void optimizeExpr(AST* ast, Expr* expr, FuncDecl* func)
-{
-	static_assert(N_EXPR_TYPES == 54, "not all expressions have any optimizations defined");
-	switch (expr->type) {
-		case EXPR_SYSCALL:
-			for (ExprNode* iter = getSubexprs(expr)->start->next; iter != NULL; iter = iter->next) {
-				optimizeExpr(ast, &iter->value, func);
-				if (!matchType(ast, BUILTIN_VAL_TYPE, &iter->value))
-					raiseArgTypeMismatchError(ast, iter->value.loc, NULL, NULL, getExprValueType(ast, iter->value));
-			}
-			break;
-		case EXPR_SUB_ASSIGN:
-		case EXPR_ADD_ASSIGN:
-		case EXPR_MUL_ASSIGN:
-		case EXPR_DIV_ASSIGN:
-		case EXPR_AND_ASSIGN:
-		case EXPR_XOR_ASSIGN:
-		case EXPR_OR_ASSIGN:
-		case EXPR_SHL_ASSIGN:
-		case EXPR_SHR_ASSIGN: {
-			static ExprType assigners_to_ops[N_EXPR_TYPES] = {
-				[EXPR_ADD_ASSIGN] = EXPR_ADD,
-				[EXPR_SUB_ASSIGN] = EXPR_SUB,
-				[EXPR_MUL_ASSIGN] = EXPR_MUL,
-				[EXPR_DIV_ASSIGN] = EXPR_DIV,
-				[EXPR_AND_ASSIGN] = EXPR_AND,
-				[EXPR_XOR_ASSIGN] = EXPR_XOR,
-				[EXPR_OR_ASSIGN ] = EXPR_OR,
-				[EXPR_SHL_ASSIGN] = EXPR_SHL,
-				[EXPR_SHR_ASSIGN] = EXPR_SHR
-			};
-			wrapExpr(expr->arg2, assigners_to_ops[expr->type], *expr->arg1);
-			swap(expr->arg2->arg1, expr->arg2->arg2, Expr*);
-			expr->type = EXPR_ASSIGN;
-		} case EXPR_ASSIGN:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (!matchType(ast, getExprValueType(ast, *expr->arg1), expr->arg2))
-				raiseAssignmentTypeMismatchError(ast, expr->loc, expr->arg1->arg1, getExprValueType(ast, *expr->arg2));
-			break;
-		case EXPR_BLOCK:
-			chain_foreach_from(Expr, subexpr, *getSubexprs(expr), 1, 
-				optimizeExpr(ast, &_subexpr->value, func);
-			);
-			break;
-		case EXPR_RETURN:
-			optimizeExpr(ast, expr->arg1, func);
-			if (!matchType(ast, func->return_type, expr->arg1))
-				raiseReturnTypeMismatchError(ast, expr->loc, getExprValueType(ast, *expr->arg1), func);
-			break;
-		case EXPR_PROC_CALL: {
-			ExprNode* arg_iter = getSubexprs(expr)->start;
-			FuncDecl* decl = (FuncDecl*)arg_iter->value.arg1;
-			arg_iter = arg_iter->next;
- 
-			ExprNode* decl_iter = getSubexprs(&decl->args)->start->next;
-
-			while (decl_iter != NULL) {
-				optimizeExpr(ast, &arg_iter->value, func);
-				if (!matchType(ast, *getSubexpr(&decl_iter->value, 1)->var_type, &arg_iter->value))
-					raiseArgTypeMismatchError(ast, arg_iter->value.loc, decl, &decl_iter->value, getExprValueType(ast, arg_iter->value));
-				decl_iter = decl_iter->next;
-				arg_iter = arg_iter->next;
-			}
-		} break;
-		case EXPR_ADD:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
-				int64_t sum = expr->arg1->int_literal + expr->arg2->int_literal;
-				free(expr->arg1);
-				free(expr->arg2);
-				expr->type = EXPR_INT;
-				expr->int_literal = sum;
-			} else if (expr->arg1->type == EXPR_INT && expr->arg1->int_literal == 0) {
-				free(expr->arg1);
-				Expr temp = *expr->arg2;
-				*expr = temp;
-			} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
-				free(expr->arg2);
-				Expr temp = *expr->arg1;
-				*expr = temp;
-			} else {
-				TypeDef arg1_type = getExprValueType(ast, *expr->arg1);
-				TypeDef arg2_type = getExprValueType(ast, *expr->arg2);
-
-				if (isPtrType(arg1_type) && !isPtrType(arg2_type) ? getTypeSize(*arg1_type.base) > 1 : false) {
-					if (expr->arg2->type == EXPR_INT) {
-						expr->arg2->int_literal *= getTypeSize(*arg1_type.base);
-					} else {
-						wrapExpr(expr->arg2, EXPR_MUL, (Expr){
-							.type = EXPR_INT,
-							.block = expr->arg2->block,
-							.loc = expr->arg2->loc,
-							.int_literal = getTypeSize(*arg1_type.base)
-						});
-					}
-				} else if (isPtrType(arg2_type) && !isPtrType(arg1_type) ? getTypeSize(*arg2_type.base) > 1 : false) {
-					if (expr->arg1->type == EXPR_INT) {
-						expr->arg1->int_literal *= getTypeSize(*arg2_type.base);
-					} else {
-						wrapExpr(expr->arg1, EXPR_MUL, (Expr){
-							.type = EXPR_INT,
-							.block = expr->arg1->block,
-							.loc = expr->arg1->loc,
-							.int_literal = getTypeSize(*arg1_type.base)
-						});
-					}
-				}
-			}
-			break;
-		case EXPR_SUB:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
-				int64_t diff = expr->arg1->int_literal - expr->arg2->int_literal;
-				free(expr->arg1);
-				free(expr->arg2);
-				expr->type = EXPR_INT;
-				expr->int_literal = diff;
-			} else if (expr->arg1->type == EXPR_INT && expr->arg1->int_literal == 0) {
-				free(expr->arg1);
-				Expr temp = *expr->arg2;
-				*expr = temp;
-			} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
-				free(expr->arg2);
-				Expr temp = *expr->arg1;
-				*expr = temp;
-			} else {
-				TypeDef arg1_type = getExprValueType(ast, *expr->arg1);
-				TypeDef arg2_type = getExprValueType(ast, *expr->arg2);
-
-				if (isPtrType(arg1_type) && isPtrType(arg2_type)) {
-					if (typeMatches(*arg1_type.base, *arg2_type.base) && getTypeSize(*arg1_type.base) > 1) {
-						wrapExpr(expr, EXPR_DIV, (Expr){
-							.type = EXPR_INT,
-							.block = expr->block,
-							.loc = expr->loc,
-							.int_literal = getTypeSize(*arg1_type.base)
-						});
-					}
-				}
-			}
-			break;
-		case EXPR_MUL:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
-				int64_t product = expr->arg1->int_literal * expr->arg2->int_literal;
-				free(expr->arg1);
-				free(expr->arg2);
-				expr->type = EXPR_INT;
-				expr->int_literal = product;
-			} else if (expr->arg1->type == EXPR_INT && expr->arg1->int_literal == 1) {
-				free(expr->arg1);
-				Expr temp = *expr->arg2;
-				*expr = temp;
-			} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 1) {
-				free(expr->arg2);
-				Expr temp = *expr->arg1;
-				*expr = temp;
-			}
-			break;
-		case EXPR_DIV:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
-				if (expr->arg2->int_literal == 0) raiseDivByZeroError(ast, expr->loc);
-				int64_t quotient = expr->arg1->int_literal / expr->arg2->int_literal;
-				free(expr->arg1);
-				free(expr->arg2);
-				expr->type = EXPR_INT;
-				expr->int_literal = quotient;
-			} else if (expr->arg2->type == EXPR_INT) {
-				if (expr->arg2->int_literal == 0) raiseDivByZeroError(ast, expr->loc);
-				else if (expr->arg2->int_literal == 1) {
-					free(expr->arg2);
-					Expr temp = *expr->arg1;
-					*expr = temp;
-				}
-			}
-			break;
-		case EXPR_MOD:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg2->type == EXPR_INT) {
-				if (expr->arg2->int_literal == 0) raiseModZeroError(ast, expr->loc);
-				if (expr->arg1->type == EXPR_INT) {
-					int64_t remainder = expr->arg1->int_literal % expr->arg2->int_literal;
-					free(expr->arg1);
-					free(expr->arg2);
-					expr->type = EXPR_INT;
-					expr->int_literal = remainder;
-				}
-			}
-			break;
-		case EXPR_AND:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
-				int64_t res = expr->arg1->int_literal & expr->arg2->int_literal;
-				free(expr->arg1);
-				free(expr->arg2);
-				expr->type = EXPR_INT;
-				expr->int_literal = res;
-			}
-			break;
-		case EXPR_OR:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
-				int64_t res = expr->arg1->int_literal | expr->arg2->int_literal;
-				free(expr->arg1);
-				free(expr->arg2);
-				expr->type = EXPR_INT;
-				expr->int_literal = res;
-			} else if (expr->arg1->type == EXPR_INT && expr->arg1->int_literal == 0) {
-				free(expr->arg1);
-				Expr temp = *expr->arg2;
-				*expr = temp;
-			} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
-				if (expr->arg2->int_literal == 0) raiseDivByZeroError(ast, expr->loc);
-				free(expr->arg2);
-				Expr temp = *expr->arg1;
-				*expr = temp;
-			}
-			break;
-		case EXPR_XOR:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg1->type == EXPR_INT && expr->arg2->type == EXPR_INT) {
-				int64_t res = expr->arg1->int_literal ^ expr->arg2->int_literal;
-				free(expr->arg1);
-				free(expr->arg2);
-				expr->type = EXPR_INT;
-				expr->int_literal = res;
-			}
-			break;
-		case EXPR_SHL:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg2->type == EXPR_INT) {
-				if (expr->arg2->int_literal < 0) raiseNegativeBitShiftError(ast, expr->loc);
-				if (expr->arg1->type == EXPR_INT) {
-					int64_t res = expr->arg1->int_literal << expr->arg2->int_literal;
-					free(expr->arg1);
-					free(expr->arg2);
-					expr->type = EXPR_INT;
-					expr->int_literal = res;
-				}
-			} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
-				free(expr->arg2);
-				Expr temp = *expr->arg1;
-				*expr = temp;
-			}
-			break;
-		case EXPR_SHR:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg2->type == EXPR_INT) {
-				if (expr->arg2->int_literal < 0) raiseNegativeBitShiftError(ast, expr->loc);
-				if (expr->arg1->type == EXPR_INT) {
-					int64_t res = expr->arg1->int_literal >> expr->arg2->int_literal;
-					free(expr->arg1);
-					free(expr->arg2);
-					expr->type = EXPR_INT;
-					expr->int_literal = res;
-				}
-			} else if (expr->arg2->type == EXPR_INT && expr->arg2->int_literal == 0) {
-				free(expr->arg2);
-				Expr temp = *expr->arg1;
-				*expr = temp;
-			}
-			break;
-		case EXPR_NOT:
-			optimizeExpr(ast, expr->arg1, func);
-			if (expr->arg1->type == EXPR_INT) {
-				int64_t int_literal = ~expr->arg1->int_literal;
-				free(expr->arg1);
-				expr->int_literal = int_literal;
-				expr->type = EXPR_INT;
-			}
-			break;
-		case EXPR_CAST:
-		case EXPR_LOGICAL_NOT:
-			optimizeExpr(ast, expr->arg1, func);
-			break;
-		case EXPR_DEREF:
-			optimizeExpr(ast, expr->arg1, func);
-			if (!isPtrType(getExprValueType(ast, *expr->arg1))) raiseUndereferrableExprError(ast, expr->loc, getExprValueType(ast, *expr->arg1));
-			break;
-		case EXPR_GET_REF:
-			optimizeExpr(ast, expr->arg1, func);
-			if (expr->arg1->type == EXPR_DEREF) {
-				Expr* new_expr = expr->arg1->arg1;
-				free(expr->arg1);
-				expr->arg1 = new_expr;
-			} else if (expr->arg1->type != EXPR_GET_VAR) raiseUnreferrableExprError(ast, expr->loc, getExprValueType(ast, *expr->arg1));
-			break;
-		case EXPR_LOGICAL_EQ:
-		case EXPR_LOGICAL_NEQ:
-		case EXPR_LOGICAL_LT:
-		case EXPR_LOGICAL_GT:
-		case EXPR_LOGICAL_LE:
-		case EXPR_LOGICAL_GE:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (!matchType(ast, getExprValueType(ast, *expr->arg1), expr->arg2))
-				raiseComparisonTypeMismatchError(ast, expr->loc, getExprValueType(ast, *expr->arg2), getExprValueType(ast, *expr->arg1));
-			break;
-		case EXPR_LOGICAL_AND:
-		case EXPR_LOGICAL_OR:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			break;
-		case EXPR_WHILE:
-		case EXPR_DOWHILE:
-		case EXPR_IF:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-			if (expr->arg3) optimizeExpr(ast, expr->arg3, func);
-
-			makeLogicalExpr(expr->type == EXPR_DOWHILE ? expr->arg2 : expr->arg1);
-			break;
-		case EXPR_NEW_VAR:
-			if (getSubexprsCount(expr) == 4) {
-				Expr* initializer = getSubexpr(expr, 3);
-				optimizeExpr(ast, initializer, func);
-				if (!matchType(ast, *getSubexpr(expr, 1)->var_type, initializer))
-					raiseAssignmentTypeMismatchError(ast, expr->loc, expr, getExprValueType(ast, *initializer));
-			}
-			break;
-		case EXPR_GET_ITEM:
-			optimizeExpr(ast, expr->arg1, func);
-			optimizeExpr(ast, expr->arg2, func);
-
-			TypeDef array_type = getExprValueType(ast, *expr->arg1);
-			if (!isPtrType(array_type)) raiseUnindexableExprError(ast, expr->arg1->loc, array_type);
-
-			TypeDef index_type = getExprValueType(ast, *expr->arg2);
-			if (!isIntType(index_type)) raiseInvalidArrayIndexError(ast, expr->arg2->loc, index_type);
-
-			if (isExprIntLiteral(expr->arg2) && array_type.kind == KIND_ARRAY && array_type.n_items > 0) {
-				int64_t index_literal = getIntLiteral(expr->arg2);
-				if (!inRange(index_literal, 0, array_type.n_items)) raiseOutOfBoundsIndexError(ast, expr->arg2->loc, array_type, index_literal);
-			}
-
-			if (expr->arg1->type == EXPR_ARRAY && isExprIntLiteral(expr->arg2)) {
-				Expr temp = *getSubexpr(expr->arg1, getIntLiteral(expr->arg2));
-				ExprChain_clear(getSubexprs(expr->arg1));
-				free(expr->arg2);
-				free(expr->arg1);
-				*expr = temp;
-			} else {
-				Expr* new_subexpr = malloc(sizeof(Expr));
-				*new_subexpr = (Expr){
-					.type = EXPR_ADD,
-					.block = expr->block,
-					.loc = expr->loc,
-					.arg1 = expr->arg1,
-					.arg2 = expr->arg2
-				};
-				expr->type = EXPR_DEREF;
-				expr->arg1 = new_subexpr;
-				optimizeExpr(ast, expr->arg1, func);
-			}
-			break;
-		case EXPR_ARRAY: {
-			int index = 0;
-			chain_foreach(Expr, item, *getSubexprs(expr),
-				optimizeExpr(ast, &_item->value, func);
-				if (!matchType(ast, *expr->element_type, &_item->value))
-					raiseElementTypeMismatchError(
-						ast, item.loc, index, *expr->element_type, getExprValueType(ast, item)
-					);
-				index++;
-			);
-		}
-		case EXPR_GET_VAR:
-		case EXPR_INT:
-		case EXPR_BUILTIN:
-		case EXPR_STRING:
-		case EXPR_VOID:
-			break;
-		default:
-			reportCompilerBug("expression with no defined optimizations: %d", expr->type);
-	}
-}
-
-bool validateReturnStmt(Expr expr)
-{
-	switch (expr.type) {
-		case EXPR_BLOCK:
-			chain_foreach(Expr, subexpr, *getSubexprs(&expr), 
-				if (validateReturnStmt(subexpr)) return true;
-			);
-			return false;
-		case EXPR_RETURN:
-			return true;
-		case EXPR_IF:
-			if (expr.arg3) return validateReturnStmt(*expr.arg2) && validateReturnStmt(*expr.arg3);
-		default:
-			return false;
-	}
-}
-
 void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
 {
-	Token token;
-	dst->prep = obj;
-	dst->functions = FuncDeclChain_new(0);
-	dst->globals.type = EXPR_BLOCK;
-	dst->globals.block = NULL;
-	initExpr(&dst->globals);
-	addSubexpr(&dst->globals, (Expr){ .type = EXPR_REF });
+	dst->preprocessor = obj;
+	dst->root.type = EXPR_BLOCK;
+	dst->root.loc = peekToken(obj).loc;
+	dst->root.block = NULL;
+	initExpr(&dst->root);
+	addSubexpr(&dst->root, (Expr){ .type = EXPR_REF });
 
 	while (true) {
-		TypeDef type;
-		if (!parseType(dst, &type)) type = VOID_TYPE;
-// fetching function name
-		Token func_name_spec = fetchToken(obj);
-		if (func_name_spec.type == TOKEN_WORD) {
-			token = fetchToken(obj);
-			FuncDecl* new_func = FuncDeclChain_append(
-				&dst->functions,
-				(FuncDecl){
-					.return_type = type,
-					.name = tostr(SBUF(func_name_spec.word)),
-					.loc = func_name_spec.loc,
-					.args = (Expr){
-						.type = EXPR_BLOCK,
-						.block = &dst->globals,
-						.loc = token.loc
-					},
-				}
-			);
-			initExpr(&new_func->args);
-			Expr* arg_block_ref = addSubexpr(&new_func->args, (Expr){
-				.type = EXPR_REF,
-				.block = &new_func->args,
-				.arg1 = NULL,
-				.loc = new_func->args.loc
-			});
-	// fetching function prototype specification
-			if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(dst, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
-			while (true) {
-				Token type_spec = peekToken(obj);
-				if (parseType(dst, &type)) {
-					if (type.kind == KIND_ARRAY) type.kind = KIND_PTR;
-					token = fetchToken(obj);
-					if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(dst, token, "an argument name", wordToken(NULL));
+		if (peekToken(obj).type) {
+			parseExpr(dst, addSubexpr(&dst->root, (Expr){0}), &dst->root, &dst->root, NULL, EXPRTYPE_DECL | EXPRTERM_FULL);
+			fetchToken(obj);
+		} else break;
+	}
+}
 
-					Expr* new_arg = addSubexpr(&new_func->args, (Expr){
-						.type = EXPR_NEW_VAR,
-						.block = &new_func->args,
-						.loc = type_spec.loc
-					});
-					initExpr(new_arg);
-					addSubexpr(new_arg, (Expr){
-						.type = EXPR_NAME,
-						.block = &new_func->args,
-						.name = token.word,
-						.loc = token.loc
-					});
-					Expr* new_arg_type_spec = addSubexpr(new_arg, (Expr){
-						.type = EXPR_TYPE,
-						.block = &new_func->args,
-						.var_type = malloc(sizeof(TypeDef)),
-						.loc = new_arg->loc
-					});
-					*new_arg_type_spec->var_type = type;
-					Expr* _tmp = addSubexpr(new_arg, (Expr){
-						.type = EXPR_REF,
-						.block = &new_func->args,
-						.arg1 = arg_block_ref->arg1,
-						.loc = new_arg->loc
-					});
-					arg_block_ref->arg1 = new_arg;
-				} else {
-					token = fetchToken(obj);
-					if (getTokenSymbolId(token) == SYMBOL_ARGSPEC_END) {
-						break;
-					} else if (getTokenSymbolId(token) != SYMBOL_COMMA)
-						raiseUnexpectedTokenError(dst, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
-				}
-			}
-
-			if (sbufeq(new_func->name, "main")) {
-		new_func->attrs |= FUNCATTR_EXTERNAL;
-				if (new_func->return_type.kind != KIND_VOID) raiseMainProcRetTypeMismatchError(dst, func_name_spec.loc, new_func->return_type);
-				int main_proc_n_args = getSubexprsCount(&new_func->args) - 1;
-				if (main_proc_n_args != 0) raiseMainProcArgCountMismatchError(dst, token.loc, main_proc_n_args);
-			}
-	// parsing the function body
-			token = peekToken(obj);
-			if (getTokenSymbolId(token) != SYMBOL_SEMICOLON) {
-				parseExpr(dst, &new_func->body, NULL, &new_func->args, new_func, EXPRTERM_FULL);
-				if (new_func->body.type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(dst, token.loc, "a function definition");
-				fetchToken(obj);
-				removeExprWrappers(&new_func->body);
-				optimizeExpr(dst, &new_func->body, new_func);
-				if (new_func->return_type.kind != KIND_VOID) {
-					if (!validateReturnStmt(new_func->body)) raiseNoProcReturnError(dst, new_func);
-				}
-			} else fetchToken(obj);
-		} else if (func_name_spec.type == TOKEN_NONE) {
-			break;
-		} else raiseInvalidGlobalStmtError(dst, func_name_spec);
+void optimizeSourceCode(AST* ast)
+{
+	chainForeachFrom(Expr, expr, *getSubexprs(&ast->root), 1) {
+		optimizeExpr(ast, expr, NULL);
 	}
 }
 
 typedef uint8_t regstate_t;
 typedef struct {
 	sbufArray data_blocks;
-	intArray mem_blocks;
 	sbuf cur_src_path;
 	int cur_src_line;
 	regstate_t arg_cache_state;
 	AST* ast;
 	FILE* dst;
+	ExprChain static_vars;
 } ASTCompilerCtx;
 
 typedef void (*ExprCompiler) (ASTCompilerCtx*, Expr, regstate_t, int);
@@ -2908,21 +3110,21 @@ void compileSrcRef(ASTCompilerCtx* ctx, TokenLoc loc)
 	if (!sbufeq(ctx->cur_src_path, path_s)) {
 		fprintf(
 			ctx->dst, 
-			"\t@f \"%.*s\"\n"
-			"\t@l %d\n",
+			"@f \"%.*s\"\n"
+			"@l %d\n",
 			unpack(path_s), loc.lineno
 		);
 		ctx->cur_src_path = path_s;
 		ctx->cur_src_line = loc.lineno;
 	} else if (loc.lineno != ctx->cur_src_line) {
-		fprintf(ctx->dst, "\t@l %d\n", loc.lineno);
+		fprintf(ctx->dst, "@l %d\n", loc.lineno);
 		ctx->cur_src_line = loc.lineno;
 	}
 }
 
 void compileExprInvalid(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
-	reportCompilerBug("uncompilable expression type %d", expr.type);
+	assert(false, "uncompilable expression type %d", expr.type);
 }
 
 void compileExprSyscall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
@@ -2932,10 +3134,10 @@ void compileExprSyscall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 	regstate_t reg_cache_state = ((1 << (getSubexprsCount(&expr) - 1)) - 1 | 1) & reg_state;
 	int cache_id = compileRegCaching(ctx, reg_cache_state);
 	int i = 0;
-	chain_foreach_from(Expr, subexpr, *getSubexprs(&expr), 1,
-		expr_compilers[subexpr.type](ctx, subexpr, (1 << i) - 1, i);
+	chainForeachFrom(Expr, subexpr, *getSubexprs(&expr), 1) {
+		expr_compilers[subexpr->type](ctx, *subexpr, (1 << i) - 1, i);
 		i++;
-	);
+	}
 	fprintf(ctx->dst, "\tsys %s\n", getSubexpr(&expr, 0)->name);
 
 	if (dst_reg != 0) fprintf(ctx->dst, "\tsetr r%d r0\n", dst_reg);
@@ -2962,10 +3164,11 @@ void compileExprString(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 	}
 	if (str_index < 0) {
 		str_index = ctx->data_blocks.length;
+		fprintf(ctx->dst, ".data \""STR_PREFIX"%d\" \"%.*s\"\n", str_index, unpack(expr.string));
 		sbufArray_append(&ctx->data_blocks, expr.string);
 	}
 
-	fprintf(ctx->dst, "\tsetd r%d . \""STR_PREFIX"%d\"\n", dst_reg, str_index);
+	if (dst_reg >= 0) fprintf(ctx->dst, "\tsetd r%d . \""STR_PREFIX"%d\"\n", dst_reg, str_index);
 }
 
 void compileExprInt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
@@ -2980,85 +3183,133 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 {
 	compileSrcRef(ctx, expr.loc);
 	char* name = getSubexpr(&expr, 0)->name;
-	TypeDef var_type = *getSubexpr(&expr, 1)->var_type;
-	int size = getTypeSize(var_type);
+	Expr* decl_info = getSubexpr(&expr, 2);
+	Expr* initializer = getSubexpr(&expr, 3);
+	int size = getTypeSize(*decl_info->var_type);
 
-	if (getSubexprsCount(&expr) == 4) {
-		Expr* initializer = getSubexpr(&expr, 3);
-		if (initializer->type == EXPR_ARRAY) {
-			int element_size = getTypeSize(*var_type.base), initializer_size = getSubexprsCount(initializer), array_size = element_size * var_type.n_items;
-			if (initializer_size) {
-				int element_reg, cache_id;
-				getRegister(ctx, &reg_state, dst_reg, &element_reg, &cache_id);
+	if (decl_info->attrs & ATTR_STATIC && dst_reg >= 0) {
+		ExprChain_append(&ctx->static_vars, expr);
+	} else {
+		if (dst_reg < 0) dst_reg = 0;
+		if (initializer) {
+			if (initializer->type == EXPR_ARRAY) {
+				int element_size = getTypeSize(*decl_info->var_type->base),
+					initializer_size = getSubexprsCount(initializer),
+					array_size = element_size * decl_info->var_type->n_items;
 
-				fprintf(ctx->dst, "\tvar \"%s\" %d\n", name, array_size);
-				fprintf(ctx->dst, "\tsetv r%d \"%s\"\n", dst_reg, name);
+				if (initializer_size) {
+					int element_reg, cache_id;
+					getRegister(ctx, &reg_state, dst_reg, &element_reg, &cache_id);
 
-				if (initializer_size == 1) {
-					int iter_reg, iter_cache_id;
-					getRegister(ctx, &reg_state, dst_reg, &iter_reg, &cache_id);
-
-					initializer = getSubexpr(initializer, 0);
-					expr_compilers[initializer->type](ctx, *initializer, reg_state | (1 << dst_reg) | (1 << iter_reg), element_reg);
-
-					fprintf(ctx->dst, "\tset r%d %d\n", iter_reg, var_type.n_items);
-					fprintf(ctx->dst, "\tmark \".ai%d\"\n", ++array_init_counter);
-					fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size * 8, dst_reg, element_reg);
-					fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
-					fprintf(ctx->dst, "\tsub r%d r%d 1\n", iter_reg, iter_reg);
-					fprintf(ctx->dst, "\tcmp r%d 0\n", iter_reg);
-					fprintf(ctx->dst, "\tgoto:neq \".ai%d\"\n", array_init_counter);
-
-					freeRegister(ctx, &reg_state, iter_reg, iter_cache_id);
-				} else {
-					chain_foreach(Expr, element, *getSubexprs(initializer),
-						expr_compilers[element.type](ctx, element, reg_state | (1 << dst_reg), element_reg);
-						fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size, dst_reg, element_reg);
-						fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
+					if (decl_info->attrs & ATTR_STATIC) {
+						fprintf(
+							ctx->dst,
+							".data mut \"%1$s\" zero %2$d\n"
+							"setd r%3$d . \"%1$s\"\n",
+							name, array_size, dst_reg
+						);
+					} else fprintf(
+						ctx->dst, 
+						"\tvar \"%1$s\" %2$d\n"
+						"\tsetv r%3$d \"%1$s\"\n",
+						name, array_size, dst_reg
 					);
-				}
 
-				freeRegister(ctx, &reg_state, element_reg, cache_id);
-			} else {
-				if (array_size <= 8) {
-					fprintf(ctx->dst, "\tpushv \"%s\" %d rZ\n", name, array_size);
-				} else {
-					int iter_reg, cache_id, step = 1;
-					getRegister(ctx, &reg_state, dst_reg, &iter_reg, &cache_id);
+					if (initializer_size == 1) {
+						int iter_reg, iter_cache_id;
+						getRegister(ctx, &reg_state, dst_reg, &iter_reg, &cache_id);
 
-					fprintf(ctx->dst, "\tvar \"%s\" %d\n", name, array_size);
-					fprintf(ctx->dst, "\tsetv r%d \"%s\"\n", dst_reg, name);
+						initializer = getSubexpr(initializer, 0);
+						expr_compilers[initializer->type](ctx, *initializer, reg_state | (1 << dst_reg) | (1 << iter_reg), element_reg);
 
-					if (array_size % 8 == 0) {
-						step = 8;
-					} else if (array_size % 4 == 0) {
-						step = 4;
-					} else if (array_size % 2 == 0) {
-						step = 2;
+						fprintf(ctx->dst, "\tset r%d %d\n", iter_reg, decl_info->var_type->n_items);
+						fprintf(ctx->dst, "\tmark \".ai%d\"\n", ++array_init_counter);
+						fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size * 8, dst_reg, element_reg);
+						fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
+						fprintf(ctx->dst, "\tsub r%d r%d 1\n", iter_reg, iter_reg);
+						fprintf(ctx->dst, "\tcmp r%d 0\n", iter_reg);
+						fprintf(ctx->dst, "\tgoto:neq \".ai%d\"\n", array_init_counter);
+
+						freeRegister(ctx, &reg_state, iter_reg, iter_cache_id);
+					} else {
+						chainForeach(Expr, element, *getSubexprs(initializer)) {
+							expr_compilers[element->type](ctx, *element, reg_state | (1 << dst_reg), element_reg);
+							fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size, dst_reg, element_reg);
+							fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
+						}
 					}
 
+					freeRegister(ctx, &reg_state, element_reg, cache_id);
+				} else {
+					if (array_size <= 8) {
+						if (decl_info->attrs & ATTR_STATIC) {
+							fprintf(ctx->dst, ".data mut \"%s\" zero %d\n", name, array_size);
+						} else fprintf(ctx->dst, "\tpushv \"%s\" %d rZ\n", name, array_size);
+					} else {
+						int iter_reg, cache_id, step = 1;
+						getRegister(ctx, &reg_state, dst_reg, &iter_reg, &cache_id);
+
+						if (decl_info->attrs & ATTR_STATIC) {
+							fprintf(
+								ctx->dst,
+								".data mut \"%1$s\" zero %2$d\n"
+								"setd r%3$d . \"%1$s\"\n",
+								name, array_size, dst_reg
+							);
+						} else fprintf(
+							ctx->dst, 
+							"\tvar \"%1$s\" %2$d\n"
+							"\tsetv r%3$d \"%1$s\"\n",
+							name, array_size, dst_reg
+						);
+
+						if (array_size % 8 == 0) {
+							step = 8;
+						} else if (array_size % 4 == 0) {
+							step = 4;
+						} else if (array_size % 2 == 0) {
+							step = 2;
+						}
+
+						fprintf(
+							ctx->dst,
+							"\tset r%1$d %2$d\n"
+							"\tmark \".ai%6$d\"\n"
+							"\tstr%3$d r%4$d rZ\n"
+							"\tadd r%4$d r%4$d %5$d\n"
+							"\tsub r%1$d r%1$d %5$d\n"
+							"\tcmp r%1$d 0\n"
+							"\tgoto:neq \".ai%6$d\"\n",
+							iter_reg, array_size,
+							step * 8, dst_reg, step, ++array_init_counter
+						);
+
+						freeRegister(ctx, &reg_state, iter_reg, cache_id);
+					}
+				}
+			} else {
+				expr_compilers[initializer->type](ctx, *initializer, reg_state, dst_reg);
+				if (decl_info->attrs & ATTR_STATIC) {
+					int cache_id, addr_reg;
+					getRegister(ctx, &reg_state, dst_reg, &addr_reg, &cache_id);
 					fprintf(
 						ctx->dst,
-						"\tset r%1$d %2$d\n"
-						"\tmark \".ai%6$d\"\n"
-						"\tstr%3$d r%4$d rZ\n"
-						"\tadd r%4$d r%4$d %5$d\n"
-						"\tsub r%1$d r%1$d %5$d\n"
-						"\tcmp r%1$d 0\n"
-						"\tgoto:neq \".ai%6$d\"\n",
-						iter_reg, array_size,
-						step * 8, dst_reg, step, ++array_init_counter
+						".data mut \"%1$s\" zero %2$d\n"
+						"setd r%3$d . \"%1$s\"\n"
+						"str%4$d r%3$d r%5$d\n",
+						name, size, addr_reg, size * 8, dst_reg
 					);
-
-					freeRegister(ctx, &reg_state, iter_reg, cache_id);
-				}
+					freeRegister(ctx, &reg_state, addr_reg, cache_id);
+				} else fprintf(ctx->dst, "\tpushv \"%s\" %d r%d\n", name, size, dst_reg);
 			}
 		} else {
-			expr_compilers[initializer->type](ctx, *initializer, reg_state, dst_reg);
-			fprintf(ctx->dst, "\tpushv \"%s\" %d r%d\n", name, size, dst_reg);
+			fprintf(
+				ctx->dst,
+				decl_info->attrs & ATTR_STATIC ? ".data mut \"%s\" zero %d\n" : "\tvar \"%s\" %d\n",
+				name,
+				decl_info->var_type->kind == KIND_ARRAY ? decl_info->var_type->n_items * getTypeSize(*decl_info->var_type->base) : size
+			);
 		}
-	} else {
-		fprintf(ctx->dst, "\tvar \"%s\" %d\n", name, var_type.kind == KIND_ARRAY ? var_type.n_items * getTypeSize(*var_type.base) : size);
 	}
 }
 
@@ -3068,8 +3319,19 @@ void compileExprAssign(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 
 	int field_size = getTypeSize(getExprValueType(ctx->ast, *expr.arg2));
 	expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
-	if (expr.arg1->type == EXPR_GET_VAR) {
-		fprintf(ctx->dst, "\tstrv \"%s\" r%d\n", getSubexpr(expr.arg1->arg1, 0)->name, dst_reg);
+	if (expr.arg1->type == EXPR_GET) {
+
+		if (getSubexpr(expr.arg1->arg1, 2)->attrs & ATTR_STATIC) {
+			int ptr_reg, cache_id;
+			getRegister(ctx, &reg_state, dst_reg, &ptr_reg, &cache_id);
+			fprintf(
+				ctx->dst,
+				"\tsetd r%1$d . \"%2$s\"\n"
+				"\tstr%3$d r%1$d r%4$d\n",
+				ptr_reg, getDeclName(expr.arg1->arg1), getTypeSize(*getSubexpr(expr.arg1->arg1, 2)->var_type) * 8, dst_reg
+			);
+			freeRegister(ctx, &reg_state, ptr_reg, cache_id);
+		} else fprintf(ctx->dst, "\tstrv \"%s\" r%d\n", getSubexpr(expr.arg1->arg1, 0)->name, dst_reg);
 	} else if (expr.arg1->type == EXPR_DEREF) {
 		int ptr_reg, cache_id;
 		getRegister(ctx, &reg_state, dst_reg, &ptr_reg, &cache_id);
@@ -3096,41 +3358,49 @@ void compileExprAssign(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 void compileExprGetVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
 	compileSrcRef(ctx, expr.loc);
-	if (getSubexpr(expr.arg1, 1)->var_type->kind == KIND_ARRAY) {
-		fprintf(ctx->dst, "\tsetv r%d \"%s\"\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
+	Expr* decl_info = getSubexpr(expr.arg1, 2);
+	if (decl_info->var_type->kind == KIND_ARRAY) {
+		fprintf(
+			ctx->dst,
+			decl_info->attrs & ATTR_STATIC ? "\tsetd r%d . \"%s\"\n" : "\tsetv r%d \"%s\"\n",
+			dst_reg, getSubexpr(expr.arg1, 0)->name
+		);
 	} else {
-		fprintf(ctx->dst, "\tldvs r%d \"%s\"\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
+		if (decl_info->attrs & ATTR_STATIC) {
+			fprintf(
+				ctx->dst,
+				"\tsetd r%1$d . \"%2$s\"\n"
+				"\tld%3$d r%1$d r%1$d\n",
+				dst_reg, getDeclName(expr.arg1), getTypeSize(*decl_info->var_type) * 8
+			);
+		} else fprintf(ctx->dst, "\tldvs r%d \"%s\"\n", dst_reg, getSubexpr(expr.arg1, 0)->name);
 	}
 }
 
 void compileExprBlock(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
 	compileSrcRef(ctx, expr.loc);
-	int n_vars = 0;
-	chain_foreach_from(Expr, subexpr, *getSubexprs(&expr), 1,
-		expr_compilers[subexpr.type](ctx, subexpr, reg_state, 0);
-		if (subexpr.type == EXPR_NEW_VAR) n_vars++;
-	);
+	chainForeachFrom(Expr, subexpr, *getSubexprs(&expr), 1) {
+		expr_compilers[subexpr->type](ctx, *subexpr, reg_state, 0);
+	}
 
-// the following line explicitly deallocates local variables if the block is not a function definition
-	if (expr.block->block->block != NULL && n_vars > 0) fprintf(ctx->dst, "\tdelnv %d\n", n_vars);
+	if (expr.n_local_vars > 0) fprintf(ctx->dst, "\tdelnv %d\n", expr.n_local_vars);
 }
 
 void compileExprProcCall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
 	compileSrcRef(ctx, expr.loc);
 
-	regstate_t reg_cache_state = ((1 << (getSubexprsCount(&expr) - 1)) - 1 | 1) & reg_state;
-	int cache_id = compileRegCaching(ctx, reg_cache_state);
+	int cache_id = compileRegCaching(ctx, reg_state);
 	int i = 0;
-	chain_foreach_from(Expr, subexpr, *getSubexprs(&expr), 1,
-		expr_compilers[subexpr.type](ctx, subexpr, (1 << i) - 1, i);
+	chainForeachFrom(Expr, subexpr, *getSubexprs(&expr), 1) {
+		expr_compilers[subexpr->type](ctx, *subexpr, (1 << i) - 1, i);
 		i++;
-	);
-	fprintf(ctx->dst, "\tcall . \"%s\"\n", ((FuncDecl*)getSubexpr(&expr, 0)->arg1)->name);
+	}
+	fprintf(ctx->dst, "\tcall . \"%s\"\n", getDeclName(getSubexpr(&expr, 0)->arg1));
 
 	if (dst_reg != 0) fprintf(ctx->dst, "\tsetr r%d r0\n", dst_reg);
-	compileRegUncaching(ctx, reg_cache_state, cache_id);
+	compileRegUncaching(ctx, reg_state, cache_id);
 }
 
 void compileExprReturn(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
@@ -3572,7 +3842,7 @@ void compileLogicalExpr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 			fprintf(ctx->dst, "\tsetc r%d equ\n", dst_reg);
 			return;
 		default:
-			reportCompilerBug("invalid expression type %d", expr.type);
+			assert(false, "invalid expression type %d", expr.type);
 	}
 }
 
@@ -3627,7 +3897,7 @@ void compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst
 				break;
 			}
 		default:
-			reportCompilerBug("invalid expression type %d", expr.arg1->type);
+			assert(false, "invalid expression type %d", expr.arg1->type);
 	}
 	if (expr.arg3->type != EXPR_VOID) {
 		expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
@@ -3693,7 +3963,7 @@ void compileExprWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int 
 				break;
 			}
 		default:
-			reportCompilerBug("invalid expression type %d", expr.arg1->type);
+			assert(false, "invalid expression type %d", expr.arg1->type);
 	}
 
 	expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
@@ -3752,7 +4022,7 @@ void compileExprDoWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 				break;
 			}
 		default:
-			reportCompilerBug("invalid expression type %d", expr.arg2->type);
+			assert(false, "invalid expression type %d", expr.arg2->type);
 	}
 }
 
@@ -3794,6 +4064,32 @@ void compileExprCast(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int d
 	}
 }
 
+void compileExprNewProc(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+{
+	sbuf proc_name = SBUF(getDeclName(&expr));
+	Expr* proc_info = getSubexpr(&expr, 2);
+	Expr* proc_args = getSubexpr(&expr, 3);
+	Expr* proc_body = getSubexpr(proc_args, proc_info->n_args + 1);
+
+	compileSrcRef(ctx, expr.loc);
+	fprintf(ctx->dst, "%sproc \"%.*s\"\n", proc_info->attrs & ATTR_EXTERNAL ? "ext" : "", unpack(proc_name));
+
+	
+	int i = 0;
+	for (ExprNode* iter = getSubexprs(proc_args)->start->next; i < proc_info->n_args; iter = iter->next) {
+		fprintf(ctx->dst, "\tpushv \"%s\" %d r%d\n", getDeclName(&iter->value), getTypeSize(*getSubexpr(&iter->value, 2)->var_type), i++);
+	}
+
+	expr_compilers[proc_body->type](ctx, *proc_body, 0, 0);
+	if (proc_info->var_type->kind == KIND_VOID) fputs("\tret\n", ctx->dst);
+	fprintf(ctx->dst, "endproc\n");
+
+	chainForeach(Expr, static_var_decl, ctx->static_vars) {
+		expr_compilers[static_var_decl->type](ctx, *static_var_decl, 0, -1);
+	}
+	ExprChain_clear(&ctx->static_vars);
+}
+
 ExprCompiler expr_compilers[] = {
 	[EXPR_INVALID    ] = &compileExprInvalid,
 	[EXPR_SYSCALL    ] = &compileExprSyscall,
@@ -3802,12 +4098,11 @@ ExprCompiler expr_compilers[] = {
 	[EXPR_STRING     ] = &compileExprString,
 	[EXPR_INT        ] = &compileExprInt,
 	[EXPR_NEW_VAR    ] = &compileExprNewVar,
-	[EXPR_ASSIGN    ] = &compileExprAssign,
-	[EXPR_GET_VAR    ] = &compileExprGetVar,
+	[EXPR_ASSIGN     ] = &compileExprAssign,
+	[EXPR_GET        ] = &compileExprGetVar,
 	[EXPR_BLOCK      ] = &compileExprBlock,
-	[EXPR_TYPE       ] = &compileExprInvalid,
+	[EXPR_DECL_INFO  ] = &compileExprInvalid,
 	[EXPR_REF        ] = &compileExprInvalid,
-	[EXPR_PROC_REF   ] = &compileExprInvalid,
 	[EXPR_PROC_CALL  ] = &compileExprProcCall,
 	[EXPR_RETURN     ] = &compileExprReturn,
 	[EXPR_ADD        ] = &compileExprAdd,
@@ -3848,7 +4143,8 @@ ExprCompiler expr_compilers[] = {
 	[EXPR_SHL_ASSIGN ] = &compileExprInvalid,
 	[EXPR_SHR_ASSIGN ] = &compileExprInvalid,
 	[EXPR_GET_ITEM   ] = &compileExprInvalid,
-	[EXPR_ARRAY      ] = &compileExprInvalid
+	[EXPR_ARRAY      ] = &compileExprInvalid,
+	[EXPR_NEW_PROC   ] = &compileExprNewProc
 };
 static_assert(N_EXPR_TYPES == 54, "not all expression types have corresponding compilers defined");
 
@@ -3859,31 +4155,10 @@ bool compileAST(AST* src, FILE* dst)
 		.dst = dst
 	};
 
-	fputs("exec {\n", dst);
-	chain_foreach(FuncDecl, func, src->functions,
-		compileSrcRef(&ctx, func.loc);
-		fprintf(dst, "\t%sproc \"%s\"\n", func.attrs & FUNCATTR_EXTERNAL ? "ext" : "",func.name);
-
-		int i = 0;
-		for (ExprNode* iter = getSubexprs(&func.args)->start->next; iter != NULL; iter = iter->next) {
-			fprintf(dst, "\tpushv \"%s\" %d r%d\n", getSubexpr(&iter->value, 0)->name, getTypeSize(*getSubexpr(&iter->value, 1)->var_type), i++);
-		}
-
-		expr_compilers[func.body.type](&ctx, func.body, 0, 0);
-		if (!sbufeq(func.name, "main") && func.return_type.kind == KIND_VOID) fputs("\tret\n", dst);
-		fputs("\tendproc\n", dst);
-	);
-	fputs("}\n", dst);
-
-	if (ctx.data_blocks.length) {
-		fputs("data {\n", dst);
-		array_foreach(sbuf, literal, ctx.data_blocks, 
-			fprintf(dst, "\t\""STR_PREFIX"%d\" \"", _literal);
-			fputsbufesc(dst, literal, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
-			fputs("\\0\"\n", dst);
-		);
-		fputs("}\n", dst);
+	chainForeachFrom(Expr, stmt, *getSubexprs(&src->root), 1) {
+		expr_compilers[stmt->type](&ctx, *stmt, 0, -1);
 	}
+	fprintf(dst, "call . \"main\"");
 
 	sbufArray_clear(&ctx.data_blocks);
 	return true;
@@ -4067,7 +4342,7 @@ int main(int argc, char* argv[])
 		BRP_HIDDEN_SYMBOL("\t"),
 		BRP_HIDDEN_SYMBOL("\n")
 	);
-	static_assert(N_KWS == 15, "not all keywords are handled");
+	static_assert(N_KWS == 16, "not all keywords are handled");
 	setKeywords(
 		&prep,
 		BRP_KEYWORD("void"),
@@ -4084,7 +4359,8 @@ int main(int argc, char* argv[])
 		BRP_KEYWORD("else"),
 		BRP_KEYWORD("while"),
 		BRP_KEYWORD("for"),
-		BRP_KEYWORD("do")
+		BRP_KEYWORD("do"),
+		BRP_KEYWORD("static")
 	);
 	setInput(&prep, input_path, fopen(input_path, "r"));
 
@@ -4100,14 +4376,14 @@ int main(int argc, char* argv[])
 		while (true) {
 			Token token = fetchToken(&prep);
 			if (token.type == TOKEN_NONE) {
-				array_foreach(Macro, macro, prep.macros, 
-					printTokenLoc(macro.def_loc);
-					printf("#define %s(", macro.name);
-					array_foreach(MacroArg, arg, macro.args, 
-						printf("%s%s", arg.name, _arg < macro.args.length - 1 ? ", " : "");
-					);
-					printf(") %.*s\n", unpack(macro.def));
-				);
+				arrayForeach(Macro, macro, prep.macros) {
+					printTokenLoc(macro->def_loc);
+					printf("#define %s(", macro->name);
+					arrayForeach(MacroArg, arg, macro->args) {
+						printf("%s%s", arg->name, arg - macro->args.data < macro->args.length - 1 ? ", " : "");
+					}
+					printf(") %.*s\n", unpack(macro->def));
+				}
 				return 0;
 			} 
 		}
@@ -4115,6 +4391,7 @@ int main(int argc, char* argv[])
 
 	AST ast;
 	parseSourceCode(&prep, &ast);
+	optimizeSourceCode(&ast);
 
 	if (debug_opts & DEBUG_OPT_EXPRS) printAST(&ast);
 
@@ -4142,7 +4419,7 @@ int main(int argc, char* argv[])
 	}
 	Module res;
 	char* search_paths[] = { ".", NULL };
-	VBRBError vbrb_err = compileVBRB(vbrb_output, vbrb_visual_output_path, &res, search_paths, 0);
+	VBRBError vbrb_err = compileVBRB(vbrb_output, vbrb_visual_output_path, &res, search_paths);
 	if (vbrb_err.code) {
 		eputs("BRidge assembler failure; assembler output:\n\t");
 		printVBRBError(stderr, vbrb_err);

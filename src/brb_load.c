@@ -2,6 +2,11 @@
 #include <brb.h>
 #include <errno.h>
 
+defArray(Submodule);
+defArray(Op);
+defArray(DataBlock);
+defArray(DataPiece);
+
 typedef str* field;
 declArray(field);
 defArray(field);
@@ -673,7 +678,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 	return (BRBLoadError){0};
 }
 
-BRBLoadError resolveModule(Module* dst, bool for_exec)
+BRBLoadError resolveModule(Module* dst)
 {
 	Submodule *submodule, *root = SubmoduleArray_append(&dst->submodules, getRootSubmodule(dst, "."));
 
@@ -756,27 +761,12 @@ BRBLoadError resolveModule(Module* dst, bool for_exec)
 		}
 	}
 
-
-//  resolving entry
-	dst->entry_opid = -1;
-	if (for_exec) {
-		for (Op* op = dst->seg_exec.data + root->es_offset; op - dst->seg_exec.data < root->es_offset + root->es_length; ++op) {
-			if (op->type == OP_EXTPROC) {
-				if (sbufeq(op->mark_name, "main")) {
-					dst->entry_opid = op - dst->seg_exec.data;
-					break;
-				}
-			}
-		}
-		if (dst->entry_opid < 0) return (BRBLoadError){.code = BRB_ERR_NO_ENTRY};
-	}
-
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags)
+BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[])
 {
 	BRBLoadError err = preloadModule(src, dst, search_paths);
 	if (err.code) return err;
-	return resolveModule(dst, flags & BRB_EXECUTABLE);
+	return resolveModule(dst);
 }

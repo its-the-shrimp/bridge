@@ -1,3 +1,3 @@
 
-BRBLoadError resolveModule(Module* dst, bool for_exec);
+BRBLoadError resolveModule(Module* dst);
 BRBLoadError preloadModule(FILE* src, Module* dst, char* search_paths[]);

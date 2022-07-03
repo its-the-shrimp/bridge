@@ -2,6 +2,10 @@
 #include <brb.h>
 #include <math.h>
 
+defArray(Submodule);
+defArray(Op);
+defArray(DataBlock);
+
 typedef int Symbol;
 declArray(Symbol);
 defArray(Symbol);
@@ -142,7 +146,7 @@ void optimizeOpSys(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpGoto(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tgoto:%s \".m%ld\"\n", conditionNames[op->cond_id].data, op + op->op_offset - module->seg_exec.data);
+	fprintf(ctx->temp_out, "\tgoto:%s \".m%ld\"\n", conditionNames[op->cond_id].data, (op + op->op_offset) - module->seg_exec.data);
 }
 
 void optimizeOpCmp(Module* module, OptimizerCtx* ctx, Op* op)
@@ -304,7 +308,7 @@ void optimizeOpShrsr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpProc(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tproc \"%s\"\n", op->mark_name);
+	fprintf(ctx->temp_out, "proc \"%s\"\n", op->mark_name);
 }
 
 void optimizeOpCall(Module* module, OptimizerCtx* ctx, Op* op)
@@ -325,7 +329,7 @@ void optimizeOpRet(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpEndproc(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\tendproc\n");
+	fprintf(ctx->temp_out, "endproc\n");
 	ctx->frame_size = 0;
 	SymbolArray_clear(&ctx->vars);
 }
@@ -571,7 +575,7 @@ void optimizeOpDivsr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpExtproc(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\textproc \"%s\"\n", op->mark_name);
+	fprintf(ctx->temp_out, "extproc \"%s\"\n", op->mark_name);
 }
 
 void optimizeOpLdv(Module* module, OptimizerCtx* ctx, Op* op)
@@ -608,17 +612,17 @@ void optimizeOpPushv(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	ctx->frame_size += op->var_size;
 	SymbolArray_append(&ctx->vars, op->var_size);
-	fprintf(ctx->temp_out, "\tpushv \".v%d\" %hhu %s\n", ctx->frame_size, op->var_size, BRBRegNames[op->dst_reg]);
+	fprintf(ctx->temp_out, "\tpushv \".v%d\" %hhu %s\n", ctx->frame_size, op->var_size, BRBRegNames[op->src_reg]);
 }
 
 void optimizeOpAtf(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\t@f \"%s\"\n", op->mark_name);
+	fprintf(ctx->temp_out, "@f \"%s\"\n", op->mark_name);
 }
 
 void optimizeOpAtl(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(ctx->temp_out, "\t@l %d\n", op->symbol_id);
+	fprintf(ctx->temp_out, "@l %d\n", op->symbol_id);
 }
 
 void optimizeOpSetc(Module* module, OptimizerCtx* ctx, Op* op)
@@ -782,33 +786,28 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 	};
 
 	if (module->submodules.length) {
-		fprintf(ctx.temp_out, "load { ");
 		for (
 			Submodule* submodule = module->submodules.data;
 			submodule - module->submodules.data < module->submodules.length;
 			++submodule
 		) {
 			if (submodule->direct && submodule - module->submodules.data < module->submodules.length - 1)
-				fprintf(ctx.temp_out, "%s ", submodule->name);
+				fprintf(ctx.temp_out, ".load %s\n", submodule->name);
 		}
-		fprintf(ctx.temp_out, "}\n");
 	}
 
 	if (module->seg_exec.length) {
-		fprintf(ctx.temp_out, "exec {\n");
 		for (Op* op = module->seg_exec.data + arrayhead(module->submodules)->es_offset; op->type != OP_END; ++op) {
 			optimizers[op->type](module, &ctx, op);
 		}
-		fprintf(ctx.temp_out, "}\n");
 	}
 
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `optimizeModule`");
 
 	if (ctx.used_db.length) {
-		fprintf(ctx.temp_out, "data {\n");
 		for (int i = 0; i < ctx.used_db.length; ++i) {
 			DataBlock* block = module->seg_data.data + ctx.used_db.data[i];
-			fprintf(ctx.temp_out, "\t\"%s\" { ", block->name);
+			fprintf(ctx.temp_out, ".data %s\"%s\" { ", block->is_mutable ? "mut " : "", block->name);
 			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
 				switch (piece->type) {
 					case PIECE_BYTES:
@@ -816,24 +815,24 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 						fprintf(ctx.temp_out, "\"%.*s\" ", unpack(piece->data));
 						break;
 					case PIECE_INT16:
-						fprintf(ctx.temp_out, ".int16 %lld ", piece->integer);
+						fprintf(ctx.temp_out, "int16 %lld ", piece->integer);
 						break;
 					case PIECE_INT32:
-						fprintf(ctx.temp_out, ".int32 %lld ", piece->integer);
+						fprintf(ctx.temp_out, "int32 %lld ", piece->integer);
 						break;
 					case PIECE_INT64:
-						fprintf(ctx.temp_out, ".int64 %lld ", piece->integer);
+						fprintf(ctx.temp_out, "int64 %lld ", piece->integer);
 						break;
 					case PIECE_DB_ADDR:
 						fprintf(
 							ctx.temp_out,
-							".db_addr %s \"%s\" ",
+							"db_addr %s \"%s\" ",
 							module->submodules.data[piece->module_id].name,
 							module->seg_data.data[piece->symbol_id].name
 						);
 						break;
 					case PIECE_ZERO:
-						fprintf(ctx.temp_out, ".zero %lld ", piece->n_bytes);
+						fprintf(ctx.temp_out, "zero %lld ", piece->n_bytes);
 						break;
 					case PIECE_NONE:
 					case N_PIECE_TYPES:
@@ -843,7 +842,6 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 			}
 			fprintf(ctx.temp_out, "}\n");
 		}
-		fprintf(ctx.temp_out, "}\n");
 	}
 
 	DataBlockArray_clear(&module->seg_data);
@@ -855,7 +853,7 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 		fwrite(temp_buf.data, temp_buf.length, 1, output);
 	ctx.temp_out = fmemopen(temp_buf.data, temp_buf.length, "r");
 
-	VBRBError err = compileVBRB(ctx.temp_out, "<optimizer output>", module, search_paths, module->entry_opid >= 0 ? BRB_EXECUTABLE : 0);
+	VBRBError err = compileVBRB(ctx.temp_out, "<optimizer output>", module, search_paths);
 	if (err.code) {
 		eprintf("unexpected internal error during optimization:\n");
 		printVBRBError(stderr, err);
@@ -864,5 +862,6 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 
 	SymbolArray_clear(&ctx.used_db);
 	SymbolArray_clear(&ctx.used_mb);
+	fclose(ctx.temp_out);
+	sfree(&temp_buf);
 }
-

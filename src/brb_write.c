@@ -433,19 +433,11 @@ void writeModule(Module* src, FILE* dst)
 	src->stack_size *= 1024;
 // writing dependencies
 	int n_dependencies = 0;
-	for (
-		Submodule* submodule = src->submodules.data;
-		submodule - src->submodules.data < src->submodules.length;
-		++submodule
-	) {
+	arrayForeach (Submodule, submodule, src->submodules) {
 		if (submodule->direct && submodule - src->submodules.data < src->submodules.length - 1) n_dependencies += 1;
 	}
 	writeInt(dst, n_dependencies, 0);
-	for (
-		Submodule* submodule = src->submodules.data;
-		submodule - src->submodules.data < src->submodules.length;
-		++submodule
-	) {
+	arrayForeach (Submodule, submodule, src->submodules) {
 		if (submodule->direct && submodule - src->submodules.data < src->submodules.length - 1) {
 			fputs(submodule->name, dst);
 			fputc('\n', dst);
@@ -466,10 +458,10 @@ void writeModule(Module* src, FILE* dst)
 	}
 //  dumping constants pool
 	writeInt(dst, writer.consts.length, 0);
-	array_foreach(str, constant, writer.consts,
-		fputs(constant, dst);
+	arrayForeach(str, constant, writer.consts) {
+		fputs(*constant, dst);
 		fputc('\n', dst);
-	);
+	}
 
 	strArray_clear(&writer.consts);
 }

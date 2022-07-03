@@ -469,7 +469,6 @@ declArray(Submodule);
 typedef struct {
 	OpArray seg_exec;
 	DataBlockArray seg_data;
-	int64_t entry_opid;
 	int64_t stack_size;
 	SubmoduleArray submodules;
 } Module;
@@ -481,13 +480,9 @@ typedef struct {
 typedef enum {
 	VBRB_ERR_OK,
 	VBRB_ERR_BLOCK_NAME_EXPECTED,
-	VBRB_ERR_STACK_SIZE_EXPECTED,
 	VBRB_ERR_NO_MEMORY,
-	VBRB_ERR_SEGMENT_START_EXPECTED,
 	VBRB_ERR_BLOCK_SPEC_EXPECTED,
 	VBRB_ERR_BLOCK_SIZE_EXPECTED,
-	VBRB_ERR_UNKNOWN_SEGMENT_SPEC,
-	VBRB_ERR_UNCLOSED_SEGMENT,
 	VBRB_ERR_INVALID_ARG,
 	VBRB_ERR_INVALID_OP,
 	VBRB_ERR_UNKNOWN_SYSCALL,
@@ -508,6 +503,7 @@ typedef enum {
 	VBRB_ERR_VAR_TOO_LARGE,
 	VBRB_ERR_INVALID_DATA_BLOCK_FMT,
 	VBRB_ERR_INVALID_DATA_PIECE_USE,
+	VBRB_ERR_OP_OUTSIDE_OF_PROC,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -530,7 +526,7 @@ typedef struct vbrb_error {
 	};
 } VBRBError;
 
-VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags);
+VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths[]);
 void printVBRBError(FILE* dst, VBRBError err);
 void cleanupVBRBCompiler(VBRBError status);
 
@@ -540,8 +536,6 @@ void cleanupVBRBCompiler(VBRBError status);
 #define CONDREG1_ID 9
 #define CONDREG2_ID 10
 #define DEFAULT_STACK_SIZE 512 // 512 Kb, just like in JVM
-
-#define BRB_EXECUTABLE       0b00000010 // used in loadModule function to make the loaded module executable with execModule
 
 typedef struct execEnv {
 	void* stack_brk;
@@ -555,6 +549,7 @@ typedef struct execEnv {
 	sbuf* exec_argv;
 	char* src_path;
 	int src_line;
+	bool calling_proc;
 	bool (**exec_callbacks) (struct execEnv*, Module*, const Op*);
 } ExecEnv;
 
@@ -571,7 +566,7 @@ Submodule* getDataBlockSubmodule(Module* module, DataBlock* block);
 Module* mergeModule(Module* restrict src, Module* dst, char* src_name);
 Submodule getRootSubmodule(Module* module, char* name);
 // implemented in `src/brb_load.c`
-BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[], int flags);
+BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[]);
 void printLoadError(FILE* dst, BRBLoadError err);
 // implemented in `src/brb_optimize.c`
 void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level);

@@ -20,6 +20,6 @@
 - ~BRP: function-like macros~
 - ~Array initializers~
 - ~Bytecode optimization: level 1~
-- `public` functions and globals
+- ~`static` variables~
 - Classes
 - Bytecode optimization: level 2

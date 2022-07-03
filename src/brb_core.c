@@ -11,6 +11,10 @@
 #include <sys/wait.h>
 extern char** environ;
 
+defArray(Op);
+defArray(Submodule);
+defArray(DataBlock);
+
 bool startTimerAt(struct timespec* dst)
 {
 	return !clock_gettime(CLOCK_MONOTONIC, dst);

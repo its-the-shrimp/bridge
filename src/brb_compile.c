@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <math.h>
 
+defArray(Op);
+
 #define STACK_ALIGNMENT 16
 #define DEFAULT_ENTRY_NAME ".entry"
 
@@ -141,10 +143,7 @@ uint64_t nativeStackOffset(CompCtx* ctx, uint64_t offset)
 
 typedef void (*OpNativeCompiler) (Module*, int, CompCtx*);
 
-void compileSysNoneNative(Module* module, int index, CompCtx* ctx)
-{
-	return;
-}
+void compileSysNoneNative(Module* module, int index, CompCtx* ctx) {}
 
 void compileSysExitNative(Module* module, int index, CompCtx* ctx)
 {
@@ -532,7 +531,11 @@ void compileOpCallNative(Module* module, int index, CompCtx* ctx)
 	Op op = module->seg_exec.data[index];
 	Op* proc = module->seg_exec.data + op.symbol_id;
 	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tbl \"%s::%s\"\n", getOpSubmodule(module, proc)->name, proc->mark_name);
+	if (proc->type == OP_PROC) {
+		fprintf(ctx->dst, "\tbl \"%s::%s\"\n", getOpSubmodule(module, proc)->name, proc->mark_name);
+	} else {
+		fprintf(ctx->dst, "\tbl \"%s\"\n", proc->mark_name);
+	}
 }
 
 void compileOpRetNative(Module* module, int index, CompCtx* ctx)
@@ -576,7 +579,7 @@ void compileOpLd32Native(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrw %s, [%s]\n", regNames32[op.dst_reg], regNames64[op.src_reg]);
+	fprintf(ctx->dst, "\tldr %s, [%s]\n", regNames32[op.dst_reg], regNames64[op.src_reg]);
 }
 
 void compileOpStr32Native(Module* module, int index, CompCtx* ctx)
@@ -1180,29 +1183,50 @@ void compileModule(Module* src, FILE* dst)
 	} else fprintf(dst, ".text\n.align 4\n");
 
 
-	if (src->entry_opid >= 0) {
-		fprintf(
-			dst,
-			".global "DEFAULT_ENTRY_NAME"\n"
-			DEFAULT_ENTRY_NAME":\n"
-			"\tmov x28, x0\n"
-			"\tmov x27, x1\n"
-			"\tmov x26, 0\n"
-			"\tmov x0, 0\n"
-			"\tmov x1, 0\n"
-			"\tmov x2, 0\n"
-			"\tmov x3, 0\n"
-			"\tmov x4, 0\n"
-			"\tmov x5, 0\n"
-			"\tmov x6, 0\n"
-			"\tmov x7, 0\n"
-			"\tbl main\n"
-			"\tmov x0, 0\n"
-			"\tmov x16, 1\n"
-			"\tsvc 0\n"
-		);
+	fprintf(
+		dst,
+		".global "DEFAULT_ENTRY_NAME"\n"
+		DEFAULT_ENTRY_NAME":\n"
+		"\tmov x28, x0\n"
+		"\tmov x27, x1\n"
+		"\tmov x26, 0\n"
+		"\tmov x0, 0\n"
+		"\tmov x1, 0\n"
+		"\tmov x2, 0\n"
+		"\tmov x3, 0\n"
+		"\tmov x4, 0\n"
+		"\tmov x5, 0\n"
+		"\tmov x6, 0\n"
+		"\tmov x7, 0\n"
+	);
+
+// compile the code outside the procedures
+	arrayForeach (Op, op, src->seg_exec) {
+		if (op->type == OP_PROC || op->type == OP_EXTPROC) {
+			while ((op++)->type != OP_ENDPROC);
+		}
+		native_op_compilers[op->type](src, op - src->seg_exec.data, &ctx);
 	}
-	for (int i = 0; i < src->seg_exec.length; i++) {
-		native_op_compilers[src->seg_exec.data[i].type](src, i, &ctx);
+
+	fprintf(
+		dst,
+		"\tmov x0, 0\n"
+		"\tmov x16, 1\n"
+		"\tsvc 0\n"
+	);
+// compile the procedures
+	int first_op = 0;
+	arrayForeach(Op, op, src->seg_exec) {
+		if (op->type == OP_PROC || op->type == OP_EXTPROC) break;
+		first_op += 1;
+	}
+	arrayForeach (Op, op, OpArray_slice(src->seg_exec, first_op, -1)) {
+		native_op_compilers[op->type](src, op - src->seg_exec.data, &ctx);
+		if (op->type == OP_ENDPROC) {
+			while (op->type != OP_END ? op->type != OP_PROC && op->type != OP_EXTPROC : false) {
+				op += 1;
+			}
+			op -= 1;
+		}
 	}
 }

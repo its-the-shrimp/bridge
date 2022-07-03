@@ -3,6 +3,10 @@
 
 declArray(Var);
 defArray(Var);
+defArray(Op);
+defArray(DataPiece);
+defArray(DataBlock);
+defArray(Submodule);
 
 typedef enum {
 	SYMBOL_SEGMENT_START,
@@ -100,9 +104,6 @@ typedef enum {
 	KW_COND_GTS,
 	KW_COND_LES,
 	KW_COND_GES,
-	KW_ENTRY,
-	KW_STACKSIZE,
-	KW_EXEC,
 	KW_DATA,
 	KW_LOAD,
 	KW_INT16,
@@ -131,62 +132,30 @@ char* getVBRBTokenTypeName(TokenType type)
 }
 
 void printVBRBError(FILE* dst, VBRBError err) {
-	static_assert(N_VBRB_ERRORS == 29, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 26, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
-		fprintTokenLoc(stderr, err.loc.loc);
+		fprintTokenLoc(dst, err.loc.loc);
 		fprintf(dst, "error: ");
 		switch (err.code) {
 			case N_VBRB_ERRORS: break;
 			case VBRB_ERR_OK: break;
 			case VBRB_ERR_BLOCK_NAME_EXPECTED:
 				fprintf(dst, "expected a word as the block name, instead got ");
-				fprintTokenStr(stderr, err.loc, err.prep);
-				fputc('\n', stderr);
-				break;
-			case VBRB_ERR_STACK_SIZE_EXPECTED:
-				fprintf(dst, "expected integer as the stack size specifier, instead got ");
-				fprintTokenStr(stderr, err.loc, err.prep);
-				fputc('\n', stderr);
+				fprintTokenStr(dst, err.loc, err.prep);
+				fputc('\n', dst);
 				break;
 			case VBRB_ERR_NO_MEMORY:
 				fprintf(dst, "memory allocation failure\n");
 				break;
-			case VBRB_ERR_SEGMENT_START_EXPECTED:
-				fprintf(dst, "expected ");
-				fprintTokenStr(
-					stderr, 
-					(Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_SEGMENT_START }, 
-					err.prep
-				);
-				fprintf(dst, " as the segment start, instead got ");
-				fprintTokenStr(stderr, err.loc, err.prep);
-				fputc('\n', stderr);
-				break;
 			case VBRB_ERR_BLOCK_SPEC_EXPECTED:
 				fprintf(dst, "expected a string as the data block specifier, instead got ");
-				fprintTokenStr(stderr, err.loc, err.prep);
-				fputc('\n', stderr);
+				fprintTokenStr(dst, err.loc, err.prep);
+				fputc('\n', dst);
 				break;
 			case VBRB_ERR_BLOCK_SIZE_EXPECTED:
 				fprintf(dst, "expected an integer as the memory block size, instead got ");
-				fprintTokenStr(stderr, err.loc, err.prep);
-				fputc('\n', stderr);
-				break;
-			case VBRB_ERR_UNKNOWN_SEGMENT_SPEC:
-				fprintf(dst, "expected a segment specifier, instead got ");
-				fprintTokenStr(stderr, err.loc, err.prep);
-				fputc('\n', stderr);
-				break;
-			case VBRB_ERR_UNCLOSED_SEGMENT:
-				fprintf(dst, "expected ");
-				fprintTokenStr(
-					stderr, 
-					(Token){ .type = TOKEN_SYMBOL, .symbol_id = SYMBOL_SEGMENT_END }, 
-					err.prep
-				);
-				fprintf(dst, ", instead got ");
-				fprintTokenStr(stderr, (Token){ .type = TOKEN_NONE }, err.prep);
-				fputc('\n', stderr);
+				fprintTokenStr(dst, err.loc, err.prep);
+				fputc('\n', dst);
 				break;
 			case VBRB_ERR_INVALID_ARG:
 				fprintf(dst, 
@@ -199,7 +168,7 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				fputc('\n', dst);
 				break;
 			case VBRB_ERR_INVALID_OP:
-				fprintf(dst, "expected operation name, instead got ");
+				fprintf(dst, "expected operation name, `.load` directive or `.data` directive, instead got ");
 				fprintTokenStr(dst, err.loc, err.prep);
 				fputc('\n', dst);
 				break;
@@ -280,6 +249,9 @@ void printVBRBError(FILE* dst, VBRBError err) {
 			case VBRB_ERR_INVALID_DATA_PIECE_USE:
 				fprintf(dst, "`%.*s` data piece can only be used in mutable data blocks\n", unpack(dataPieceNames[err.data_piece_type]));
 				break;
+			case VBRB_ERR_OP_OUTSIDE_OF_PROC:
+				fprintf(dst, "operation `%s` can only be used inside a procedure\n", err.loc.word);
+				break;
 		}
 	}
 }
@@ -296,6 +268,9 @@ typedef struct {
 	ExecMarkArray proc_gotos;
 	ExecMarkArray proc_marks;
 	VarArray vars;
+	ExecMarkArray global_gotos;
+	ExecMarkArray global_marks;
+	VarArray global_vars;
 	bool in_proc;
 	Token op_token;
 	BRP* prep;
@@ -500,13 +475,14 @@ VBRBError getVarArg(CompilerCtx* ctx, Token src, int32_t* offset_p, uint8_t* var
 		};
 	
 	*offset_p = 0;
-	for (int i = 0; i < ctx->vars.length; ++i) {
-		if (sbufeq(ctx->vars.data[i].name, src.string)) { 
+	VarArray* vars = ctx->in_proc ? &ctx->vars : &ctx->global_vars;
+	for (int i = 0; i < vars->length; ++i) {
+		if (sbufeq(vars->data[i].name, src.string)) { 
 			src.string.data = NULL;
-			*var_size_p = ctx->vars.data[i].size;
+			*var_size_p = vars->data[i].size;
 			break;
 		}
-		*offset_p += ctx->vars.data[i].size;
+		*offset_p += vars->data[i].size;
 	}
 	if (src.string.data) return (VBRBError){
 		.prep = ctx->prep,
@@ -523,6 +499,9 @@ void delCompilerCtx(CompilerCtx* ctx)
 	ExecMarkArray_clear(&ctx->proc_gotos);
 	ExecMarkArray_clear(&ctx->proc_marks);
 	VarArray_clear(&ctx->vars);
+	ExecMarkArray_clear(&ctx->global_gotos);
+	ExecMarkArray_clear(&ctx->global_marks);
+	VarArray_clear(&ctx->global_vars);
 }
 
 VBRBError compileNoArgOp(CompilerCtx* ctx, Module* dst)
@@ -535,17 +514,25 @@ VBRBError compileOpMark(CompilerCtx* ctx, Module* dst)
 	Op* op = arrayhead(dst->seg_exec);
 
 	Token name_spec = fetchToken(ctx->prep);
-	if (name_spec.type != TOKEN_STRING) {
+	if (name_spec.type != TOKEN_STRING) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_INVALID_ARG,
+		.loc = name_spec,
+		.op_type = OP_MARK,
+		.arg_id = 0,
+		.expected_token_type = TOKEN_STRING
+	};
+	if (memchr(name_spec.string.data, '\0', name_spec.string.length))
 		return (VBRBError){
 			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_ARG,
-			.loc = name_spec,
-			.op_type = OP_MARK,
-			.arg_id = 0,
-			.expected_token_type = TOKEN_STRING
+			.code = VBRB_ERR_INVALID_NAME,
+			.loc = name_spec
 		};
-	}
-	ExecMarkArray_append(&ctx->proc_marks, (ExecMark){ .name = name_spec, .id = dst->seg_exec.length - 1 });
+
+	ExecMarkArray_append(
+		ctx->in_proc ? &ctx->proc_marks : &ctx->global_marks,
+		(ExecMark){ .name = name_spec, .id = dst->seg_exec.length - 1 }
+	);
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -706,7 +693,7 @@ VBRBError compileOpGoto(CompilerCtx* ctx, Module* dst)
 			.code = VBRB_ERR_INVALID_NAME,
 			.loc = name_spec
 		};
-	ExecMarkArray_append(&ctx->proc_gotos, (ExecMark){ .name = name_spec, .id = dst->seg_exec.length - 1 });
+	ExecMarkArray_append(ctx->in_proc ? &ctx->proc_gotos : &ctx->global_gotos, (ExecMark){ .name = name_spec, .id = dst->seg_exec.length - 1 });
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -866,18 +853,22 @@ VBRBError compileOpProc(CompilerCtx* ctx, Module* dst)
 
 VBRBError compileOpEndproc(CompilerCtx* ctx, Module* dst)
 {
+	if (!ctx->in_proc) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_OP_OUTSIDE_OF_PROC,
+		.loc = ctx->op_token
+	};
 // resolving local marks and `goto`s
-	for (int goto_index = 0; goto_index < ctx->proc_gotos.length; goto_index++) {
-		ExecMark* dst_mark = ctx->proc_gotos.data + goto_index;
-		for (int mark_index = 0; mark_index < ctx->proc_marks.length; mark_index++) {
-			ExecMark* src_mark = ctx->proc_marks.data + mark_index;
+	arrayForeach (ExecMark, dst_mark, ctx->proc_gotos) {
+		bool resolved = false;
+		arrayForeach (ExecMark, src_mark, ctx->proc_marks) {
 			if (sbufeq(src_mark->name.string, dst_mark->name.string)) {
 				dst->seg_exec.data[dst_mark->id].op_offset = src_mark->id - dst_mark->id;
-				dst_mark = NULL;
+				resolved = true;
 				break;
 			}
 		}
-		if (dst_mark) {
+		if (!resolved) {
 			return (VBRBError){
 				.prep = ctx->prep,
 				.code = VBRB_ERR_EXEC_MARK_NOT_FOUND,
@@ -899,7 +890,7 @@ VBRBError compileOpVar(CompilerCtx* ctx, Module* dst)
 
 	Token token = fetchToken(ctx->prep);
 	Var* new_var;
-	if (!(new_var = VarArray_append(&ctx->vars, (Var){0}))) return (VBRBError){
+	if (!(new_var = VarArray_append(ctx->in_proc ? &ctx->vars : &ctx->global_vars, (Var){0}))) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_NO_MEMORY,
 		.loc = token
@@ -1008,12 +999,13 @@ VBRBError compileOpPopv(CompilerCtx* ctx, Module* dst)
 {
 	Op* op = arrayhead(dst->seg_exec);
 
-	if (ctx->vars.length == 0) return (VBRBError){
+	VarArray* vars = ctx->in_proc ? &ctx->vars : &ctx->global_vars;
+	if (vars->length == 0) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_NO_VAR,
 		.loc = ctx->op_token
 	};
-	Var popped = VarArray_pop(&ctx->vars, -1);
+	Var popped = VarArray_pop(vars, -1);
 	op->var_size = popped.size;
 	if (popped.size > 8) return (VBRBError){
 		.prep = ctx->prep,
@@ -1036,7 +1028,7 @@ VBRBError compileOpPushv(CompilerCtx* ctx, Module* dst)
 
 	Token token = fetchToken(ctx->prep);
 	Var* new_var;
-	if (!(new_var = VarArray_append(&ctx->vars, (Var){0}))) return (VBRBError){
+	if (!(new_var = VarArray_append(ctx->in_proc ? &ctx->vars : &ctx->global_vars, (Var){0}))) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_NO_MEMORY,
 		.loc = token
@@ -1143,7 +1135,8 @@ VBRBError compileOpDelnv(CompilerCtx* ctx, Module* dst)
 	VBRBError err = getIntArg(ctx, token, &n_vars, op->type, 0);
 	if (err.code) return err;
 
-	if (n_vars > ctx->vars.length) return (VBRBError){
+	VarArray* vars = ctx->in_proc ? &ctx->vars : &ctx->global_vars;
+	if (n_vars > vars->length) return (VBRBError){
 		.code = VBRB_ERR_DELNV_TOO_FEW_VARS,
 		.prep = ctx->prep,
 		.loc = token,
@@ -1151,11 +1144,21 @@ VBRBError compileOpDelnv(CompilerCtx* ctx, Module* dst)
 	};
 
 	op->symbol_id = 0;
-	for (int64_t i = ctx->vars.length - 1; i >= (int64_t)(ctx->vars.length - n_vars); i--) {
-		op->symbol_id += ctx->vars.data[i].size;
+	for (int64_t i = vars->length - 1; i >= (int64_t)(vars->length - n_vars); --i) {
+		op->symbol_id += vars->data[i].size;
 	}
-	ctx->vars.length -= n_vars;
+	vars->length -= n_vars;
 
+	return (VBRBError){ .prep = ctx->prep };
+}
+
+VBRBError compileOpRet(CompilerCtx* ctx, Module* dst)
+{
+	if (!ctx->in_proc) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_OP_OUTSIDE_OF_PROC,
+		.loc = ctx->op_token
+	};
 	return (VBRBError){ .prep = ctx->prep };
 }
 
@@ -1190,7 +1193,7 @@ OpCompiler op_compilers[] = {
 	[OP_SHRSR] = &compile3RegOp,
 	[OP_PROC] = &compileOpProc,
 	[OP_CALL] = &compileOpCall,
-	[OP_RET] = &compileNoArgOp,
+	[OP_RET] = &compileOpRet,
 	[OP_ENDPROC] = &compileOpEndproc,
 	[OP_LD64] = &compile2RegOp,
 	[OP_STR64] = &compile2RegOp,
@@ -1232,7 +1235,7 @@ OpCompiler op_compilers[] = {
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 
-VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths[], int flags)
+VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths[])
 {
 	BRP* obj = malloc(sizeof(BRP));
 	initBRP(obj, NULL, BRP_ESC_STR_LITERALS);
@@ -1250,261 +1253,183 @@ VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths
 		_opNames,
 		_syscallNames,
 		_conditionNames,
-		BRP_KEYWORD("entry"), 
-		BRP_KEYWORD("stacksize"),
-		BRP_KEYWORD("exec"),
-		BRP_KEYWORD("data"),
-		BRP_KEYWORD("load"),
-		BRP_KEYWORD(".int16"),
-		BRP_KEYWORD(".int32"),
-		BRP_KEYWORD(".int64"),
-		BRP_KEYWORD(".db_addr"),
+		BRP_KEYWORD(".data"),
+		BRP_KEYWORD(".load"),
+		BRP_KEYWORD("int16"),
+		BRP_KEYWORD("int32"),
+		BRP_KEYWORD("int64"),
+		BRP_KEYWORD("db_addr"),
 		BRP_KEYWORD("mut"),
-		BRP_KEYWORD(".zero")
+		BRP_KEYWORD("zero")
 	);
 	setInput(obj, src_name, src);
 	
-	dst->entry_opid = -1;
 	dst->seg_exec = OpArray_new(0);
 	dst->seg_data = DataBlockArray_new(0);
 	dst->submodules = SubmoduleArray_new(0);
 	dst->stack_size = DEFAULT_STACK_SIZE;
 
-	CompilerCtx compctx = {
-		.proc_gotos = ExecMarkArray_new(0),
-		.proc_marks = ExecMarkArray_new(0),
-		.vars = VarArray_new(0),
-		.prep = obj
-	};
-	Token entry_name = {0};
+	CompilerCtx compctx = {.prep = obj};
 
-	while (!BRPempty(obj)) {
-		Token segment_spec = fetchToken(obj);
-		if (segment_spec.type == TOKEN_NONE) { break; }
-		switch (getTokenKeywordId(segment_spec)) {
-			case KW_STACKSIZE: {
-				Token size_spec = fetchToken(obj);
-				if (size_spec.type != TOKEN_INT) {
-					delCompilerCtx(&compctx);
-					return (VBRBError){
-						.prep = obj,
-						.code = VBRB_ERR_STACK_SIZE_EXPECTED,
-						.loc = size_spec
-					};
-				}
+	while (true) {
+		Token op_name = fetchToken(obj);
+		if (!op_name.type) break; 
 
-				dst->stack_size = size_spec.value * 1024;
-				break;
-			} case KW_DATA: {
-				Token block_start = fetchToken(obj);
-				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
-					delCompilerCtx(&compctx);
-					return (VBRBError){
-						.prep = obj,
-						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
-						.loc = block_start
-					};
-				}
-
-				Token block_name, block_spec;
-				DataBlock* block;
-				bool is_mutable = false;
-				while (true) {
-					block_name = fetchToken(obj);
-					if (getTokenSymbolId(block_name) == SYMBOL_SEGMENT_END) {
-						break;
-					} else if (getTokenKeywordId(block_name) == KW_MUT && !is_mutable) {
-						is_mutable = true;
-						continue;
-					} else if (block_name.type != TOKEN_STRING) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-							.prep = obj,
-							.code = VBRB_ERR_BLOCK_NAME_EXPECTED,
-							.loc = block_name
-						};
-					}
-
-					if (memchr(block_name.string.data, '\0', block_name.string.length)) return (VBRBError){
-						.prep = obj,
-						.code = VBRB_ERR_INVALID_NAME,
-						.loc = block_name
-					};
-
-					if (!(block = DataBlockArray_append(&dst->seg_data, (DataBlock){.is_mutable = is_mutable}))) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-							.prep = obj,
-							.code = VBRB_ERR_NO_MEMORY
-						};
-					}
-
-					block->name = block_name.string.data;
-
-					block_spec = peekToken(obj);
-					if (getTokenSymbolId(block_spec) == SYMBOL_SEGMENT_START) {
-						fetchToken(obj);
-						while (getTokenSymbolId(peekToken(obj)) != SYMBOL_SEGMENT_END) {
-							DataPiece* piece = DataPieceArray_resize(&block->pieces, 1);
-							if (!piece) {
-								delCompilerCtx(&compctx);
-								return (VBRBError){
-									.prep = obj,
-									.code = VBRB_ERR_NO_MEMORY
-								};
-							}
-							VBRBError err = getDataPiece(&compctx, dst, piece, block->is_mutable);
-							if (err.code) return err;
-						}
-						fetchToken(obj);
-					} else {
-						DataPiece* piece = DataPieceArray_resize(&block->pieces, 1);
-						if (!piece) {
-							delCompilerCtx(&compctx);
-							return (VBRBError){
-								.prep = obj,
-								.code = VBRB_ERR_NO_MEMORY
-							};
-						}
-						VBRBError err = getDataPiece(&compctx, dst, piece, block->is_mutable);
-						if (err.code) return err;
-					}
-					is_mutable = false;
-				}
-
-				break;
-			} case KW_EXEC: {
-				Token block_start = fetchToken(obj);
-				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
-					delCompilerCtx(&compctx);
-					return (VBRBError){
-									.prep = obj,
-						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
-						.loc = block_start
-					};
-				}
-
-				Op* new_op;
-				while (!BRPempty(obj)) {
-					Token op_name = fetchToken(obj);
-					if (getTokenSymbolId(op_name) == SYMBOL_SEGMENT_END) break; 
-
-					if (!(new_op = OpArray_append(&dst->seg_exec, (Op){0}))) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-											.prep = obj,
-							.code = VBRB_ERR_NO_MEMORY,
-							.loc = segment_spec
-						};
-					}
-
-					char kw_id = getTokenKeywordId(op_name);
-					if (!inRange(kw_id, 0, N_OPS)) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-					   					.prep = obj,
-							.code = VBRB_ERR_INVALID_OP,
-							.loc = op_name
-						};
-					}
-
-					new_op->type = kw_id;
-					compctx.op_token = op_name;
-					Token cond_spec = peekToken(obj);
-					if (getTokenSymbolId(cond_spec) == SYMBOL_CONDITION_SPEC) {
-						if (op_flags[new_op->type] & OPF_UNCONDITIONAL) return (VBRBError){
-							.prep = compctx.prep,
-							.code = VBRB_ERR_UNCONDITIONAL_OP,
-							.loc = cond_spec,
-							.op_type = new_op->type
-						};
-
-						fetchToken(obj); // to remove the peeked ':' symbol
-						cond_spec = fetchToken(obj);
-						if (!inRange(getTokenKeywordId(cond_spec), KW_COND_NON, KW_COND_NON + N_CONDS)) {
-							delCompilerCtx(&compctx);
-							return (VBRBError){
-												.prep = obj,
-								.code = VBRB_ERR_UNKNOWN_CONDITION,
-								.loc = cond_spec
-							};
-						}
-						new_op->cond_id = cond_spec.keyword_id - KW_COND_NON;
-					}
-
-					VBRBError err = op_compilers[kw_id](&compctx, dst);
-					if (err.code != VBRB_ERR_OK) {
-						delCompilerCtx(&compctx);
-						return err;
-					}
-				}
-				break;
-			} case KW_LOAD: {
-				Token block_start = fetchToken(obj);
-				if (getTokenSymbolId(block_start) != SYMBOL_SEGMENT_START) {
-					delCompilerCtx(&compctx);
-					return (VBRBError){
-									.prep = obj,
-						.code = VBRB_ERR_SEGMENT_START_EXPECTED,
-						.loc = block_start
-					};
-				}
-
-				while (!BRPempty(obj)) {
-					Token module_name_spec = fetchToken(obj);
-					if (getTokenSymbolId(module_name_spec) == SYMBOL_SEGMENT_END) break;
-					if (!isWordToken(module_name_spec)) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-											.prep = obj,
-							.code = VBRB_ERR_INVALID_MODULE_NAME,
-							.loc = module_name_spec
-						};
-					}
-
-					char* module_name = getTokenWord(obj, module_name_spec);
-					FILE* module_fd = findModule(module_name, search_paths);
-					if (!module_fd) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-										.prep = obj,
-							.code = VBRB_ERR_MODULE_NOT_FOUND,
-							.loc = module_name_spec
-						};
-					}
-
-					Module submodule;
-					BRBLoadError err = preloadModule(module_fd, &submodule, search_paths);
-					if (err.code) {
-						delCompilerCtx(&compctx);
-						return (VBRBError){
-					  					.prep = obj,
-							.code = VBRB_ERR_MODULE_NOT_LOADED,
-							.loc = module_name_spec,
-							.load_error = err
-						};
-					}
-					mergeModule(&submodule, dst, module_name);
-				}
-				break;
-			} default: {
+		char kw_id = getTokenKeywordId(op_name);
+		if (inRange(kw_id, 0, N_OPS)) {
+			Op* new_op;
+			if (!(new_op = OpArray_append(&dst->seg_exec, (Op){0}))) {
 				delCompilerCtx(&compctx);
 				return (VBRBError){
-							.prep = obj,
-					.code = VBRB_ERR_UNKNOWN_SEGMENT_SPEC,
-					.loc = segment_spec
+					.prep = obj,
+					.code = VBRB_ERR_NO_MEMORY,
+					.loc = op_name
 				};
 			}
-		}
+
+			new_op->type = kw_id;
+			compctx.op_token = op_name;
+			Token cond_spec = peekToken(obj);
+
+			if (getTokenSymbolId(cond_spec) == SYMBOL_CONDITION_SPEC) {
+				if (op_flags[new_op->type] & OPF_UNCONDITIONAL) return (VBRBError){
+					.prep = compctx.prep,
+					.code = VBRB_ERR_UNCONDITIONAL_OP,
+					.loc = cond_spec,
+					.op_type = new_op->type
+				};
+
+				fetchToken(obj); // to remove the peeked ':' symbol
+				cond_spec = fetchToken(obj);
+				if (!inRange(getTokenKeywordId(cond_spec), KW_COND_NON, KW_COND_NON + N_CONDS)) {
+					delCompilerCtx(&compctx);
+					return (VBRBError){
+						.prep = obj,
+						.code = VBRB_ERR_UNKNOWN_CONDITION,
+						.loc = cond_spec
+					};
+				}
+				new_op->cond_id = cond_spec.keyword_id - KW_COND_NON;
+			}
+
+			VBRBError err = op_compilers[kw_id](&compctx, dst);
+			if (err.code != VBRB_ERR_OK) {
+				delCompilerCtx(&compctx);
+				return err;
+			}
+		} else if (kw_id == KW_DATA) {
+			Token token = fetchToken(compctx.prep);
+			DataBlock* block;
+			if (!(block = DataBlockArray_append(&dst->seg_data, (DataBlock){0}))) {
+				delCompilerCtx(&compctx);
+				return (VBRBError){
+					.prep = obj,
+					.code = VBRB_ERR_NO_MEMORY,
+					.loc = token
+				};
+			}
+
+			if (getTokenKeywordId(token) == KW_MUT) {
+				block->is_mutable = true;
+				token = fetchToken(compctx.prep);
+			}
+
+			if (token.type != TOKEN_STRING) return (VBRBError){
+				.prep = compctx.prep,
+				.code = VBRB_ERR_BLOCK_NAME_EXPECTED,
+				.loc = token
+			};
+			if (memchr(token.string.data, '\0', token.string.length)) return (VBRBError){
+				.prep = compctx.prep,
+				.code = VBRB_ERR_INVALID_NAME,
+				.loc = token
+			};
+			block->name = token.string.data;
+
+			token = peekToken(compctx.prep);
+			if (getTokenSymbolId(token) == SYMBOL_SEGMENT_START) {
+				fetchToken(compctx.prep);
+				while (getTokenSymbolId(peekToken(compctx.prep)) != SYMBOL_SEGMENT_END) {
+					DataPiece* piece;
+					if (!(piece = DataPieceArray_append(&block->pieces, (DataPiece){0}))) return (VBRBError){
+						.prep = compctx.prep,
+						.code = VBRB_ERR_NO_MEMORY,
+						.loc = peekToken(compctx.prep)
+					};
+
+					VBRBError err = getDataPiece(&compctx, dst, piece, block->is_mutable);
+					if (err.code) return err;
+				}
+				fetchToken(compctx.prep);
+			} else {
+				DataPiece* piece;
+				if (!(piece = DataPieceArray_append(&block->pieces, (DataPiece){0}))) return (VBRBError){
+					.prep = compctx.prep,
+					.code = VBRB_ERR_NO_MEMORY,
+					.loc = peekToken(compctx.prep)
+				};
+
+				VBRBError err = getDataPiece(&compctx, dst, piece, block->is_mutable);
+				if (err.code) return err;
+			}
+		} else if (kw_id == KW_LOAD) {
+			Token token = fetchToken(compctx.prep);
+			if (!isWordToken(token)) return (VBRBError){
+				.prep = compctx.prep,
+				.code = VBRB_ERR_INVALID_MODULE_NAME,
+				.loc = token
+			};
+			
+			char* module_name = getTokenWord(compctx.prep, token);
+			FILE* module_fd = findModule(module_name, search_paths);
+			if (!module_fd) return (VBRBError){
+				.prep = compctx.prep,
+				.code = VBRB_ERR_INVALID_MODULE_NAME,
+				.loc = token
+			};
+
+			Module submodule;
+			BRBLoadError err = preloadModule(module_fd, &submodule, search_paths);
+			if (err.code) return (VBRBError){
+				.prep = compctx.prep,
+				.code = VBRB_ERR_MODULE_NOT_LOADED,
+				.loc = token,
+				.load_error = err
+			};
+			mergeModule(&submodule, dst, module_name);
+		} else return (VBRBError){
+			.prep = compctx.prep,
+			.code = VBRB_ERR_INVALID_OP,
+			.loc = op_name
+		};
 	}
+
+// resolving global marks and `goto`s
+	arrayForeach (ExecMark, dst_mark, compctx.global_gotos) {
+		bool resolved = false;
+		arrayForeach (ExecMark, src_mark, compctx.global_marks) {
+			if (sbufeq(src_mark->name.string, dst_mark->name.string)) {
+				dst->seg_exec.data[dst_mark->id].op_offset = src_mark->id - dst_mark->id;
+				resolved = true;
+				break;
+			}
+		}
+		if (!resolved) return (VBRBError){
+			.prep = compctx.prep,
+			.code = VBRB_ERR_EXEC_MARK_NOT_FOUND,
+			.loc = dst_mark->name
+		};
+	}
+
 	OpArray_append(&dst->seg_exec, (Op){ .type = OP_END });
 	
-	BRBLoadError resolution_err = resolveModule(dst, flags & BRB_EXECUTABLE);
+	BRBLoadError resolution_err = resolveModule(dst);
 	if (resolution_err.code) return (VBRBError){
 		.code = VBRB_ERR_MODULE_NOT_LOADED,
 		.loc = (Token){ .type = TOKEN_WORD, .word = "." },
 		.load_error = resolution_err
 	};
+
 	delCompilerCtx(&compctx);
 	return (VBRBError){ .prep = obj };
 }

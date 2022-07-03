@@ -1,6 +1,8 @@
 // implementation for execution of BRB modules
 #include <brb.h>
 
+defArray(sbuf);
+
 sbuf allocateDataBlock(DataBlock block)
 {
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `allocateDataBlock`");
@@ -82,7 +84,7 @@ void initExecEnv(ExecEnv* env, Module* module, char** args)
 	env->exec_callbacks = NULL;
 	env->stack_brk = malloc(module->stack_size);
 	env->exitcode = 0;
-	env->op_id = module->entry_opid;
+	env->op_id = 0;
 	env->registers = calloc(N_REGS, sizeof(uint64_t));
 	env->prev_stack_head = env->stack_head = env->stack_brk + module->stack_size;
 
@@ -441,6 +443,7 @@ bool handleOpCall(ExecEnv* env, Module* module)
 	env->prev_stack_head = env->stack_head;
 
 	env->op_id = module->seg_exec.data[env->op_id].symbol_id;
+	env->calling_proc = true;
 
 	return false;
 }
@@ -751,6 +754,16 @@ bool handleOpModsr(ExecEnv* env, Module* module)
 	return false;
 }
 
+bool handleProcEntry(ExecEnv* env, Module* module)
+{
+	if (!env->calling_proc) {
+// if the procedure wasn't called, increments the execution index until the whole procedure is skipped
+		while (module->seg_exec.data[++env->op_id].type != OP_ENDPROC);
+	} else env->calling_proc = false;
+	env->op_id += 1;
+	return false;
+}
+
 ExecHandler op_handlers[] = {
 	[OP_NONE] = &handleNop,
 	[OP_END] = &handleOpEnd,
@@ -780,7 +793,7 @@ ExecHandler op_handlers[] = {
 	[OP_SHRR] = &handleOpShrr,
 	[OP_SHRS] = &handleOpShrs,
 	[OP_SHRSR] = &handleOpShrsr,
-	[OP_PROC] = &handleNop,
+	[OP_PROC] = &handleProcEntry,
 	[OP_CALL] = &handleOpCall,
 	[OP_RET] = &handleOpRet,
 	[OP_ENDPROC] = &handleNop,
@@ -800,7 +813,7 @@ ExecHandler op_handlers[] = {
 	[OP_DIVR] = &handleOpDivr,
 	[OP_DIVS] = &handleOpDivs,
 	[OP_DIVSR] = &handleOpDivsr,
-	[OP_EXTPROC] = &handleNop,
+	[OP_EXTPROC] = &handleProcEntry,
 	[OP_LDV] = &handleOpLdv,
 	[OP_STRV] = &handleOpStrv,
 	[OP_POPV] = &handleOpPopv,
