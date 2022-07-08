@@ -219,11 +219,21 @@ typedef struct {
 #define EXPRTERM_SQBRACKET    8
 #define EXPRTERM_ARRAY_ARG    16
 #define EXPRTERM_DOWHILE_BODY 32
+#define EXPRTERM_IF_BODY      1024
+
 #define EXPRTYPE_EVALUATABLE  64
 #define EXPRTYPE_VOIDABLE     128
 #define EXPRTYPE_LOGICAL      256
 #define EXPRTYPE_DECL         512
-#define EXPRTERM              (EXPRTERM_FULL | EXPRTERM_ARG | EXPRTERM_BRACKET | EXPRTERM_SQBRACKET | EXPRTERM_ARRAY_ARG | EXPRTERM_DOWHILE_BODY)
+#define EXPRTERM              ( \
+	EXPRTERM_FULL \
+	| EXPRTERM_ARG \
+	| EXPRTERM_BRACKET \
+	| EXPRTERM_SQBRACKET \
+	| EXPRTERM_ARRAY_ARG \
+	| EXPRTERM_DOWHILE_BODY \
+	| EXPRTERM_IF_BODY \
+)
 #define EXPRTYPE              (EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE | EXPRTYPE_LOGICAL | EXPRTYPE_DECL)
 
 #define EXPR_VARIADIC    1
@@ -909,6 +919,11 @@ bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
 				? symbol_id == SYMBOL_BLOCK_END
 				: symbol_id == SYMBOL_SEMICOLON
 					|| getTokenKeywordId(token) == KW_WHILE;
+		case EXPRTERM_IF_BODY:
+			return isCBracketEnclosing(expr)
+				? symbol_id == SYMBOL_BLOCK_END
+				: symbol_id == SYMBOL_SEMICOLON
+					|| getTokenKeywordId(token) == KW_ELSE;
 		case EXPRTERM_ARG:
 			if (symbol_id == SYMBOL_SEMICOLON)
 				raiseUnexpectedTokenError(
@@ -2575,17 +2590,19 @@ bool parseKwIf(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, 
 
 	dst->arg2 = calloc(1, sizeof(Expr));
 	token = peekToken(ast->preprocessor);
-	parseExpr(ast, dst->arg2, dst, dst->block, proc, EXPRTERM_FULL);
+	parseExpr(ast, dst->arg2, dst, dst->block, proc, EXPRTERM_IF_BODY);
 	if (dst->arg2->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "`if` statement");
 
 	Token stmt_term = fetchToken(ast->preprocessor);
-	token = peekToken(ast->preprocessor);
-	if (getTokenKeywordId(token) != KW_ELSE) {
-		unfetchToken(ast->preprocessor, stmt_term);
-		return false;
+	if (getTokenKeywordId(stmt_term) != KW_ELSE) {
+		token = peekToken(ast->preprocessor);
+		if (getTokenKeywordId(token) != KW_ELSE) {
+			unfetchToken(ast->preprocessor, stmt_term);
+			return false;
+		}
+		fetchToken(ast->preprocessor);
 	}
 	dst->arg3 = calloc(1, sizeof(Expr));
-	fetchToken(ast->preprocessor);
 	
 	token = peekToken(ast->preprocessor);
 	parseExpr(ast, dst->arg3, dst, dst->block, proc, EXPRTERM_FULL);
