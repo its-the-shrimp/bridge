@@ -10,3 +10,4 @@ test*
 __pycache__
 *.pyc
 *.swp
+tags

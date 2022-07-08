@@ -812,7 +812,9 @@ void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned
 				switch (piece->type) {
 					case PIECE_BYTES:
 					case PIECE_TEXT:
-						fprintf(ctx.temp_out, "\"%.*s\" ", unpack(piece->data));
+						fputc('"', ctx.temp_out);
+						fputsbufesc(ctx.temp_out, piece->data, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
+						fputs("\" ", ctx.temp_out);
 						break;
 					case PIECE_INT16:
 						fprintf(ctx.temp_out, "int16 %lld ", piece->integer);

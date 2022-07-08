@@ -1,6 +1,5 @@
 #include <brb.h>
 #include <errno.h>
-#include <sys/cdefs.h>
 
 defArray(sbuf);
 
@@ -114,7 +113,7 @@ static TypeDef TYPE_STR_LITERAL;
 
 typedef enum {
 	EXPR_INVALID,
-	EXPR_SYSCALL, // main, composite, evaluatable
+	EXPR_SYSCALL, // main, variadic, evaluatable
 	EXPR_NAME, // auxillary
 	EXPR_BUILTIN, // main, unary, evaluatable
 	EXPR_STRING, // main, unary, evaluatable
@@ -166,7 +165,7 @@ typedef enum {
 	EXPR_DEREF, // main, unary, evaluatable
 	EXPR_GET_ITEM, // main, binary, evaluatable
 	EXPR_ARRAY, // main, variadic, evaluatable
-	EXPR_NEW_PROC, // main, variadic, evaluatable
+	EXPR_NEW_PROC, // main, variadic, non-evaluatable
 	N_EXPR_TYPES
 } ExprType;
 
@@ -223,72 +222,76 @@ typedef struct {
 #define EXPRTYPE_EVALUATABLE  64
 #define EXPRTYPE_VOIDABLE     128
 #define EXPRTYPE_LOGICAL      256
-#define EXPRTYPE_DECL       512
+#define EXPRTYPE_DECL         512
 #define EXPRTERM              (EXPRTERM_FULL | EXPRTERM_ARG | EXPRTERM_BRACKET | EXPRTERM_SQBRACKET | EXPRTERM_ARRAY_ARG | EXPRTERM_DOWHILE_BODY)
 #define EXPRTYPE              (EXPRTYPE_EVALUATABLE | EXPRTYPE_VOIDABLE | EXPRTYPE_LOGICAL | EXPRTYPE_DECL)
 
-#define VARIADIC -1
-#define NULLARY 0
-#define UNARY 1
-#define BINARY 2
-#define TERNARY 3
+#define EXPR_VARIADIC    1
+#define EXPR_NULLARY     2
+#define EXPR_UNARY       4
+#define EXPR_BINARY      8
+#define EXPR_TERNARY     16
+#define EXPR_ARITY       (EXPR_VARIADIC | EXPR_NULLARY | EXPR_UNARY | EXPR_BINARY | EXPR_TERNARY)
+#define EXPR_EVALUATABLE 32
+#define EXPR_CONSTANT    64
 
-static char expr_arity_table[] = {
-	[EXPR_INVALID    ] = NULLARY,
-	[EXPR_SYSCALL    ] = VARIADIC,
-	[EXPR_NAME       ] = NULLARY,
-	[EXPR_BUILTIN    ] = NULLARY,
-	[EXPR_STRING     ] = NULLARY,
-	[EXPR_INT        ] = NULLARY,
-	[EXPR_NEW_VAR    ] = VARIADIC,
-	[EXPR_GET    ] = UNARY,
-	[EXPR_BLOCK      ] = VARIADIC, // TODO: make blocks evaluate to their "return" value
-	[EXPR_DECL_INFO       ] = NULLARY,
-	[EXPR_REF        ] = UNARY,
-	[EXPR_PROC_CALL  ] = VARIADIC,
-	[EXPR_RETURN     ] = UNARY,
-	[EXPR_NOT        ] = UNARY,
-	[EXPR_MUL        ] = BINARY,
-	[EXPR_DIV        ] = BINARY,
-	[EXPR_MOD        ] = BINARY,
-	[EXPR_SUB        ] = BINARY,
-	[EXPR_ADD        ] = BINARY,
-	[EXPR_SHL        ] = BINARY,
-	[EXPR_SHR        ] = BINARY,
-	[EXPR_AND        ] = BINARY,
-	[EXPR_XOR        ] = BINARY,
-	[EXPR_OR         ] = BINARY,
-	[EXPR_ASSIGN     ] = BINARY,
-	[EXPR_ADD_ASSIGN ] = BINARY,
-	[EXPR_SUB_ASSIGN ] = BINARY,
-	[EXPR_MUL_ASSIGN ] = BINARY,
-	[EXPR_DIV_ASSIGN ] = BINARY,
-	[EXPR_AND_ASSIGN ] = BINARY,
-	[EXPR_XOR_ASSIGN ] = BINARY,
-	[EXPR_OR_ASSIGN  ] = BINARY,
-	[EXPR_SHR_ASSIGN ] = BINARY,
-	[EXPR_SHL_ASSIGN ] = BINARY,
-	[EXPR_CAST       ] = UNARY,
-	[EXPR_LOGICAL_EQ ] = BINARY,
-	[EXPR_LOGICAL_NEQ] = BINARY,
-	[EXPR_LOGICAL_LT ] = BINARY,
-	[EXPR_LOGICAL_GT ] = BINARY,
-	[EXPR_LOGICAL_LE ] = BINARY,
-	[EXPR_LOGICAL_GE ] = BINARY,
-	[EXPR_LOGICAL_AND] = BINARY,
-	[EXPR_LOGICAL_OR ] = BINARY,
-	[EXPR_LOGICAL_NOT] = UNARY,
-	[EXPR_WRAPPER    ] = UNARY,
-	[EXPR_IF         ] = TERNARY,
-	[EXPR_VOID       ] = NULLARY,
-	[EXPR_WHILE      ] = BINARY,
-	[EXPR_DOWHILE    ] = BINARY,
-	[EXPR_GET_REF    ] = UNARY,
-	[EXPR_DEREF      ] = UNARY,
-	[EXPR_GET_ITEM   ] = BINARY,
-	[EXPR_ARRAY      ] = VARIADIC,
-	[EXPR_NEW_PROC   ] = VARIADIC
+static char expr_flags[N_EXPR_TYPES] = {
+	[EXPR_INVALID    ] = EXPR_NULLARY,
+	[EXPR_SYSCALL    ] = EXPR_VARIADIC | EXPR_EVALUATABLE,
+	[EXPR_NAME       ] = EXPR_NULLARY,
+	[EXPR_BUILTIN    ] = EXPR_NULLARY | EXPR_EVALUATABLE | EXPR_CONSTANT,
+	[EXPR_STRING     ] = EXPR_NULLARY | EXPR_EVALUATABLE | EXPR_CONSTANT,
+	[EXPR_INT        ] = EXPR_NULLARY | EXPR_EVALUATABLE | EXPR_CONSTANT,
+	[EXPR_NEW_VAR    ] = EXPR_VARIADIC,
+	[EXPR_GET        ] = EXPR_UNARY | EXPR_EVALUATABLE,
+	[EXPR_BLOCK      ] = EXPR_VARIADIC, // TODO: make blocks evaluate to their "return" value
+	[EXPR_DECL_INFO  ] = EXPR_NULLARY,
+	[EXPR_REF        ] = EXPR_UNARY,
+	[EXPR_PROC_CALL  ] = EXPR_VARIADIC | EXPR_EVALUATABLE,
+	[EXPR_RETURN     ] = EXPR_UNARY,
+	[EXPR_NOT        ] = EXPR_UNARY  | EXPR_EVALUATABLE,
+	[EXPR_MUL        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_DIV        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_MOD        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_SUB        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_ADD        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_SHL        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_SHR        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_AND        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_XOR        ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_OR         ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_ASSIGN     ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_ADD_ASSIGN ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_SUB_ASSIGN ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_MUL_ASSIGN ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_DIV_ASSIGN ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_AND_ASSIGN ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_XOR_ASSIGN ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_OR_ASSIGN  ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_SHR_ASSIGN ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_SHL_ASSIGN ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_CAST       ] = EXPR_UNARY  | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_EQ ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_NEQ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_LT ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_GT ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_LE ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_GE ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_AND] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_OR ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_LOGICAL_NOT] = EXPR_UNARY  | EXPR_EVALUATABLE,
+	[EXPR_WRAPPER    ] = EXPR_UNARY,
+	[EXPR_IF         ] = EXPR_TERNARY,
+	[EXPR_VOID       ] = EXPR_NULLARY | EXPR_EVALUATABLE | EXPR_CONSTANT,
+	[EXPR_WHILE      ] = EXPR_BINARY,
+	[EXPR_DOWHILE    ] = EXPR_BINARY,
+	[EXPR_GET_REF    ] = EXPR_UNARY | EXPR_EVALUATABLE,
+	[EXPR_DEREF      ] = EXPR_UNARY | EXPR_EVALUATABLE,
+	[EXPR_GET_ITEM   ] = EXPR_BINARY | EXPR_EVALUATABLE,
+	[EXPR_ARRAY      ] = EXPR_VARIADIC | EXPR_EVALUATABLE,
+	[EXPR_NEW_PROC   ] = EXPR_VARIADIC,
 };
+
 static char expr_order_table[] = {
 	[EXPR_INVALID    ] = 0,
 	[EXPR_SYSCALL    ] = 0,
@@ -298,9 +301,9 @@ static char expr_order_table[] = {
 	[EXPR_INT        ] = 0,
 	[EXPR_NEW_VAR    ] = 0,
 	[EXPR_NEW_PROC   ] = 0,
-	[EXPR_GET    ] = 0,
+	[EXPR_GET        ] = 0,
 	[EXPR_BLOCK      ] = 0, // TODO: make blocks evaluate to their "return" value
-	[EXPR_DECL_INFO       ] = 0,
+	[EXPR_DECL_INFO  ] = 0,
 	[EXPR_REF        ] = 0,
 	[EXPR_PROC_CALL  ] = 0,
 	[EXPR_CAST       ] = 0,
@@ -354,38 +357,48 @@ static inline void initExpr(Expr* expr)
 
 static inline ExprChain* getSubexprs(Expr* expr)
 {
-	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get subexpressions of a non-variadic expression %d", expr->type);
+	assert(expr_flags[expr->type] & EXPR_VARIADIC, "attempted to get subexpressions of a non-variadic expression %d", expr->type);
 	return (ExprChain*)expr;
 }
 
 static inline Expr* addSubexpr(Expr* expr, Expr new)
 {
-	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to add a subexpression to a non-varaidic expression %d", expr->type);
+	assert(expr_flags[expr->type] & EXPR_VARIADIC, "attempted to add a subexpression to a non-varaidic expression %d", expr->type);
 	return ExprChain_append(getSubexprs(expr), new);
 }
 
 static inline Expr* getSubexpr(Expr* expr, int id)
 {
-	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get a subexpression of a non-variadic expression %d", expr->type);
+	assert(expr_flags[expr->type] & EXPR_VARIADIC, "attempted to get a subexpression of a non-variadic expression %d", expr->type);
 	return ExprChain_getref(*getSubexprs(expr), id);
 }
 
 static inline int getSubexprsCount(Expr* expr)
 {
-	assert(expr_arity_table[expr->type] == VARIADIC, "attempted to get the subexpressions count of a non-variadic expression %d", expr->type);
+	assert(expr_flags[expr->type] & EXPR_VARIADIC, "attempted to get the subexpressions count of a non-variadic expression %d", expr->type);
 	return ExprChain_length(*getSubexprs(expr));
 }
 
 static char* getDeclName(Expr* decl)
 {
 	assert(decl->type == EXPR_NEW_PROC || decl->type == EXPR_NEW_VAR, "expression of type %d is not a declaration", decl->type);
-	return getSubexpr(decl, 0)->name;
+	decl = getSubexpr(decl, 0);
+	assert(decl->type == EXPR_NAME, "declaration name must be an expression of type EXPR_NAME, instead got an expression of type %d", decl->type);
+	return decl->name;
 }
 
 static Expr* getPrevDecl(Expr* decl)
 {
 	assert(decl->type == EXPR_NEW_PROC || decl->type == EXPR_NEW_VAR, "expression of type %d is not a declaration", decl->type);
-	return getSubexpr(decl, 1)->arg1;
+	decl = getSubexpr(decl, 1)->arg1;
+	if (decl) assert(decl->type == EXPR_NEW_PROC || decl->type == EXPR_NEW_VAR, "expression of type %d is not a declaration", decl->type);
+	return decl;
+}
+
+static Expr* getProcDef(Expr* expr)
+{
+	assert(expr->type == EXPR_NEW_PROC, "expected an expression of type EXPR_NEW_PROC, instead got expression of type %d", expr->type);
+	return getSubexpr(getSubexpr(expr, 3), getSubexpr(expr, 2)->n_args + 1);
 }
 
 const int COUNTER_BASE = __COUNTER__;
@@ -862,29 +875,67 @@ int getTypeSize(TypeDef type)
 	}
 }
 
+bool isCBracketEnclosing(Expr* expr)
+{
+	switch (expr->type) {
+		case EXPR_BLOCK:
+			return true;
+		case EXPR_IF:
+			return isCBracketEnclosing(expr->arg3 ? expr->arg3 : expr->arg2);
+		case EXPR_WHILE:
+			return isCBracketEnclosing(expr->arg2);
+		case EXPR_DOWHILE:
+			return isCBracketEnclosing(expr->arg1);
+		case EXPR_NEW_PROC:
+			return getSubexpr(expr, 2)->attrs & ATTR_NOT_DEFINED
+				? false
+				: isCBracketEnclosing(getProcDef(expr));
+		default:
+			return false;
+	}
+}
+
 bool isExprTerm(AST* ast, Token token, Expr* expr, int flags)
 {
 	static_assert(N_EXPR_TYPES == 54, "not all expression types are handled in isExprTerm");
 	int64_t symbol_id = getTokenSymbolId(token);
-	if ((expr->type == EXPR_BLOCK || expr->type == EXPR_IF || expr->type == EXPR_WHILE || expr->type == EXPR_NEW_PROC) && symbol_id == SYMBOL_BLOCK_END)
-		return true; 
-	if (flags & EXPRTERM_FULL) return symbol_id == SYMBOL_SEMICOLON;
-	if (flags & EXPRTERM_DOWHILE_BODY) return symbol_id == SYMBOL_SEMICOLON || getTokenKeywordId(token) == KW_WHILE;
-	if (flags & EXPRTERM_ARG) {
-		if (symbol_id == SYMBOL_ARGSPEC_END || symbol_id == SYMBOL_COMMA) return true;
-		if (symbol_id == SYMBOL_SEMICOLON)
-			raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
-		return false;
+	switch (flags & EXPRTERM) {
+		case EXPRTERM_FULL:
+			return isCBracketEnclosing(expr)
+				? symbol_id == SYMBOL_BLOCK_END
+				: symbol_id == SYMBOL_SEMICOLON;
+		case EXPRTERM_DOWHILE_BODY:
+			return isCBracketEnclosing(expr)
+				? symbol_id == SYMBOL_BLOCK_END
+				: symbol_id == SYMBOL_SEMICOLON
+					|| getTokenKeywordId(token) == KW_WHILE;
+		case EXPRTERM_ARG:
+			if (symbol_id == SYMBOL_SEMICOLON)
+				raiseUnexpectedTokenError(
+					ast,
+					token,
+					NULL,
+					symbolToken(SYMBOL_COMMA),
+					symbolToken(SYMBOL_ARGSPEC_END)
+				);
+			return symbol_id == SYMBOL_COMMA || symbol_id == SYMBOL_ARGSPEC_END;
+		case EXPRTERM_ARRAY_ARG:
+			if (symbol_id == SYMBOL_SEMICOLON)
+				raiseUnexpectedTokenError(
+					ast,
+					token,
+					NULL,
+					symbolToken(SYMBOL_COMMA),
+					symbolToken(SYMBOL_BLOCK_END)
+				);
+			return symbol_id == SYMBOL_COMMA || symbol_id == SYMBOL_BLOCK_END;
+		case EXPRTERM_BRACKET:
+			return symbol_id == SYMBOL_ARGSPEC_END;
+		case EXPRTERM_SQBRACKET:
+			return symbol_id == SYMBOL_INDEX_END;
+		default:
+			assert(false, "invalid expression terminator flag: %d", flags & EXPRTERM);
 	}
-	if (flags & EXPRTERM_ARRAY_ARG) {
-		if (symbol_id == SYMBOL_BLOCK_END || symbol_id == SYMBOL_COMMA) return true;
-		if (symbol_id == SYMBOL_SEMICOLON)
-			raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_BLOCK_END));
-		return false;
-	}
-	if (flags & EXPRTERM_BRACKET) return symbol_id == SYMBOL_ARGSPEC_END;
-	if (flags & EXPRTERM_SQBRACKET) return symbol_id == SYMBOL_INDEX_END;
-	return false;
 }
 
 bool _typeMatches(TypeDef field, TypeDef entry)
@@ -985,7 +1036,8 @@ bool parseType(AST* ast, TypeDef* dst, int* attrs_p, int allowed_attrs, const ch
 						n_items = index_spec.value;
 						if (n_items < 0) raiseNegativeArraySizeError(ast, index_spec.loc, n_items);
 						token = fetchToken(ast->preprocessor);
-						if (getTokenSymbolId(token) != SYMBOL_INDEX_END) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_INDEX_END));
+						if (getTokenSymbolId(token) != SYMBOL_INDEX_END)
+							raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_INDEX_END));
 					} else if (getTokenSymbolId(index_spec) != SYMBOL_INDEX_END)
 						raiseUnexpectedTokenError(ast, index_spec, "the array size specifier", symbolToken(SYMBOL_INDEX_END), intToken(0));
 					
@@ -1006,41 +1058,21 @@ bool parseType(AST* ast, TypeDef* dst, int* attrs_p, int allowed_attrs, const ch
 	}
 }
 
-bool isExprEvaluatable(ExprType type) {
-	static_assert(N_EXPR_TYPES == 54, "not all expression types are handled in isExprEvaluatable");
-	static bool expr_evaluatability_info[N_EXPR_TYPES] = {
-		[EXPR_INVALID   ] = false,
-		[EXPR_INVALID + 1 ... N_EXPR_TYPES - 1] = true,
-		[EXPR_NAME      ] = false,
-		[EXPR_BLOCK     ] = false, // TODO: make blocks evaluate to their "return" value
-		[EXPR_DECL_INFO ] = false,
-		[EXPR_REF       ] = false,
-		[EXPR_RETURN    ] = false,
-		[EXPR_IF        ] = false,
-		[EXPR_WHILE     ] = false,
-		[EXPR_DOWHILE   ] = false,
-		[EXPR_NEW_VAR   ] = false,
-		[EXPR_NEW_PROC  ] = false
-	};
-	assert(inRange(type, 0, N_EXPR_TYPES), "unknown expression type was previded");
-	return expr_evaluatability_info[type];
-}
+bool isExprEvaluatable(Expr* expr)
+{
+	return expr->type == EXPR_WRAPPER ?
+		isExprEvaluatable(expr->arg1) :
+		expr_flags[expr->type] & EXPR_EVALUATABLE;
+} 
 
 bool isExprConstant(Expr* expr) {
 	static_assert(N_EXPR_TYPES == 54, "not all expression types are handled in isExprEvaluatable");
 
-	switch (expr->type) {
-		case EXPR_INT:
-		case EXPR_STRING:
-			return true;
-		case EXPR_ARRAY:
-			chainForeach(Expr, element, *getSubexprs(expr)) {
-				if (!isExprConstant(element)) return false;
-			}
-			return true;
-		default:
-			return false;
-	}
+	if (expr->type == EXPR_ARRAY)
+		chainForeach(Expr, element, *getSubexprs(expr)) {
+			if (!isExprConstant(element)) return false;
+		}
+	return expr_flags[expr->type] & EXPR_CONSTANT;
 }
 
 TypeDef getExprValueType(AST* ast, Expr expr);
@@ -1053,7 +1085,7 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
 	static_assert(N_EXPR_TYPES == 54, "not all expression types are handled in fprintExpr");
 
 	fprintTokenLoc(dst, expr.loc);
-	if (isExprEvaluatable(expr.type)) {
+	if (isExprEvaluatable(&expr)) {
 		fprintf(dst, "(type: ");
 		fprintType(dst, getExprValueType(ast, expr));
 		fprintf(dst, ") ");
@@ -1335,7 +1367,6 @@ static Expr* getDecl(Expr* block, char* name)
 			if (sbufeq(name, getDeclName(expr))) return expr;
 		}
 	}
-
 	return NULL;
 }
 
@@ -1360,24 +1391,24 @@ static void wrapExpr(Expr* expr, ExprType new_expr_type, Expr arg2)
 {
 	Expr arg1 = *expr;
 	expr->type = new_expr_type;
-	switch (expr_arity_table[new_expr_type]) {
-		case VARIADIC:
+	switch (expr_flags[new_expr_type] & EXPR_ARITY) {
+		case EXPR_VARIADIC:
 			initExpr(expr);
 			addSubexpr(expr, arg1);
 			if (arg2.type) addSubexpr(expr, arg2);
-		case NULLARY:
+		case EXPR_NULLARY:
 			return;
-		case BINARY:
+		case EXPR_BINARY:
 			if (arg2.type) {
 				expr->arg2 = malloc(sizeof(Expr));
 				*expr->arg2 = arg2;
 			}
-		case UNARY:
+		case EXPR_UNARY:
 			expr->arg1 = malloc(sizeof(Expr));
 			*expr->arg1 = arg1;
 			return;
 		default:
-			assert(false, "unknown expression arity type %d", expr_arity_table[new_expr_type]);
+			assert(false, "unknown expression arity type %d", expr_flags[new_expr_type] & EXPR_ARITY);
 	}
 }
 
@@ -1677,23 +1708,23 @@ void removeExprWrappers(Expr* expr)
 		*expr = new_expr;
 	}
 
-	switch (expr_arity_table[expr->type]) {
-		case VARIADIC:
+	switch (expr_flags[expr->type] & EXPR_ARITY) {
+		case EXPR_VARIADIC:
 			chainForeachFrom(Expr, subexpr, *getSubexprs(expr), 1) {
 				removeExprWrappers(subexpr);
 			}
 			return;
-		case NULLARY:
+		case EXPR_NULLARY:
 			return;
-		case TERNARY:
-			removeExprWrappers(expr->arg3);
-		case BINARY:
+		case EXPR_TERNARY:
+			if (expr->arg3) removeExprWrappers(expr->arg3);
+		case EXPR_BINARY:
 			removeExprWrappers(expr->arg2);
-		case UNARY:
+		case EXPR_UNARY:
 			if (expr->arg1) removeExprWrappers(expr->arg1);
 			return;
 		default:
-			assert(false, "expression type %d has unknown arity type %d", expr->type, expr_arity_table[expr->type]);
+			assert(false, "expression type %d has unknown arity type %d", expr->type, expr_flags[expr->type] & EXPR_ARITY);
 	}
 }
 
@@ -2164,7 +2195,7 @@ void optimizeExprArray(AST* ast, Expr* expr, Expr* proc)
 
 void optimizeExprNewProc(AST* ast, Expr* expr, Expr* proc)
 {
-	optimizeExpr(ast, getSubexpr(getSubexpr(expr, 3), getSubexpr(expr, 2)->n_args + 1), expr);
+	optimizeExpr(ast, getProcDef(expr), expr);
 }
 
 static_assert(N_EXPR_TYPES == 54, "not all expressions have any optimizations defined");
@@ -2549,16 +2580,11 @@ bool parseKwIf(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, 
 
 	Token stmt_term = fetchToken(ast->preprocessor);
 	token = peekToken(ast->preprocessor);
-	dst->arg3 = calloc(1, sizeof(Expr));
 	if (getTokenKeywordId(token) != KW_ELSE) {
-		*dst->arg3 = (Expr){
-			.type = EXPR_VOID,
-			.block = dst->block,
-			.loc = stmt_term.loc
-		};
 		unfetchToken(ast->preprocessor, stmt_term);
 		return false;
 	}
+	dst->arg3 = calloc(1, sizeof(Expr));
 	fetchToken(ast->preprocessor);
 	
 	token = peekToken(ast->preprocessor);
@@ -2653,7 +2679,7 @@ bool parseKwDo(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc, 
 
 	token = fetchToken(ast->preprocessor);
 	if (getTokenKeywordId(token) == KW_WHILE) token = fetchToken(ast->preprocessor);
-	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, keywordToken(SYMBOL_ARGSPEC_START));
+	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
 	
 	dst->arg2 = calloc(1, sizeof(Expr));
 	parseExpr(ast, dst->arg2, dst, dst->block, proc, EXPRTERM_BRACKET | EXPRTYPE_LOGICAL | EXPRTYPE_EVALUATABLE);
@@ -2694,7 +2720,7 @@ bool parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 			unfetchToken(ast->preprocessor, token);
 			return true;
 		}
-		if (flags & EXPRTYPE_EVALUATABLE && !(flags & EXPRTERM_BRACKET)) raiseUnbracketedAssignExprError(ast, token.loc);
+		if (flags & EXPRTYPE_EVALUATABLE && !(flags & (EXPRTERM_BRACKET | EXPRTERM_ARG))) raiseUnbracketedAssignExprError(ast, token.loc);
 
 		dst->arg2 = malloc(sizeof(Expr));
 		Token entry_loc = peekToken(ast->preprocessor);
@@ -2752,7 +2778,6 @@ bool parseSymbolBlockStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 			fetchToken(ast->preprocessor);
 		}
 	}
-
 
 	return false;
 }
@@ -3017,7 +3042,10 @@ void parseExpr(AST* ast, Expr* dst, Expr* parent_expr, Expr* block, Expr* func, 
 
 	if (dst->type == EXPR_NAME) (void)setExprType(ast, dst, parent_expr, EXPR_GET);
 	if (dst->type == EXPR_INVALID && flags & EXPRTYPE_VOIDABLE) dst->type = EXPR_VOID;
-	if (!isExprEvaluatable(dst->type) && flags & EXPRTYPE_EVALUATABLE) raiseNoValueExprError(ast, token.loc);
+	if (!isExprEvaluatable(dst) && flags & EXPRTYPE_EVALUATABLE) {
+		printf("%d\n", dst->type);
+		raiseNoValueExprError(ast, token.loc);
+	}
 }
 
 void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
@@ -3164,7 +3192,9 @@ void compileExprString(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 	}
 	if (str_index < 0) {
 		str_index = ctx->data_blocks.length;
-		fprintf(ctx->dst, ".data \""STR_PREFIX"%d\" \"%.*s\"\n", str_index, unpack(expr.string));
+		fprintf(ctx->dst, ".data \""STR_PREFIX"%d\" \"", str_index);
+		fputsbufesc(ctx->dst, expr.string, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
+		fputs("\"\n", ctx->dst);
 		sbufArray_append(&ctx->data_blocks, expr.string);
 	}
 
@@ -3899,7 +3929,7 @@ void compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst
 		default:
 			assert(false, "invalid expression type %d", expr.arg1->type);
 	}
-	if (expr.arg3->type != EXPR_VOID) {
+	if (expr.arg3) {
 		expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
 		fprintf(ctx->dst, "\tgoto \".end%d\"\n\tmark \".else%d\"\n", block_id, block_id);
 		expr_compilers[expr.arg3->type](ctx, *expr.arg3, reg_state, dst_reg);

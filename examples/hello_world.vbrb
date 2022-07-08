@@ -1,11 +1,7 @@
-data {
-    "helloworld" "Hello, World\n"
-}
-exec {
-    extproc "main"
+.data "helloworld" "Hello, World\n"
+extproc "main"
     setb r0 STDOUT
     setd r1 . "helloworld"
     set r2 13
     sys write
-    endproc
-}
+endproc

@@ -23,3 +23,4 @@
 - ~`static` variables~
 - Classes
 - Bytecode optimization: level 2
+- Option to pre-evaluate an expression to be used as a literal value
