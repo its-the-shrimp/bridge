@@ -7,23 +7,21 @@
 #include <stdarg.h>
 #include <unistd.h>
 
-#define arrayForeach(T, item, array) for (T* item = (array).data; item - (array).data < (array).length; ++item)
-#define arrayRevForeach(T, item, array) for (T* item = (array).data + (array).length - 1; item != (array).data; --item)
-#define chainForeachFrom(T, item, chain, start) for ( \
-	T* item = &(T##Chain_getnode(chain, start)->value); \
-	(size_t)item != sizeof(void*); \
-	item = &(((T##Node*)((void*)item - sizeof(void*)))->next->value) \
-)
-#define chainForeach(T, item, chain) for ( \
-	T* item = &(chain).start->value; \
-	(size_t)item != sizeof(void*); \
-	item = &(((T##Node*)((void**)item - 1))->next->value) \
-)
+#define _CONCAT(x, y) x##y
+#define CONCAT(x, y) _CONCAT(x,y)
+
+#define arrayForeach(T, item, array) \
+T##Array CONCAT(_lc,__LINE__)=(array);for(T*item=CONCAT(_lc,__LINE__).data;item-CONCAT(_lc,__LINE__).data<CONCAT(_lc,__LINE__).length;++item)
+#define arrayRevForeach(T, item, array) \
+T##Array CONCAT(_lc,__LINE__)=(array);for(T*item=CONCAT(_lc,__LINE__).data+CONCAT(_lc,__LINE__).length-1;item!=CONCAT(_lc,__LINE__).data;--item)
+#define chainForeach(T, item, chain) \
+T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&CONCAT(_lc,__LINE__).start->value;item!=&(CONCAT(_lc,__LINE__).end->next->value);item=&(((T##Node*)((void**)item-1))->next->value))
+
+#define repeat(n) for(long CONCAT(_rep, __LINE__) = (n); CONCAT(_rep, __LINE__) > 0; --CONCAT(_rep, __LINE__))
 
 #define _str(t) #t
 
 #define arrayhead(array) ((array).data + (array).length - 1)
-#define arrayctx(array) chunkctx((array).data)
 #define declArray(t) \
 	typedef struct { int length; t* data; } t##Array; \
 	static t##Array t##Array_new(int n, ...); \
@@ -169,6 +167,7 @@
 	static t t##Chain_pop(t##Chain* chain, int index); \
 	static bool t##Chain_insert(t##Chain* chain, t##Chain sub, int index); \
 	static bool t##Chain_clear(t##Chain* chain); \
+	static inline t##Chain t##Chain_slice(t##Chain chain, int start, int end); \
 
 #define defChain(t) \
 	static t##Chain t##Chain_new(int n, ...) { \
@@ -273,6 +272,12 @@
 		chain->end = NULL; \
 		chain->start = NULL; \
 		return true; \
+	} \
+	static inline t##Chain t##Chain_slice(t##Chain chain, int start, int end) { \
+		t##Node* first = t##Chain_getnode(chain, start); \
+		chain.end = t##Chain_getnode(chain, end); \
+		chain.start = first; \
+		return chain; \
 	} \
 
 #endif // _DATASETS_H

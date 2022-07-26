@@ -290,13 +290,19 @@ typedef enum {
 	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
+typedef char** field;
+declArray(field);
 typedef struct {
 	BRBLoadErrorCode code;
 	union {
 		struct { // for BRB_ERR_UNRESOLVED_*_REF
-			char* module_name; // also for BRB_ERR_MODULE_NOT_FOUND
-			char* mark_name;
+			const char* module_name; // also for BRB_ERR_MODULE_NOT_FOUND
+			const char* mark_name;
+			const char* in_module_name;
+			const char* in_proc_name;
+			const char* in_db_name;
 		};
+		fieldArray names;
 		int32_t opcode; // for BRB_ERR_INVALID_OPCODE and BRB_ERR_NO_OP_ARG
 		uint8_t cond_id; // for BRB_ERR_INVALID_COND_ID
 	};
@@ -461,7 +467,7 @@ typedef struct {
 	int es_length;
 	int ds_offset;
 	int ds_length;
-	char* name;
+	const char* name;
 	bool direct;
 } Submodule;
 declArray(Submodule);
@@ -502,8 +508,9 @@ typedef enum {
 	VBRB_ERR_DELNV_TOO_FEW_VARS,
 	VBRB_ERR_VAR_TOO_LARGE,
 	VBRB_ERR_INVALID_DATA_BLOCK_FMT,
-	VBRB_ERR_INVALID_DATA_PIECE_USE,
 	VBRB_ERR_OP_OUTSIDE_OF_PROC,
+	VBRB_ERR_INVALID_VAR_SIZE,
+	VBRB_ERR_INVALID_VAR_OFFSET,
 	N_VBRB_ERRORS
 } VBRBErrorCode;
 
@@ -536,6 +543,7 @@ void cleanupVBRBCompiler(VBRBError status);
 #define CONDREG1_ID 9
 #define CONDREG2_ID 10
 #define DEFAULT_STACK_SIZE 512 // 512 Kb, just like in JVM
+#define STACKFRAME_SIZE 16
 
 typedef struct execEnv {
 	void* stack_brk;
@@ -564,7 +572,7 @@ FILE* findModule(char* name, char* search_paths[]);
 Submodule* getOpSubmodule(Module* module, Op* op);
 Submodule* getDataBlockSubmodule(Module* module, DataBlock* block);
 Module* mergeModule(Module* restrict src, Module* dst, char* src_name);
-Submodule getRootSubmodule(Module* module, char* name);
+Submodule getRootSubmodule(Module* module, const char* name);
 // implemented in `src/brb_load.c`
 BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[]);
 void printLoadError(FILE* dst, BRBLoadError err);

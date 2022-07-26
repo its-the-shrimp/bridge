@@ -182,11 +182,11 @@ Submodule* getDataBlockSubmodule(Module* module, DataBlock* block)
 	return NULL;
 }
 
-Submodule getRootSubmodule(Module* module, char* name)
+Submodule getRootSubmodule(Module* module, const char* name)
 {
 	if (module->submodules.length) {
 		Submodule* last = arrayhead(module->submodules);
-		if (sbufeq(last->name, ".")) {
+		if (strcmp(last->name, ".") == 0) {
 			Submodule res = *last;
 			res.name = name;
 			return res;
@@ -199,16 +199,14 @@ Submodule getRootSubmodule(Module* module, char* name)
 			.name = name,
 			.direct = true
 		};
-	} else {
-		return (Submodule){
-			.ds_offset = 0,
-			.ds_length = module->seg_data.length,
-			.es_offset = 0,
-			.es_length = module->seg_exec.length,
-			.name = name,
-			.direct = true
-		};
-	}
+	} else return (Submodule){
+		.ds_offset = 0,
+		.ds_length = module->seg_data.length,
+		.es_offset = 0,
+		.es_length = module->seg_exec.length,
+		.name = name,
+		.direct = true
+	};
 }
 
 Module* mergeModule(Module* restrict src, Module* dst, char* src_name)

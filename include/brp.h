@@ -864,7 +864,7 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pendi
 					obj->handler(obj);
 					return (Token){0};
 				}
-				char unesc_buffer[sizeof(res.value)];
+				char unesc_buffer[sizeof(res.value)] = {0};
 				sbuf unesc = { .data = unesc_buffer, .length = sizeof(unesc_buffer) };
 				sbufunesc(char_literal, &unesc);
 				if (IS_BIG_ENDIAN) reverseByteOrder(unesc.data, unesc.length);
@@ -917,7 +917,7 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pendi
 				obj->handler(obj);
 				return (Token){0};
 			}
-			char unesc_buffer[sizeof(res.value)];
+			char unesc_buffer[sizeof(res.value)] = {0};
 			sbuf unesc = { .data = unesc_buffer, .length = sizeof(unesc_buffer) };
 			sbufunesc(char_literal, &unesc);
 			if (IS_BIG_ENDIAN) reverseByteOrder(unesc.data, unesc.length);

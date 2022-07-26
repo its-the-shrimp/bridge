@@ -11,7 +11,7 @@ defArray(Submodule);
 typedef enum {
 	SYMBOL_SEGMENT_START,
 	SYMBOL_SEGMENT_END,
-	SYMBOL_CONDITION_SPEC,
+	SYMBOL_COLON,
 	N_VBRB_SYMBOLS
 } VBRBSymbol;
 
@@ -132,10 +132,10 @@ char* getVBRBTokenTypeName(TokenType type)
 }
 
 void printVBRBError(FILE* dst, VBRBError err) {
-	static_assert(N_VBRB_ERRORS == 26, "not all VBRB errors are handled");
+	static_assert(N_VBRB_ERRORS == 27, "not all VBRB errors are handled");
 	if (err.code != VBRB_ERR_OK) {
 		fprintTokenLoc(dst, err.loc.loc);
-		fprintf(dst, "error: ");
+		fprintf(dst, "error %04x: ", err.code);
 		switch (err.code) {
 			case N_VBRB_ERRORS: break;
 			case VBRB_ERR_OK: break;
@@ -213,7 +213,7 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				fprintf(dst, "module `%s` not found\n", getTokenWord(err.prep, err.loc));
 				break;
 			case VBRB_ERR_MODULE_NOT_LOADED:
-				fprintf(dst, "module `%s` not loaded:\n\t", err.loc.word);
+				fprintf(dst, "module `%s` not loaded:\n", err.loc.word);
 				printLoadError(dst, err.load_error);
 				break;
 			case VBRB_ERR_INVALID_NAME:
@@ -246,12 +246,20 @@ void printVBRBError(FILE* dst, VBRBError err) {
 				fprintTokenStr(dst, err.loc, err.prep);
 				fputc('\n', dst);
 				break;
-			case VBRB_ERR_INVALID_DATA_PIECE_USE:
-				fprintf(dst, "`%.*s` data piece can only be used in mutable data blocks\n", unpack(dataPieceNames[err.data_piece_type]));
-				break;
 			case VBRB_ERR_OP_OUTSIDE_OF_PROC:
-				fprintf(dst, "operation `%s` can only be used inside a procedure\n", err.loc.word);
+				fprintf(dst, "operation `%.*s` can only be used inside a procedure\n", unpack(opNames[err.loc.keyword_id]));
 				break;
+			case VBRB_ERR_INVALID_VAR_SIZE:
+				fputs("expected a positive integer as the variable size specifier, instead got ", dst);
+				fprintTokenStr(dst, err.loc, err.prep);
+				fputc('\n', dst);
+				break;
+			case VBRB_ERR_INVALID_VAR_OFFSET:
+				fputs("expected an unsigned integer as the variable offset specifier, instead got ", dst);
+				fprintTokenStr(dst, err.loc, err.prep);
+				fputc('\n', dst);
+				break;
+				
 		}
 	}
 }
@@ -318,12 +326,6 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 		case KW_DB_ADDR:
 			arg = fetchToken(ctx->prep);
 			piece->type = spec.keyword_id - KW_DB_ADDR + PIECE_DB_ADDR;
-			if (!is_mutable) return (VBRBError){
-				.prep = ctx->prep,
-				.code = VBRB_ERR_INVALID_DATA_PIECE_USE,
-				.loc = spec,
-				.data_piece_type = piece->type
-			};
 			if (!isWordToken(arg)) return (VBRBError){
 				.prep = ctx->prep,
 				.code = VBRB_ERR_INVALID_DATA_BLOCK_FMT,
@@ -490,6 +492,31 @@ VBRBError getVarArg(CompilerCtx* ctx, Token src, int32_t* offset_p, uint8_t* var
 		.loc = src
 	};
 	*offset_p += *var_size_p;
+
+	src = peekToken(ctx->prep);
+	if (getTokenSymbolId(src) == SYMBOL_COLON) {
+		fetchToken(ctx->prep);
+		src = fetchToken(ctx->prep);
+		if (src.type != TOKEN_INT || src.value <= 0) return (VBRBError){
+			.prep = ctx->prep,
+			.code = VBRB_ERR_INVALID_VAR_SIZE,
+			.loc = src
+		};
+		*var_size_p = src.value;
+		
+		src = peekToken(ctx->prep);
+		if (getTokenSymbolId(src) == SYMBOL_COLON) {
+			fetchToken(ctx->prep);
+			src = fetchToken(ctx->prep);
+			if (src.type != TOKEN_INT || src.value < 0) return (VBRBError){
+				.prep = ctx->prep,
+				.code = VBRB_ERR_INVALID_VAR_OFFSET,
+				.loc = src
+			};
+
+			*offset_p -= src.value;
+		}
+	}
 
 	return (VBRBError){0};
 }
@@ -750,12 +777,12 @@ VBRBError compileOpCall(CompilerCtx* ctx, Module* dst)
 		.arg_id = 0,
 		.expected_token_type = TOKEN_WORD
 	};
-	const sbuf module_name = SBUF(getTokenWord(ctx->prep, module_name_spec));
-	if (sbufeq(module_name, CSBUF("."))) {
+	const char* module_name = getTokenWord(ctx->prep, module_name_spec);
+	if (strcmp(module_name, ".") == 0) {
 		op->module_id = dst->submodules.length;
 	} else {
-		for (Submodule* submodule = dst->submodules.data; submodule - dst->submodules.data < dst->submodules.length; ++submodule) {
-			if (sbufeq(submodule->name, module_name)) {
+		arrayForeach (Submodule, submodule, dst->submodules) {
+			if (strcmp(submodule->name, module_name) == 0) {
 				op->module_id = submodule - dst->submodules.data;
 				module_name_spec.type = TOKEN_NONE;
 				break;
@@ -953,17 +980,17 @@ VBRBError compileOpLdv(CompilerCtx* ctx, Module* dst)
 	Token var_name = fetchToken(ctx->prep);
 	err = getVarArg(ctx, var_name, &op->symbol_id, &var_size, op->type, 1);
 	if (err.code) return err;
-	op->var_size = var_size;
 
-	if (op->var_size > 8) return (VBRBError){
+	if (var_size > 8) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_VAR_TOO_LARGE,
 		.var = (Var){
 			.name = var_name.word,
-			.size = op->var_size
+			.size = var_size
 		},
 		.loc = ctx->op_token
 	};
+	op->var_size = var_size;
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -976,17 +1003,17 @@ VBRBError compileOpStrv(CompilerCtx* ctx, Module* dst)
 	uint8_t var_size, src_reg;
 	VBRBError err = getVarArg(ctx, var_name, &op->symbol_id, &var_size, op->type, 1);
 	if (err.code) return err;
-	op->var_size = var_size;
 
-	if (op->var_size > 8) return (VBRBError){
+	if (var_size > 8) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_VAR_TOO_LARGE,
 		.var = (Var){
 			.name = var_name.word,
-			.size = op->var_size
+			.size = var_size
 		},
 		.loc = ctx->op_token
 	};
+	op->var_size = var_size;
 
 	err = getRegIdArg(ctx, fetchToken(ctx->prep), &src_reg, op->type, 0);
 	if (err.code) return err;
@@ -1291,7 +1318,7 @@ VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths
 			compctx.op_token = op_name;
 			Token cond_spec = peekToken(obj);
 
-			if (getTokenSymbolId(cond_spec) == SYMBOL_CONDITION_SPEC) {
+			if (getTokenSymbolId(cond_spec) == SYMBOL_COLON) {
 				if (op_flags[new_op->type] & OPF_UNCONDITIONAL) return (VBRBError){
 					.prep = compctx.prep,
 					.code = VBRB_ERR_UNCONDITIONAL_OP,
@@ -1421,8 +1448,8 @@ VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths
 		};
 	}
 
-	OpArray_append(&dst->seg_exec, (Op){ .type = OP_END });
-	
+	OpArray_append(&dst->seg_exec, (Op){.type = OP_END});
+
 	BRBLoadError resolution_err = resolveModule(dst);
 	if (resolution_err.code) return (VBRBError){
 		.code = VBRB_ERR_MODULE_NOT_LOADED,

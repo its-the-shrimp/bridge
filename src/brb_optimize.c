@@ -378,16 +378,34 @@ void optimizeOpVar(Module* module, OptimizerCtx* ctx, Op* op)
 	fprintf(ctx->temp_out, "\tvar \".v%d\" %lld\n", ctx->frame_size, op->new_var_size);
 }
 
+void printVar(OptimizerCtx* ctx, int32_t offset, int32_t var_size)
+{
+	if (!var_size) {
+		fprintf(ctx->temp_out, " \".v%d\"", offset);
+		return;
+	}
+
+	int32_t acc = 0;
+	arrayForeach (Symbol, cur_var_size, ctx->vars) {
+		if (inRange(offset, acc, acc + *cur_var_size)) break;
+		acc += *cur_var_size;
+	}
+	offset -= acc;
+
+	fprintf(ctx->temp_out, " \".v%d\":%d :%d", acc, var_size, offset);
+}
+
 void optimizeOpSetv(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
 	fprintf(
 		ctx->temp_out,
-		"\tsetv:%s %s \".v%d\"\n",
+		"\tsetv:%s %s",
 		conditionNames[op->cond_id].data,
-		BRBRegNames[op->dst_reg],
-		op->symbol_id
+		BRBRegNames[op->dst_reg]
 	);
+	printVar(ctx, op->symbol_id, op->var_size);
+	fputc('\n', ctx->temp_out);
 }
 
 void optimizeOpMul(Module* module, OptimizerCtx* ctx, Op* op)
@@ -583,29 +601,26 @@ void optimizeOpLdv(Module* module, OptimizerCtx* ctx, Op* op)
 	if (op->dst_reg == ZEROREG_ID) return;
 	fprintf(
 		ctx->temp_out,
-		"\tldv%s:%s %s \".v%d\"\n",
+		"\tldv%s:%s %s",
 		op->type == OP_LDVS ? "s" : "",
 		conditionNames[op->cond_id].data,
-		BRBRegNames[op->dst_reg],
-		op->symbol_id
+		BRBRegNames[op->dst_reg]
 	);
+	printVar(ctx, op->symbol_id, op->var_size);
+	fputc('\n', ctx->temp_out);
 }
 
 void optimizeOpStrv(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	fprintf(
-		ctx->temp_out,
-		"\tstrv:%s \".v%d\" %s\n",
-		conditionNames[op->cond_id].data,
-		op->symbol_id,
-		BRBRegNames[op->dst_reg]
-	);
+	fprintf(ctx->temp_out, "\tstrv:%s", conditionNames[op->cond_id].data);
+	printVar(ctx, op->symbol_id, op->var_size);
+	fprintf(ctx->temp_out, " %s\n", BRBRegNames[op->src_reg]);
 }
 
 void optimizeOpPopv(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	fprintf(ctx->temp_out, "\tpopv %s\n", BRBRegNames[op->dst_reg]);
-	ctx->vars.length -= 1;
+	ctx->frame_size -= SymbolArray_pop(&ctx->vars, -1);
 }
 
 void optimizeOpPushv(Module* module, OptimizerCtx* ctx, Op* op)

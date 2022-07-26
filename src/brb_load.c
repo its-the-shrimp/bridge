@@ -7,8 +7,6 @@ defArray(Op);
 defArray(DataBlock);
 defArray(DataPiece);
 
-typedef str* field;
-declArray(field);
 defArray(field);
 typedef struct {
 	Module* dst;
@@ -174,64 +172,80 @@ typedef BRBLoadError (*OpLoader) (ModuleLoader*, Op*);
 void printLoadError(FILE* dst, BRBLoadError err)
 {
 	static_assert(N_BRB_ERRORS == 19, "not all BRB errors are handled\n");
+	if (!err.code) return;
+	fprintf(dst, "BRB loading error %04x: ", err.code);
 	switch (err.code) {
 		case BRB_ERR_OK: break;
 		case BRB_ERR_NO_MEMORY:
-			fprintf(dst, "BRB loading error: memory allocation failure\n");
+			fprintf(dst, "memory allocation failure\n");
 			break;
 		case BRB_ERR_NO_OPCODE:
-			fprintf(dst, "BRB loading error: operation code not found\n");
+			fprintf(dst, "operation code not found\n");
 			break;
 		case BRB_ERR_UNRESOLVED_NAMES:
-			fprintf(dst, "BRB loading error: not all names were resolved\n");
+			fprintf(dst, "the following names were not resolved:\n");
+			arrayForeach(field, name, err.names) {
+				fprintf(dst, "\t%s\n", **name);
+			}
 			break;
 		case BRB_ERR_NO_OP_ARG:
 			fprintf(dst, 
-				"BRB loading error: arguments for `%.*s` operation not found\n", 
+				"arguments for `%.*s` operation not found\n", 
 				unpack(opNames[err.opcode])
 			);
 			break;
 		case BRB_ERR_INVALID_OPCODE:
-			fprintf(dst, "BRB loading error: invalid operation code %d found\n", err.opcode);
+			fprintf(dst, "invalid operation code %d found\n", err.opcode);
 			break;
 		case BRB_ERR_INVALID_COND_ID:
-			fprintf(dst, "BRB loading error: invalid condition code %hhu found\n", err.cond_id);
+			fprintf(dst, "invalid condition code %hhu found\n", err.cond_id);
 			break;
 		case BRB_ERR_NO_STACK_SIZE:
-			fprintf(dst, "BRB loading error: `stacksize` segment not found\n");
+			fprintf(dst, "`stacksize` segment not found\n");
 			break;
 		case BRB_ERR_NO_ENTRY:
-			fprintf(dst, "BRB loading error: no `main` procedure found in the module\n");
+			fprintf(dst, "no `main` procedure found in the module\n");
 			break;
 		case BRB_ERR_NO_DATA_SEGMENT:
-			fprintf(dst, "BRB loading error: `data` segment not found\n");
+			fprintf(dst, "`data` segment not found\n");
 			break;
 		case BRB_ERR_NO_EXEC_SEGMENT:
-			fprintf(dst, "BRB loading error: `exec` segment not found\n");
+			fprintf(dst, "`exec` segment not found\n");
 			break;
 		case BRB_ERR_NO_NAME_SEGMENT:
-			fprintf(dst, "BRB loading error: `name` segment not found\n");
+			fprintf(dst, "`name` segment not found\n");
 			break;
 		case BRB_ERR_NO_NAME_SPEC:
-			fprintf(dst, "BRB loading error: no name specifier found\n");
+			fprintf(dst, "no name specifier found\n");
 			break;
 		case BRB_ERR_NO_COND_ID:
-			fprintf(dst, "BRB loading error: no condition code found\n");
+			fprintf(dst, "no condition code found\n");
 			break;
 		case BRB_ERR_NO_LOAD_SEGMENT:
-			fprintf(dst, "BRB loading error: `load` segment not found\n");
+			fprintf(dst, "`load` segment not found\n");
 			break;
 		case BRB_ERR_MODULE_NOT_FOUND:
-			fprintf(dst, "BRB loading error: module `%s` not found in the specified search paths\n", err.module_name);
+			fprintf(dst, "module `%s` not found in the specified search paths\n", err.module_name);
 			break;
 		case BRB_ERR_INVALID_BLOCK:
-			fprintf(dst, "BRB loading error: invalid block structure\n");
+			fprintf(dst, "invalid block structure\n");
 			break;
 		case BRB_ERR_UNRESOLVED_DB_REF:
 			fprintf(dst, "data block `%s` was not found in module `%s`\n", err.mark_name, err.module_name);
 			break;
 		case BRB_ERR_UNRESOLVED_PROC_REF:
-			fprintf(dst, "procedure `%s` was not found in module `%s`\n", err.mark_name, err.module_name);
+			fprintf(
+				dst,
+				"procedure `%s` was not found in module `%s`; referenced in:\n\tmodule `%s`, ",
+				err.mark_name,
+				err.module_name,
+				err.in_module_name
+			);
+			if (err.in_db_name) {
+				fprintf(dst, "data block `%s`\n", err.in_db_name);
+			} else if (err.in_proc_name) {
+				fprintf(dst, "procedure `%s`\n", err.in_proc_name);
+			} else fprintf(dst, "global scope\n");
 			break;
 		case N_BRB_ERRORS:
 			fprintf(dst, "unreachable\n");
@@ -482,7 +496,7 @@ OpLoader op_loaders[] = {
 	[OP_SHRS] = &loadBitShiftOp,
 	[OP_SHRSR] = &load3RegOp,
 	[OP_PROC] = &loadMarkOp,
-	[OP_CALL] = &loadMarkOp,
+	[OP_CALL] = &loadOpCall,
 	[OP_RET] = &loadNoArgOp,
 	[OP_ENDPROC] = &loadNoArgOp,
 	[OP_LD64] = &load2RegOp,
@@ -608,7 +622,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		.code = BRB_ERR_NO_DATA_SEGMENT
 	};
 	DataBlockArray_resize(&dst->seg_data, n);
-	for (int64_t i = dst->seg_data.length - n; i < dst->seg_data.length; i++) {
+	for (int64_t i = dst->seg_data.length - n; i < dst->seg_data.length; ++i) {
 		BRBLoadError err = loadDataBlock(&loader, dst->seg_data.data + i);
 		if (err.code) return err;
 	}
@@ -618,7 +632,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		.code = BRB_ERR_NO_EXEC_SEGMENT
 	};
 	OpArray_resize(&dst->seg_exec, n);
-	for (int64_t i = dst->seg_exec.length - n; i < dst->seg_exec.length; i++) {
+	for (int64_t i = dst->seg_exec.length - n; i < dst->seg_exec.length; ++i) {
 		Op* op = dst->seg_exec.data + i;
 
 		op->type = loadInt8(src, &status);
@@ -671,11 +685,25 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		}
 	}
 	
-	if (unresolved.length) {
-		fieldArray_clear(&unresolved);
-		return (BRBLoadError){.code = BRB_ERR_UNRESOLVED_NAMES};
-	}
+	if (unresolved.length) 
+		return (BRBLoadError){.code = BRB_ERR_UNRESOLVED_NAMES, .names = unresolved};
 	return (BRBLoadError){0};
+}
+
+char* getProcNameByOp(OpArray ops, int index)
+{
+	arrayRevForeach (Op, op, OpArray_slice(ops, 0, index)) {
+		switch (op->type) {
+			case OP_PROC:
+			case OP_EXTPROC:
+				printf("%s\n", op->mark_name);
+				return op->mark_name;
+			case OP_ENDPROC:
+				return NULL;
+			default: break;
+		}
+	}
+	return NULL;
 }
 
 BRBLoadError resolveModule(Module* dst)
@@ -710,7 +738,9 @@ BRBLoadError resolveModule(Module* dst)
 				if (submodule) return (BRBLoadError){
 					.code = BRB_ERR_UNRESOLVED_DB_REF,
 					.module_name = submodule->name,
-					.mark_name = piece->mark_name
+					.mark_name = piece->mark_name,
+					.in_module_name = getDataBlockSubmodule(dst, block)->name,
+					.in_db_name = block->name
 				};
 			}
 		}
@@ -733,12 +763,14 @@ BRBLoadError resolveModule(Module* dst)
 				if (submodule) return (BRBLoadError){
 					.code = BRB_ERR_UNRESOLVED_DB_REF,
 					.module_name = submodule->name,
-					.mark_name = op->mark_name
+					.mark_name = op->mark_name,
+					.in_module_name = getOpSubmodule(dst, op)->name,
+					.in_proc_name = getProcNameByOp(dst->seg_exec, op - dst->seg_exec.data)
 				};
 				break;
 			case OP_CALL:
 				submodule = dst->submodules.data + op->module_id;
-				for (int64_t proc_index = submodule->es_offset; proc_index < submodule->es_offset + submodule->es_length; proc_index++) {
+				for (int64_t proc_index = submodule->es_offset; proc_index < submodule->es_offset + submodule->es_length; ++proc_index) {
 					Op* proc = dst->seg_exec.data + proc_index;
 
 					if (proc->type == OP_PROC || proc->type == OP_EXTPROC) {
@@ -750,12 +782,14 @@ BRBLoadError resolveModule(Module* dst)
 					}
 				}
 
+				
 				if (submodule) return (BRBLoadError){
 					.code = BRB_ERR_UNRESOLVED_PROC_REF,
 					.module_name = submodule->name,
-					.mark_name = op->mark_name
+					.mark_name = op->mark_name,
+					.in_module_name = getOpSubmodule(dst, op)->name,
+					.in_proc_name = getProcNameByOp(dst->seg_exec, op - dst->seg_exec.data)
 				};
-				break;
 			default:
 				break;
 		}
@@ -768,5 +802,8 @@ BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[])
 {
 	BRBLoadError err = preloadModule(src, dst, search_paths);
 	if (err.code) return err;
-	return resolveModule(dst);
+	if (!OpArray_append(&dst->seg_exec, (Op){.type = OP_END}))
+		return (BRBLoadError){.code = BRB_ERR_NO_MEMORY};
+	err = resolveModule(dst);
+	return err;
 }

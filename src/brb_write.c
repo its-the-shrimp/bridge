@@ -448,12 +448,12 @@ void writeModule(Module* src, FILE* dst)
 	
 //  dumping data blocks
 	writeInt(dst, root->ds_length, 0);
-	for (int i = root->ds_offset; i < src->seg_data.length; i++) {
+	for (int i = root->ds_offset; i < src->seg_data.length; ++i) {
 		writeDataBlock(&writer, src->seg_data.data[i]);
 	}
 //  dumping operations
-	writeInt(dst, root->es_length, 0);
-	for (int i = root->es_offset; i < src->seg_exec.length; i++) {
+	writeInt(dst, root->es_length - 1, 0);
+	for (int i = root->es_offset; i < src->seg_exec.length - 1; ++i) {
 		writeOp(&writer, src->seg_exec.data[i]);
 	}
 //  dumping constants pool

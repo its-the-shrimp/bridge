@@ -162,7 +162,7 @@ int main(int argc, char* argv[])
 		eprintf("error: native assembler exited with code %hhu\n", proc_res.exitcode);
 		sbuf err_output = filecontent(proc_res.err);
 		eprintf("assembler output: \"\n"sbuf_format"\"\n", unpack(err_output));
-		// unlink(asm_output_path);
+		if (isTempPath(asm_output_path)) unlink(asm_output_path);
 		return 1;
 	}
 

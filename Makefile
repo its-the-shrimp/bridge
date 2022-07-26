@@ -39,7 +39,7 @@ $(LIB)/libbrb.dylib: src/brb_*.c
 $(BIN)/brs: src/brs.c
 	cc $(UTILFLAGS) -o $(BIN)/brs $(SRC)/brs.c
 
-$(BIN)brbx: src/brbx.c
+$(BIN)/brbx: src/brbx.c
 	cc $(UTILFLAGS) -o $(BIN)/brbx $(SRC)/brbx.c
 
 $(BIN)/brbc: src/brbc.c

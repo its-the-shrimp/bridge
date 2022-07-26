@@ -516,13 +516,12 @@ void compileOpShrsrNative(Module* module, int index, CompCtx* ctx)
 void compileOpProcNative(Module* module, int index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
-	const sbuf module_name = SBUF(getOpSubmodule(module, module->seg_exec.data + index)->name);
 	fprintf(
 		ctx->dst,
-		"\"%.*s::%s\":\n"
+		"\"%s::%s\":\n"
 		"\tstp fp, lr, [sp, -16]!\n"
 		"\tmov fp, sp\n",
-		unpack(module_name), op.mark_name
+		getOpSubmodule(module, module->seg_exec.data + index)->name, op.mark_name
 	);
 }
 
@@ -701,7 +700,7 @@ void compileOpExtprocNative(Module* module, int index, CompCtx* ctx)
 	Op op = module->seg_exec.data[index];
 	Submodule* submodule = getOpSubmodule(module, module->seg_exec.data + index);
 	char proc_name[strlen(submodule->name) + strlen(op.mark_name) + 3];
-	if (sbufeq(submodule->name, ".")) {
+	if (strcmp(submodule->name, ".") == 0) {
 		snprintf(proc_name, sizeof(proc_name), "%s", op.mark_name);
 	} else {
 		snprintf(proc_name, sizeof(proc_name), "%s::%s", submodule->name, op.mark_name);
@@ -1121,6 +1120,23 @@ static_assert(
 	"not all operations have matching native compilers"
 );
 
+bool isForDataSegment(DataBlock* block)
+{
+	arrayForeach (DataPiece, piece, block->pieces) {
+		if (piece->type == PIECE_DB_ADDR) return true;
+	}
+	return block->is_mutable;
+}
+
+bool isForBSSSegment(DataBlock* block)
+//	   ^
+{
+	arrayForeach(DataPiece, piece, block->pieces) {
+		if (piece->type != PIECE_ZERO) return false;
+	}
+	return true;
+}
+
 void compileModule(Module* src, FILE* dst)
 // notes: 
 // 		x28 - argc
@@ -1135,10 +1151,10 @@ void compileModule(Module* src, FILE* dst)
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `compileModule`");
 	if (src->seg_data.length) {
 		for (DataBlock* block = src->seg_data.data; block - src->seg_data.data < src->seg_data.length; ++block) {
-			if (block->is_mutable && block->pieces.length == 1 && block->pieces.data->type == PIECE_ZERO && cur_seg != CUR_SEG_BSS) {
+			if (isForBSSSegment(block) && cur_seg != CUR_SEG_BSS) {
 				fputs(".bss\n", dst);
 				cur_seg = CUR_SEG_BSS;
-			} else if (block->is_mutable && cur_seg != CUR_SEG_DATA) {
+			} else if (isForDataSegment(block) && cur_seg != CUR_SEG_DATA) {
 				fputs(".data\n", dst);
 				cur_seg = CUR_SEG_DATA;
 			} else if (cur_seg != CUR_SEG_TEXT) {
@@ -1202,9 +1218,8 @@ void compileModule(Module* src, FILE* dst)
 
 // compile the code outside the procedures
 	arrayForeach (Op, op, src->seg_exec) {
-		if (op->type == OP_PROC || op->type == OP_EXTPROC) {
+		while (op->type == OP_PROC || op->type == OP_EXTPROC)
 			while ((op++)->type != OP_ENDPROC);
-		}
 		native_op_compilers[op->type](src, op - src->seg_exec.data, &ctx);
 	}
 
