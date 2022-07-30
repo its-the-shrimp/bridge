@@ -145,7 +145,7 @@ sbuf fileBaseName_s(sbuf path)
 	}
 }
 
-FILE* findModule(char* name, char* search_paths[])
+FILE* findModule(const char* name, const char* search_paths[])
 {
 	for (int i = 0; search_paths[i]; i++) {
 		char path[256];

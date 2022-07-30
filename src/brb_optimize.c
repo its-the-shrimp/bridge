@@ -787,7 +787,7 @@ static Optimizer optimizers[N_OPS] = {
 	[OP_MODSR] = optimizeOpModsr
 };
 
-void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level)
+void optimizeModule(Module* module, const char* search_paths[], FILE* output, unsigned int level)
 {
 	assert(level <= 1, "invalid optimization level");
 	if (level == 0) return;

@@ -4465,7 +4465,7 @@ bool compileAST(AST* src, FILE* dst)
 	chainForeach (Expr, stmt, ExprChain_slice(*getSubexprs(&src->root), 1, -1)) {
 		expr_compilers[stmt->type](&ctx, *stmt, 0, -1);
 	}
-	if (ctx.has_entry_point) fprintf(dst, "call . \"main\"");
+	if (ctx.has_entry_point) fprintf(dst, "call . \"main\"\n");
 
 	sbufArray_clear(&ctx.data_blocks);
 	ExprChain_clear(&ctx.static_vars);
@@ -4479,35 +4479,207 @@ void printUsageMsg(FILE* dst, char* program_name)
 		"brc - Compiler for BRidge Source Code `.br` files\n"
 		"usage: %s [options...] <source path>\n"
 		"options:\n"
-		"\t-h                     Display this message and quit\n"
-		"\t-d                     Print the generated syntax tree and quit\n"
-		"\t-r                     Run the program immediately after the compilation with brbx\n"
-		"\t-s                     Compile silently, i.e. don't output compilation times\n"
-		"\t--vbrb-output <path>   Output BRidge Assembly (`.vbrb` file) to <path>;\n"
-		"\t\tif <path> is a directory, output will be at <path>/<source name>.vbrb;\n"
-		"\t\tby default, BRidge Assembly is stored in a temporary file and is deleted after compilation\n"
-		"\t-o <path>              Output BRidge Bytecode (`.brb` file) to <path>;\n"
-		"\t\tif <path> is a directory, output will be at <path>/<source name>.brb;\n"
-		"\t\tby default, BRidge Bytecode is saved at <source dir>/<source name>.brb\n",
+
+		"\t-h           Display this message and quit\n"
+		"\t-dE          Output the parsed source code and quit. This is different from `-S0` flag because this mode also performs syntactical analysis\n"
+		"\t-dM          Output all macros defined in the source code\n"
+		"\t-dT		Output the tokens in the source code, with all macros expanded and `#include`s resolved\n"
+		"\t-r           Run the program immediately after the compilation\n"
+		"\t--no-opt     Disable bytecode-level optimizations\n"
+		"\t-A<action>   Specify the action for the compiler to perform on the input. Default is 2\n"
+		"\tCompiler actions:\n"
+		"\t\tp		Preprocess the code. Extension of the output of this action is `.br`\n"
+		"\t\tv		Generate BRidge Assembly from the input; Extension of the output of this action is `.vbrb`\n"
+		"\t\tb		The default action: generate BRidge Bytecode from the input; Extension of the output of this action is `.brb`\n"
+		"\t\ts		Generate native assembly from the input; Extension of the output of this action is `.S`\n"
+		"\t\to		Generate native object file from the input; Extension of the output of this action is `.o`\n"
+		"\t\tx		Generate native executable program from the input; Extension of the output of this action is ``\n"
+		"\t\ti          Interpret the program by compiling it to BRidge Bytecode, executing the bytecode and deleting it afterwards\n"
+		"\t-o <path>    Write the output to <path>;\n"
+		"\t\tif <path> is a directory, output will be at <path>/<source name>.<appropriate extension>;\n"
+		"\t\tby default, the output is saved at <source dir>/<source name>.<appropriate extension>\n",
 		program_name
 	);
 }
 
+sbuf EXTS[] = {
+	['p'] = CSBUF(".br"),
+	['v'] = CSBUF(".vbrb"),
+	['b'] = CSBUF(".brb"),
+	['s'] = CSBUF(".S"),
+	['o'] = CSBUF(".o"),
+	['x'] = CSBUF("")
+};
 
-#define DEBUG_OPT_TOKENS 0x1
+void printMacros(BRP* prep) {
+	arrayForeach(Macro, macro, prep->macros) {
+		printTokenLoc(macro->def_loc);
+		printf("#define %s%c", macro->name, macro->args.length ? '(' : '\0');
+		arrayForeach(MacroArg, arg, macro->args) {
+			printf("%s%s", arg->name, arg - macro->args.data < macro->args.length - 1 ? ", " : "");
+		}
+		printf("%c %.*s\n", macro->args.length ? ')' : '\0', unpack(macro->def));
+	}
+}
+
+sbuf br_symbols[] = {
+	[SYMBOL_ARGSPEC_START] = BRP_SYMBOL("("),
+	[SYMBOL_ARGSPEC_END] = BRP_SYMBOL(")"),
+	[SYMBOL_COMMA] = BRP_SYMBOL(","),
+	[SYMBOL_BLOCK_START] = BRP_SYMBOL("{"),
+	[SYMBOL_BLOCK_END] = BRP_SYMBOL("}"),
+	[SYMBOL_SEMICOLON] = BRP_SYMBOL(";"),
+	[SYMBOL_ADD_ASSIGN] = BRP_SYMBOL("+="),
+	[SYMBOL_SUB_ASSIGN] = BRP_SYMBOL("-="),
+	[SYMBOL_MUL_ASSIGN] = BRP_SYMBOL("*="),
+	[SYMBOL_DIV_ASSIGN] = BRP_SYMBOL("/="),
+	[SYMBOL_AND_ASSIGN] = BRP_SYMBOL("&="),
+	[SYMBOL_XOR_ASSIGN] = BRP_SYMBOL("^="),
+	[SYMBOL_OR_ASSIGN] = BRP_SYMBOL("|="),
+	[SYMBOL_SHL_ASSIGN] = BRP_SYMBOL("<<="),
+	[SYMBOL_SHR_ASSIGN] = BRP_SYMBOL(">>="),
+	[SYMBOL_EQ] = BRP_SYMBOL("=="),
+	[SYMBOL_NEQ] = BRP_SYMBOL("!="),
+	[SYMBOL_LE] = BRP_SYMBOL("<="),
+	[SYMBOL_GE] = BRP_SYMBOL(">="),
+	[SYMBOL_NOT] = BRP_SYMBOL("!"),
+	[SYMBOL_OR] = BRP_SYMBOL("||"),
+	[SYMBOL_AND] = BRP_SYMBOL("&&"),
+	[SYMBOL_ASSIGNMENT] = BRP_SYMBOL("="),
+	[SYMBOL_PLUS] = BRP_SYMBOL("+"),
+	[SYMBOL_MINUS] = BRP_SYMBOL("-"),
+	[SYMBOL_STAR] = BRP_SYMBOL("*"),
+	[SYMBOL_DIV] = BRP_SYMBOL("/"),
+	[SYMBOL_MOD] = BRP_SYMBOL("%"),
+	[SYMBOL_AMPERSAND] = BRP_SYMBOL("&"),
+	[SYMBOL_PIPE] = BRP_SYMBOL("|"),
+	[SYMBOL_CARET] = BRP_SYMBOL("^"),
+	[SYMBOL_LSHIFT] = BRP_SYMBOL("<<"),
+	[SYMBOL_RSHIFT] = BRP_SYMBOL(">>"),
+	[SYMBOL_TILDE] = BRP_SYMBOL("~"),
+	[SYMBOL_LT] = BRP_SYMBOL("<"),
+	[SYMBOL_GT] = BRP_SYMBOL(">"),
+	[SYMBOL_INDEX_START] = BRP_SYMBOL("["),
+	[SYMBOL_INDEX_END] = BRP_SYMBOL("]"),
+	[SYMBOL_DOT] = BRP_SYMBOL("."),
+	BRP_HIDDEN_SYMBOL(" "),
+	BRP_HIDDEN_SYMBOL("\t"),
+	BRP_HIDDEN_SYMBOL("\n"),
+	(sbuf){0}
+};
+static_assert(N_SYMBOLS == 39, "not all symbols are handled");
+
+sbuf br_keywords[] = {
+		BRP_KEYWORD("void"),
+		BRP_KEYWORD("int8"),
+		BRP_KEYWORD("int16"),
+		BRP_KEYWORD("int32"),
+		BRP_KEYWORD("int64"),
+		BRP_KEYWORD("sys"),
+		BRP_KEYWORD("builtin"),
+		BRP_KEYWORD("return"),
+		BRP_KEYWORD("cast"),
+		BRP_KEYWORD("bool"),
+		BRP_KEYWORD("if"),
+		BRP_KEYWORD("else"),
+		BRP_KEYWORD("while"),
+		BRP_KEYWORD("for"),
+		BRP_KEYWORD("do"),
+		BRP_KEYWORD("static"),
+		BRP_KEYWORD("type"),
+		(sbuf){0}
+};
+static_assert(N_KWS == 17, "not all keywords are handled");
+
+void preprocessSourceCode(const char* input_path, bool output_macros)
+{
+	BRP prep;
+	if (!initBRP(&prep, NULL, BRP_ESC_STR_LITERALS)) {
+		eprintf("error: could not initialize the preprocessor due to memory shortage\n");
+		exit(1);
+	}
+
+	br_symbols[SYMBOL_DOT + 1] = BRP_SYMBOL(" ");
+	br_symbols[SYMBOL_DOT + 2] = BRP_SYMBOL("\t");
+	br_symbols[SYMBOL_DOT + 3] = BRP_SYMBOL("\n");
+	setSymbols(&prep, br_symbols);
+	setKeywords(&prep, br_keywords);
+	setInput(&prep, input_path, fopen(input_path, "r"));
+
+	while (true) {
+		Token token = fetchToken(&prep);
+		if (!token.type) break;
+		printTokenText(token, &prep);
+	}
+	putchar('\n');
+	if (output_macros) printMacros(&prep);
+	delBRP(&prep);
+}
+
+void sourceCode2VBRB(const char* input_path, const char* output_path, bool output_ast, bool output_macros)
+{
+	BRP prep;
+	if (!initBRP(&prep, NULL, BRP_ESC_STR_LITERALS)) {
+		eprintf("error: could not initialize the preprocessor due to memory shortage\n");
+		exit(1);
+	}
+
+	setSymbols(&prep, br_symbols);
+	setKeywords(&prep, br_keywords);
+	setInput(&prep, input_path, fopen(input_path, "r"));
+
+	AST ast;
+	parseSourceCode(&prep, &ast);
+
+	if (output_ast) printAST(&ast);
+	if (output_macros) printMacros(&prep);
+
+	FILE* output_fd;
+	if (!(output_fd = fopen(output_path, "w"))) {
+		eprintf("error: could not open file `%s` (reason: %s)\n", output_path, strerror(errno));
+		exit(1);
+	}
+
+	compileAST(&ast, output_fd);
+	fclose(output_fd);
+	delBRP(&prep);
+}
+
+Module optimizeVBRB(const char* input_path, const char* output_path)
+{
+	Module res;
+	FILE* fd = fopen(input_path, "r");
+	const char* search_paths[] = { ".", NULL };
+	VBRBError vbrb_err = compileVBRB(fd, input_path, &res, search_paths);
+	if (vbrb_err.code) {
+		eputs("BRidge assembler failure; assembler output:\n");
+		printVBRBError(stderr, vbrb_err);
+		exit(1);
+	}
+	fclose(fd);
+	if (!(fd = fopen(output_path, "w"))) {
+		eprintf("error: could not open file `%s` (reason: %s)\n", output_path, strerror(errno));
+		exit(1);
+	}
+	optimizeModule(&res, search_paths, fd, 1);
+	fclose(fd);
+	return res;
+}
+
 #define DEBUG_OPT_MACROS 0x2
 #define DEBUG_OPT_EXPRS 0x4
 
 int main(int argc, char* argv[])
 {
-	startTimer();
+	//assert(false, "TODO: extract different parts of main function into separate functions\n");
 	TYPE_STR_LITERAL.kind = KIND_PTR;
 	TypeDef str_lit_base = (TypeDef){ .kind = KIND_INT, .size = 1 };
 	TYPE_STR_LITERAL.base = &str_lit_base;
 
-	bool run_program = false, silent = false;
-	unsigned int optimization_level = 1, debug_opts = 0;
-	char *input_path = NULL, *brb_output_path = NULL, *vbrb_output_path = NULL;
+	bool run_program = false, optimize = true;
+	unsigned int debug_opts = 0, compiler_action = 'b';
+	char *input_path = NULL, *output_path = NULL;
+	FILE *output_fd = NULL;
 	for (int i = 1; i < argc; ++i) {
 		bool go_on = false;
 		if (argv[i][0] == '-') {
@@ -4520,9 +4692,7 @@ int main(int argc, char* argv[])
 					case 'd':
 						while (*(++argv[i])) {
 							char debug_opt = *argv[i];
-							if (debug_opt == 'T') {
-								debug_opts |= DEBUG_OPT_TOKENS;
-							} else if (debug_opt == 'M') {
+							if (debug_opt == 'M') {
 								debug_opts |= DEBUG_OPT_MACROS;
 							} else if (debug_opt == 'E') {
 								debug_opts |= DEBUG_OPT_EXPRS;
@@ -4530,40 +4700,35 @@ int main(int argc, char* argv[])
 						}
 						argv[i]--;
 						break;
-					case 'r':
-						run_program = true;
-						break;
-					case 's':
-						silent = true;
+					case 'A': 
+						argv[i] += 1;
+						if (!strchr("pvbsoxi", argv[i][0])) {
+							eprintf("error: unknown option `-S%c`\n", argv[i][0]);
+							return 1;
+						}
+						
+						if (argv[i][0] == 'i') {
+							compiler_action = 'b';
+							run_program = true;
+						} else compiler_action = argv[i][0];
 						break;
 					case 'o':
 						if (!argv[++i]) {
 							eprintf("error: `-o` option specified but no executable output file path provided\n");
 							return 1;
 						}
-						brb_output_path = argv[i];
+						output_path = argv[i];
 						go_on = true;
 						break;
-					case 'O':
-						if (!inRange(argv[i][1], '0', '2')) {
-							eprintf("error: invalid option `-O%c`; expected either `-O0` or `-O1`\n", argv[i][1]);
-							exit(1);
-						}
-						optimization_level = *(++argv[i]) - '0';
-						break;
 					case '-':
-						argv[i]++;
-						if (sbufeq(argv[i], "vbrb-output")) {
-							if (!argv[++i]) {
-								eprintf("error: `--vbrb-output` option specified but no path is provided\n");
-								return 1;
-							}
-							vbrb_output_path = argv[i];
-							go_on = true;
+						argv[i] += 1;
+						if (sbufeq(argv[i], "no-opt")) {
+							optimize = false;
 						} else {
 							eprintf("error: unknown option `--%s`\n", argv[i]);
 							return 1;
 						}
+						go_on = true;
 						break;
 					default:
 						eprintf("error: unknown option `-%c`\n", *argv[i]);
@@ -4582,197 +4747,61 @@ int main(int argc, char* argv[])
 		eprintf("error: no input path provided\n");
 		return 1;
 	}
-	sbuf basename = fileBaseName_s(SBUF(input_path));
 
-	if (brb_output_path) {
-		if (isPathDir(brb_output_path)) {
-			brb_output_path = tostr(SBUF(brb_output_path), PATHSEP, basename, CSBUF(BRB_EXT));
+	if (output_path) {
+		if (isPathDir(output_path))
+			output_path = tostr(
+				SBUF(output_path),
+				PATHSEP,
+				fileBaseName_s(SBUF(input_path)),
+				EXTS[compiler_action]
+			);
+	} else output_path = setFileExt(input_path, EXTS[compiler_action].data);
+
+	if (sbufendswith(input_path, ".br")) {
+		if (compiler_action == 'p') {
+			preprocessSourceCode(input_path, debug_opts & DEBUG_OPT_MACROS);
+			return 0;
 		}
-	} else {
-		brb_output_path = setFileExt(input_path, BRB_EXT);
-	}
 
+		sourceCode2VBRB(input_path, output_path, debug_opts & DEBUG_OPT_EXPRS, debug_opts & DEBUG_OPT_MACROS);
 
-	if (vbrb_output_path)
-		if (isPathDir(vbrb_output_path))
-			vbrb_output_path = tostr(SBUF(vbrb_output_path), PATHSEP, basename, CSBUF(VBRB_EXT));
-
-	char* vbrb_visual_output_path = vbrb_output_path;
-	if (!vbrb_output_path)
-		vbrb_visual_output_path = tostr(CSBUF("~"), setFileExt_s(SBUF(input_path), CSBUF(VBRB_EXT)));
-
-	BRP prep;
-	if (!initBRP(&prep, NULL, BRP_ESC_STR_LITERALS)) {
-		eprintf("error: could not initialize the preprocessor due to memory shortage\n");
-		return 1;
-	}
-	static_assert(N_SYMBOLS == 39, "not all symbols are handled");
-	setSymbols(
-		&prep,
-		BRP_SYMBOL("("),
-		BRP_SYMBOL(")"),
-		BRP_SYMBOL(","),
-		BRP_SYMBOL("{"),
-		BRP_SYMBOL("}"),
-		BRP_SYMBOL(";"),
-		BRP_SYMBOL("+="),
-		BRP_SYMBOL("-="),
-		BRP_SYMBOL("*="),
-		BRP_SYMBOL("/="),
-		BRP_SYMBOL("&="),
-		BRP_SYMBOL("^="),
-		BRP_SYMBOL("|="),
-		BRP_SYMBOL("<<="),
-		BRP_SYMBOL(">>="),
-		BRP_SYMBOL("=="),
-		BRP_SYMBOL("!="),
-		BRP_SYMBOL("<="),
-		BRP_SYMBOL(">="),
-		BRP_SYMBOL("!"),
-		BRP_SYMBOL("||"),
-		BRP_SYMBOL("&&"),
-		BRP_SYMBOL("="),
-		BRP_SYMBOL("+"),
-		BRP_SYMBOL("-"),
-		BRP_SYMBOL("*"),
-		BRP_SYMBOL("/"),
-		BRP_SYMBOL("%"),
-		BRP_SYMBOL("&"),
-		BRP_SYMBOL("|"),
-		BRP_SYMBOL("^"),
-		BRP_SYMBOL("<<"),
-		BRP_SYMBOL(">>"),
-		BRP_SYMBOL("~"),
-		BRP_SYMBOL("<"),
-		BRP_SYMBOL(">"),
-		BRP_SYMBOL("["),
-		BRP_SYMBOL("]"),
-		BRP_SYMBOL("."),
-		BRP_HIDDEN_SYMBOL(" "),
-		BRP_HIDDEN_SYMBOL("\t"),
-		BRP_HIDDEN_SYMBOL("\n")
-	);
-	static_assert(N_KWS == 17, "not all keywords are handled");
-	setKeywords(
-		&prep,
-		BRP_KEYWORD("void"),
-		BRP_KEYWORD("int8"),
-		BRP_KEYWORD("int16"),
-		BRP_KEYWORD("int32"),
-		BRP_KEYWORD("int64"),
-		BRP_KEYWORD("sys"),
-		BRP_KEYWORD("builtin"),
-		BRP_KEYWORD("return"),
-		BRP_KEYWORD("cast"),
-		BRP_KEYWORD("bool"),
-		BRP_KEYWORD("if"),
-		BRP_KEYWORD("else"),
-		BRP_KEYWORD("while"),
-		BRP_KEYWORD("for"),
-		BRP_KEYWORD("do"),
-		BRP_KEYWORD("static"),
-		BRP_KEYWORD("type")
-	);
-	setInput(&prep, input_path, fopen(input_path, "r"));
-
-	if (debug_opts & DEBUG_OPT_TOKENS) {
-		while (true) {
-			Token token = fetchToken(&prep);
-			if (token.type == TOKEN_NONE) return 0;
-			printToken(token, &prep);
-		}
-	}
-
-	if (debug_opts & DEBUG_OPT_MACROS) {
-		while (true) {
-			Token token = fetchToken(&prep);
-			if (token.type == TOKEN_NONE) {
-				arrayForeach(Macro, macro, prep.macros) {
-					printTokenLoc(macro->def_loc);
-					printf("#define %s%c", macro->name, macro->args.length ? '(' : '\0');
-					arrayForeach(MacroArg, arg, macro->args) {
-						printf("%s%s", arg->name, arg - macro->args.data < macro->args.length - 1 ? ", " : "");
-					}
-					printf("%c %.*s\n", macro->args.length ? ')' : '\0', unpack(macro->def));
-				}
-				return 0;
-			} 
-		}
-	}
-
-	AST ast;
-	parseSourceCode(&prep, &ast);
-
-	if (debug_opts & DEBUG_OPT_EXPRS) {
-		printAST(&ast);
-		return 0;
-	}
-
-
-	FILE *vbrb_output;
-	sbuf temp_vbrb_buffer = {0};
-	if (!vbrb_output_path) {
-		if (!(vbrb_output = open_memstream(&temp_vbrb_buffer.data, (size_t*)&temp_vbrb_buffer.length))) {
-			eprintf("error: could not open temporary file for writing VBRB output (reason: %s)\n", strerror(errno));
-			return 1;
-		}
-	} else {
-		if (!(vbrb_output = fopen(vbrb_output_path, "w"))) {
-			eprintf("error: could not open file `%s` (reason: %s)\n", vbrb_output_path, strerror(errno));
-			return 1;
-		}
-	}
-
-	compileAST(&ast, vbrb_output);
-
-	fclose(vbrb_output);
-	if (!vbrb_output_path) {
-		vbrb_output = fmemopen(temp_vbrb_buffer.data, (size_t)temp_vbrb_buffer.length, "r");
-	} else {
-		vbrb_output = fopen(vbrb_output_path, "r");
-	}
-	Module res;
-	char* search_paths[] = { ".", NULL };
-	VBRBError vbrb_err = compileVBRB(vbrb_output, vbrb_visual_output_path, &res, search_paths);
-	if (vbrb_err.code) {
-		eputs("BRidge assembler failure; assembler output:\n\t");
-		printVBRBError(stderr, vbrb_err);
-		return 1;
-	}
-	if (optimization_level) {
-		fclose(vbrb_output);
-		vbrb_output = NULL;
-		if (vbrb_output_path) {
-			if (!(vbrb_output = fopen(vbrb_output_path, "w"))) {
-				eprintf("error: could not open file `%s` (reason: %s)\n", vbrb_output_path, strerror(errno));
+		Module res;
+		if (optimize) {
+			res = optimizeVBRB(output_path, output_path);
+			if (compiler_action == 'v') return 0;
+		} else if (compiler_action != 'v') {
+			const char* search_paths[] = { ".", NULL };
+			VBRBError err = compileVBRB(fopen(output_path, "r"), output_path, &res, search_paths);
+			if (err.code) {
+				eputs("error while compiling BRidge Assembly to bytecode:\n");
+				printVBRBError(stderr, err);
 				return 1;
 			}
-		}
-		optimizeModule(&res, search_paths, vbrb_output, optimization_level);
-	}
-	if (!silent) printf("%s -> %s in %.3f ms\n", input_path, vbrb_visual_output_path, endTimer());
+		} else return 0;
 
-	startTimer();
-	FILE* brb_output = fopen(brb_output_path, "wb");
-	if (!brb_output) {
-		eprintf("error: could not open file `%s` for writing BRB output (reason: %s)\n", brb_output_path, strerror(errno));
-		return 1;
-	}
-	writeModule(&res, brb_output);
-	if (!silent) printf("%s -> %s in %.3f ms\n", vbrb_visual_output_path, brb_output_path, endTimer());
-
-	fclose(brb_output);
-	fclose(vbrb_output);
-	delBRP(&prep);
-
-	if (run_program) {
-		char* cmd = NULL;
-		asprintf(&cmd, "brbx %s", brb_output_path);
-		if (!cmd) {
-			printf("error: could not invoke the command to execute the program\n");
+		FILE* output_fd = fopen(output_path, "wb");
+		if (!output_fd) {
+			eprintf("error: could not open file `%s` for writing BRB output (reason: %s)\n", output_path, strerror(errno));
 			return 1;
 		}
+		writeModule(&res, output_fd);
+		fclose(output_fd);
 
-		system(cmd);
+		if (run_program) {
+			char* cmd = NULL;
+			asprintf(&cmd, "brbx \"%s\"", output_path);
+			if (!cmd) {
+				eprintf("error: could not invoke the command to execute the program\n");
+				return 1;
+			}
+
+			system(cmd);
+			unlink(output_path);
+		}
+		return 0;
+	} else {
+		eprintf("error: brc can only handle `.br` files\n");
+		return 1;
 	}
 }

@@ -37,6 +37,7 @@ T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&
 	static bool t##Array_clear(t##Array* array); \
 	static int t##Array_length(t##Array array); \
 	static t* t##Array_resize(t##Array* array, int n); \
+	static t##Array t##Array_copy(t##Array array); \
 
 #define defArray(t) \
 	static t##Array t##Array_new(int n, ...) { \
@@ -153,6 +154,12 @@ T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&
 		array.data += start; \
 		array.length = end - start; \
 		return array; \
+	} \
+	static t##Array t##Array_copy(t##Array array) { \
+		return (t##Array){ \
+			.data = memcpy(malloc(array.length * sizeof(t)), array.data, array.length * sizeof(t)), \
+			.length = array.length \
+		}; \
 	} \
 
 #define declChain(t) \

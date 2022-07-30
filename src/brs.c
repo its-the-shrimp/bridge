@@ -67,7 +67,7 @@ int main(int argc, char* argv[])
 	}
 	
 	Module res;
-	char* module_search_paths[] = { ".", NULL };
+	const char* module_search_paths[] = { ".", NULL };
 	VBRBError err = compileVBRB(input_fd, input_path, &res, module_search_paths);
 	if (err.code) {
 		printVBRBError(stderr, err);

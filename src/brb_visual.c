@@ -1,5 +1,5 @@
+#define _BRB_INTERNAL
 #include <brb.h>
-#include "brb_load.h"
 
 declArray(Var);
 defArray(Var);
@@ -1262,33 +1262,37 @@ OpCompiler op_compilers[] = {
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 
-VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths[])
+sbuf vbrb_symbols[] = {
+	[SYMBOL_SEGMENT_START] = BRP_SYMBOL("{"),
+	[SYMBOL_SEGMENT_END] = BRP_SYMBOL("}"),
+	[SYMBOL_COLON] = BRP_SYMBOL(":"),
+	BRP_HIDDEN_SYMBOL(" "),
+	BRP_HIDDEN_SYMBOL("\t"),
+	BRP_HIDDEN_SYMBOL("\n"),
+	(sbuf){0}
+};
+
+sbuf vbrb_keywords[] = {
+	_opNames,
+	_syscallNames,
+	_conditionNames,
+	BRP_KEYWORD(".data"),
+	BRP_KEYWORD(".load"),
+	BRP_KEYWORD("int16"),
+	BRP_KEYWORD("int32"),
+	BRP_KEYWORD("int64"),
+	BRP_KEYWORD("db_addr"),
+	BRP_KEYWORD("mut"),
+	BRP_KEYWORD("zero"),
+	(sbuf){0}
+};
+
+VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* search_paths[])
 {
 	BRP* obj = malloc(sizeof(BRP));
 	initBRP(obj, NULL, BRP_ESC_STR_LITERALS);
-	setSymbols(
-		obj,
-		BRP_SYMBOL("{"),
-		BRP_SYMBOL("}"),
-		BRP_SYMBOL(":"),
-		BRP_HIDDEN_SYMBOL(" "),
-		BRP_HIDDEN_SYMBOL("\t"),
-		BRP_HIDDEN_SYMBOL("\n")
-	);
-	setKeywords(
-		obj,
-		_opNames,
-		_syscallNames,
-		_conditionNames,
-		BRP_KEYWORD(".data"),
-		BRP_KEYWORD(".load"),
-		BRP_KEYWORD("int16"),
-		BRP_KEYWORD("int32"),
-		BRP_KEYWORD("int64"),
-		BRP_KEYWORD("db_addr"),
-		BRP_KEYWORD("mut"),
-		BRP_KEYWORD("zero")
-	);
+	setSymbols(obj, vbrb_symbols);
+	setKeywords(obj, vbrb_keywords);
 	setInput(obj, src_name, src);
 	
 	dst->seg_exec = OpArray_new(0);

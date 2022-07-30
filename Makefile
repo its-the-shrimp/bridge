@@ -31,7 +31,7 @@ ifeq ("$(wildcard $(GLOBAL)/brbd)", "")
 	sudo ln -sF $(PWD)/$(BIN)/brbd $(GLOBAL)/brbd
 endif
 
-$(LIB)/libbrb.dylib: src/brb_*.c
+$(LIB)/libbrb.dylib: src/brb_*.c include/*
 	cc -c $(SRC)/brb_*.c -Wno-initializer-overrides -I include -ferror-limit=1
 	cc -shared -o $(LIB)/libbrb.dylib brb_*.o
 	rm brb_*.o

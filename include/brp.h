@@ -39,7 +39,7 @@ typedef enum token_type {
 typedef struct token_loc {
 	int32_t lineno;
 	int32_t colno;
-	char* src_name;
+	const char* src_name;
 	struct token_loc* included_from;
 } TokenLoc;
 declArray(TokenLoc);
@@ -147,11 +147,9 @@ BRP* initBRP(BRP* obj, BRPErrorHandler handler, char flags);
 #define BRP_ESC_STR_LITERALS 0x1
 void delBRP(BRP* obj);
 
-bool _setKeywords(BRP* obj, ...);
-#define setKeywords(obj, ...) _setKeywords(obj, __VA_ARGS__, (sbuf){0})
+bool setKeywords(BRP* obj, sbuf kws[]);
 
-bool _setSymbols(BRP* obj, ...);
-#define setSymbols(obj, ...) _setSymbols(obj, __VA_ARGS__, (sbuf){0})
+bool setSymbols(BRP* obj, sbuf symbols[]);
 
 bool appendInput(BRP* obj, InputCtx* input, FILE* input_fd, TokenLoc initial_loc, TokenLoc include_loc);
 #define setInput(obj, path, input_fd) appendInput(obj, &(obj)->cur_input, input_fd, (TokenLoc){ .src_name = path, .colno = 1, .lineno = 1, .included_from = NULL }, (TokenLoc){0})
@@ -170,6 +168,9 @@ void fprintTokenStr(FILE* fd, Token token, BRP* obj);
 
 void fprintToken(FILE* fd, Token token, BRP* obj);
 #define printToken(token, parser) fprintToken(stdout, token, parser)
+
+void fprintTokenText(FILE* fd, Token token, BRP* obj);
+#define printTokenText(token, parser) fprintTokenText(stdout, token, parser)
 
 int getTokenSymbolId(Token token);
 int getTokenKeywordId(Token token);
@@ -227,7 +228,7 @@ char* getNormPath(char* src)
 	return res.data;
 }
 
-bool pathEquals(char path1[], char path2[])
+bool pathEquals(const char path1[], const char path2[])
 {
 	char path1_r[256];
 	char path2_r[256];
@@ -236,51 +237,34 @@ bool pathEquals(char path1[], char path2[])
 	return sbufeq(path1_r, path2_r);
 }
 
-bool _setKeywords(BRP* obj, ...)
+bool setKeywords(BRP* obj, sbuf kws[])
 {
-	va_list args;
-	va_start(args, obj);
-	sbuf kw;
-	int n_kws = 1;
-// calculating amount of keywords
-	while ((kw = va_arg(args, sbuf)).data) { n_kws++; }
-	va_end(args);
-// copying the keywords array
-	va_start(args, obj);
-	obj->keywords = malloc(n_kws * sizeof(sbuf));
-	if (!obj->keywords) return false;
-	for (int i = 0; i < n_kws; i++) {
-		obj->keywords[i] = va_arg(args, sbuf);
+	int n_kws = 0;
+	for (sbuf* kw = kws; kw->data; ++kw) {
+		n_kws += 1;
 	}
-
-	return true;
+	return (obj->keywords = memcpy(malloc(n_kws * sizeof(sbuf)), kws, n_kws * sizeof(sbuf))) != NULL;
 }
 
-bool _setSymbols(BRP* obj, ...)
+bool setSymbols(BRP* obj, sbuf symbols[])
 {
-	va_list args;
-	va_start(args, obj);
-	sbuf symbol;
 	int n_symbols = 1;
 	int n_hidden_symbols = 1;
 // calculating amount of symbols
-	while ((symbol = va_arg(args, sbuf)).data) {
+	for (sbuf* symbol = symbols; symbol->data; ++symbol) {
 		n_symbols++;
-		if (isSymbolSpecHidden(symbol)) n_hidden_symbols++;
+		if (isSymbolSpecHidden(*symbol)) n_hidden_symbols++;
 	}
-	va_end(args);
 // copying the symbols array
-	va_start(args, obj);
 	obj->symbols = malloc((n_symbols + 2) * sizeof(sbuf));
 	obj->hidden_symbols = malloc(n_hidden_symbols * sizeof(sbuf));
 	if (!obj->symbols || !obj->hidden_symbols) return false;
 
 	n_hidden_symbols = 0;
 	for (int i = 0; i < n_symbols - 1; i++) {
-		obj->symbols[i] = va_arg(args, sbuf);
+		obj->symbols[i] = symbols[i];
 		if (isSymbolSpecHidden(obj->symbols[i])) obj->hidden_symbols[n_hidden_symbols++] = obj->symbols[i];
 	}
-	va_end(args);
 
 	obj->_dquote_symbol_id = n_symbols - 1;
 	obj->symbols[n_symbols - 1] = DQUOTE;
@@ -1002,6 +986,32 @@ void fprintToken(FILE* fd, Token token, BRP* obj)
 	fputc('\n', fd);
 }
 
+void fprintTokenText(FILE* fd, Token token, BRP* obj)
+{
+	switch (token.type) {
+		case TOKEN_NONE:
+			fputc('\0', fd);
+			break;
+		case TOKEN_WORD:
+			fputs(token.word, fd);
+			break;
+		case TOKEN_STRING:
+			fputc('"', fd);
+			fputsbufesc(fd, token.string, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
+			fputc('"', fd);
+			break;
+		case TOKEN_KEYWORD:
+			fputsbuf(fd, obj->keywords[token.keyword_id]);
+			break;
+		case TOKEN_SYMBOL:
+			fputsbuf(fd, obj->symbols[token.symbol_id]);
+			break;
+		case TOKEN_INT:
+			fprintf(fd, "%lld", token.value);
+			break;
+	}
+}
+
 int getTokenSymbolId(Token token)
 {
 	return token.type == TOKEN_SYMBOL ? token.symbol_id : -1;
@@ -1116,20 +1126,20 @@ BRP* initBRP(BRP* obj, BRPErrorHandler handler, char flags)
 	obj->flags = flags;
 	obj->macros = MacroArray_new(
 		3,
-		(Macro){ .name = "__BRC__", .def = {0}, .def_loc = {0} },
+		(Macro){.name = "__BRC__"},
 		(Macro){0}, // OS indicator macro placeholder
 		(Macro){0} // platform (POSIX | NT) indicator macro placeholder
 	);
 
 #if defined(__APPLE__) || defined(__MACH__)
-	obj->macros.data[1] = (Macro){ .name = "__APPLE__", .def = {0}, .def_loc = {0} };
-	obj->macros.data[2] = (Macro){ .name = "__POSIX__", .def = {0}, .def_loc = {0} };
+	obj->macros.data[1] = (Macro){.name = "__APPLE__"};
+	obj->macros.data[2] = (Macro){.name = "__POSIX__"};
 #elif defined(_WIN32)
-	obj->macros.data[1] = (Macro){ .name = "_WIN32", .def = {0}, .def_loc = {0} };
-	obj->macros.data[2] = (Macro){ .name = "__NT__", .def = {0}, .def_loc = {0} };
+	obj->macros.data[1] = (Macro){.name = "_WIN32"};
+	obj->macros.data[2] = (Macro){.name = "__NT__"};
 #elif defined(__linux__)
-	obj->macros.data[1] = (Macro){ .name = "__linux__", .def = {0}, .def_loc = {0} };
-	obj->macros.data[2] = (Macro){ .name = "__POSIX__", .def = {0}, .def_loc = {0} };
+	obj->macros.data[1] = (Macro){.name = "__linux__"};
+	obj->macros.data[2] = (Macro){.name = "__POSIX__"};
 #endif
 
 	return obj;

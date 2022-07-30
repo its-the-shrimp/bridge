@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
 	}
 
 	Module module;
-	char* search_paths[] = { ".", NULL };
+	const char* search_paths[] = { ".", NULL };
 	BRBLoadError err = loadModule(input_fd, &module, search_paths);
 	if (err.code) {
 		printLoadError(stderr, err);

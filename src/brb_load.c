@@ -7,6 +7,8 @@ defArray(Op);
 defArray(DataBlock);
 defArray(DataPiece);
 
+typedef char** field;
+declArray(field);
 defArray(field);
 typedef struct {
 	Module* dst;
@@ -49,7 +51,7 @@ uint64_t loadInt64(FILE* fd, long* n_fetched)
 
 int64_t loadInt(FILE* fd, long* n_fetched)
 {
-	register uint8_t size = loadInt8(fd, n_fetched) & 0b1111;
+	register uint8_t size = loadInt8(fd, n_fetched);
 	switch (size) {
 		case 8: return loadInt8(fd, n_fetched);
 		case 9: return loadInt16(fd, n_fetched);
@@ -88,27 +90,27 @@ void load2Ints(FILE* fd, int64_t* x, int64_t* y, long* n_fetched)
 	uint8_t sizes = loadInt8(fd, n_fetched);
 
 	switch (sizes >> 4) {
-		case 8: *x = loadInt8(fd, n_fetched);
-		case 9: *x = loadInt16(fd, n_fetched);
-		case 10: *x = loadInt32(fd, n_fetched);
-		case 11: *x = loadInt64(fd, n_fetched);
-		case 12: *x = ~(int64_t)loadInt8(fd, n_fetched);
-		case 13: *x = ~(int64_t)loadInt16(fd, n_fetched);
-		case 14: *x = ~(int64_t)loadInt32(fd, n_fetched);
-		case 15: *x = ~(int64_t)loadInt64(fd, n_fetched);
-		default: *x = sizes >> 4;
+		case 8: *x = loadInt8(fd, n_fetched); break;
+		case 9: *x = loadInt16(fd, n_fetched); break;
+		case 10: *x = loadInt32(fd, n_fetched); break;
+		case 11: *x = loadInt64(fd, n_fetched); break;
+		case 12: *x = ~(int64_t)loadInt8(fd, n_fetched); break;
+		case 13: *x = ~(int64_t)loadInt16(fd, n_fetched); break;
+		case 14: *x = ~(int64_t)loadInt32(fd, n_fetched); break;
+		case 15: *x = ~(int64_t)loadInt64(fd, n_fetched); break;
+		default: *x = sizes >> 4; break;
 	}
 
 	switch (sizes & 0b1111) {
-		case 8: *y = loadInt8(fd, n_fetched);
-		case 9: *y = loadInt16(fd, n_fetched);
-		case 10: *y = loadInt32(fd, n_fetched);
-		case 11: *y = loadInt64(fd, n_fetched);
-		case 12: *y = ~(int64_t)loadInt8(fd, n_fetched);
-		case 13: *y = ~(int64_t)loadInt16(fd, n_fetched);
-		case 14: *y = ~(int64_t)loadInt32(fd, n_fetched);
-		case 15: *y = ~(int64_t)loadInt64(fd, n_fetched);
-		default: *y = sizes & 0b1111;
+		case 8: *y = loadInt8(fd, n_fetched); break;
+		case 9: *y = loadInt16(fd, n_fetched); break;
+		case 10: *y = loadInt32(fd, n_fetched); break;
+		case 11: *y = loadInt64(fd, n_fetched); break;
+		case 12: *y = ~(int64_t)loadInt8(fd, n_fetched); break;
+		case 13: *y = ~(int64_t)loadInt16(fd, n_fetched); break;
+		case 14: *y = ~(int64_t)loadInt32(fd, n_fetched); break;
+		case 15: *y = ~(int64_t)loadInt64(fd, n_fetched); break;
+		default: *y = sizes & 0b1111; break;
 	}
 }
 
@@ -183,10 +185,7 @@ void printLoadError(FILE* dst, BRBLoadError err)
 			fprintf(dst, "operation code not found\n");
 			break;
 		case BRB_ERR_UNRESOLVED_NAMES:
-			fprintf(dst, "the following names were not resolved:\n");
-			arrayForeach(field, name, err.names) {
-				fprintf(dst, "\t%s\n", **name);
-			}
+			fprintf(dst, "not all names were resolved; The most probable cause is that the file, from which the bytecode was being read, was truncated\n");
 			break;
 		case BRB_ERR_NO_OP_ARG:
 			fprintf(dst, 
@@ -571,7 +570,7 @@ fieldArray getUnresolvedNames(Module* module)
 	return res;
 }
 
-BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
+BRBLoadError preloadModule(FILE* src, Module* dst, const char* module_paths[])
 {
 	long status = 0;
 	ModuleLoader loader = {
@@ -685,8 +684,9 @@ BRBLoadError preloadModule(FILE* src, Module* dst, char* module_paths[])
 		}
 	}
 	
-	if (unresolved.length) 
-		return (BRBLoadError){.code = BRB_ERR_UNRESOLVED_NAMES, .names = unresolved};
+	if (unresolved.length) {
+		return (BRBLoadError){.code = BRB_ERR_UNRESOLVED_NAMES};
+	}
 	return (BRBLoadError){0};
 }
 
@@ -798,7 +798,7 @@ BRBLoadError resolveModule(Module* dst)
 	return (BRBLoadError){0};
 }
 
-BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[])
+BRBLoadError loadModule(FILE* src, Module* dst, const char* search_paths[])
 {
 	BRBLoadError err = preloadModule(src, dst, search_paths);
 	if (err.code) return err;

@@ -11,7 +11,6 @@ typedef enum {
 	OP_SETR, // uses Op::dst_reg and Op::src_reg
 	OP_SETD, // uses Op::dst_reg and Op::symbol_id
 	OP_SETB, // uses Op::dst_reg and Op::symbol_id
-// free space
 	OP_ADD, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_ADDR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_SUB, // uses Op::dst_reg, Op::src_reg and Op::value
@@ -290,8 +289,6 @@ typedef enum {
 	N_BRB_ERRORS
 } BRBLoadErrorCode;
 
-typedef char** field;
-declArray(field);
 typedef struct {
 	BRBLoadErrorCode code;
 	union {
@@ -302,7 +299,6 @@ typedef struct {
 			const char* in_proc_name;
 			const char* in_db_name;
 		};
-		fieldArray names;
 		int32_t opcode; // for BRB_ERR_INVALID_OPCODE and BRB_ERR_NO_OP_ARG
 		uint8_t cond_id; // for BRB_ERR_INVALID_COND_ID
 	};
@@ -533,7 +529,7 @@ typedef struct vbrb_error {
 	};
 } VBRBError;
 
-VBRBError compileVBRB(FILE* src, char* src_name, Module* dst, char* search_paths[]);
+VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* search_paths[]);
 void printVBRBError(FILE* dst, VBRBError err);
 void cleanupVBRBCompiler(VBRBError status);
 
@@ -568,16 +564,20 @@ typedef bool (*ExecCallback) (ExecEnv*, Module*, const Op*);
 // implemented in `src/brb_write.c`
 void writeModule(Module* src, FILE* dst);
 // implemented in `src/brb_core.c`
-FILE* findModule(char* name, char* search_paths[]);
+FILE* findModule(const char* name, const char* search_paths[]);
 Submodule* getOpSubmodule(Module* module, Op* op);
 Submodule* getDataBlockSubmodule(Module* module, DataBlock* block);
 Module* mergeModule(Module* restrict src, Module* dst, char* src_name);
 Submodule getRootSubmodule(Module* module, const char* name);
 // implemented in `src/brb_load.c`
-BRBLoadError loadModule(FILE* src, Module* dst, char* search_paths[]);
+BRBLoadError loadModule(FILE* src, Module* dst, const char* search_paths[]);
 void printLoadError(FILE* dst, BRBLoadError err);
+#ifdef _BRB_INTERNAL
+BRBLoadError resolveModule(Module* dst);
+BRBLoadError preloadModule(FILE* src, Module* dst, const char* search_paths[]);
+#endif
 // implemented in `src/brb_optimize.c`
-void optimizeModule(Module* module, char* search_paths[], FILE* output, unsigned int level);
+void optimizeModule(Module* module, const char* search_paths[], FILE* output, unsigned int level);
 // implemented in `src/brb_exec.c`
 void initExecEnv(ExecEnv* env, Module* module, char** args);
 bool addDefaultCallback(ExecEnv* env, ExecCallback callback);
