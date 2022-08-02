@@ -7,6 +7,7 @@
 #include <datasets.h>
 #include <errno.h>
 #include <sys/cdefs.h>
+#include <sys/mman.h>
 
 
 #define DQUOTE CSBUF('"')
@@ -237,13 +238,12 @@ bool pathEquals(const char path1[], const char path2[])
 	return sbufeq(path1_r, path2_r);
 }
 
-bool setKeywords(BRP* obj, sbuf kws[])
+bool setKeywords(BRP* const obj, sbuf* const kws)
 {
-	int n_kws = 0;
-	for (sbuf* kw = kws; kw->data; ++kw) {
-		n_kws += 1;
-	}
-	return (obj->keywords = memcpy(malloc(n_kws * sizeof(sbuf)), kws, n_kws * sizeof(sbuf))) != NULL;
+	long n_kws = 1;
+	for (sbuf* kw = kws; kw->data; ++kw) ++n_kws;
+	obj->keywords = memcpy(malloc(n_kws * sizeof(sbuf)), kws, n_kws * sizeof(sbuf));
+	return obj->keywords != NULL;
 }
 
 bool setSymbols(BRP* obj, sbuf symbols[])
@@ -286,6 +286,46 @@ bool setSymbols(BRP* obj, sbuf symbols[])
 	return true;
 }
 
+sbuf removeComments(sbuf buffer)
+{
+	char* to_free = buffer.data;
+	static sbuf comment_delims[5] = {
+		CSBUF('"'),
+		CSBUF("'"),
+		CSBUF("//"),
+		CSBUF("/*"),
+		(sbuf){0}
+	};
+	sbuf res = CSBUF("");
+	
+	while (buffer.length) {
+		sbuf part, other_part;
+		switch ((sbufsplitv(&buffer, &part, comment_delims))) {
+			case 0: // double quote
+				sbufsplitesc(&buffer, &other_part, comment_delims[0]);
+				res = sbufconcat(res, part, comment_delims[0], other_part, comment_delims[0]);
+				break;
+			case 1: // single quote
+				sbufsplitesc(&buffer, &other_part, comment_delims[1]);
+				res = sbufconcat(res, part, comment_delims[1], other_part, comment_delims[1]);
+				break;
+			case 2: // line-terminated comment (like the one this text is in)
+				sbufsplit(&buffer, &other_part, NEWLINE);
+				res = sbufconcat(res, part);
+				break;
+			case 3: /* free-form comment (like the one this text is in) */
+				sbufsplit(&buffer, &other_part, CSBUF("*/"));
+				res = sbufconcat(res, part);
+				break;
+			default:
+				res = sbufconcat(res, part);
+				break;
+		}
+	}
+	free(to_free);
+	return res;
+}
+
 bool appendInput(BRP *obj, InputCtx* const input, FILE* input_fd, TokenLoc initial_loc, TokenLoc include_loc)
 {
 	if (!input_fd) {
@@ -298,8 +338,8 @@ bool appendInput(BRP *obj, InputCtx* const input, FILE* input_fd, TokenLoc initi
 
 	InputCtx* prev_ctx = malloc(sizeof(InputCtx));
 	*prev_ctx = *input;
-	input->cur_loc = initial_loc,
-	input->buffer = filecontent(input_fd),
+	input->cur_loc = initial_loc;
+	input->buffer = removeComments(filecontent(input_fd));
 	input->prev = prev_ctx;
 
 	if (!input->buffer.data) {
@@ -309,6 +349,7 @@ bool appendInput(BRP *obj, InputCtx* const input, FILE* input_fd, TokenLoc initi
 		fclose(input_fd);
 		return false;
 	}
+	
 
 	input->orig_data = input->buffer.data;
 	if (include_loc.src_name) {
@@ -341,6 +382,11 @@ static sbuf nl_arg[2] = { NEWLINE };
 
 void cleanInput(BRP* obj, InputCtx* const input)
 {
+	while (!input->buffer.length) {
+		if (!input->prev) return;
+		delInput(obj, input);
+	}
+
 	sbuf stripped = sbufstriplv(&input->buffer, obj->hidden_symbols);
 	int nl_count = sbufcount_v(stripped, nl_arg);
 	if (nl_count) {
@@ -349,6 +395,11 @@ void cleanInput(BRP* obj, InputCtx* const input)
 		sbufsplitrv(&stripped, &last_stripped_line, nl_arg);
 		input->cur_loc.colno = stripped.length + 1;
 	} else input->cur_loc.colno += stripped.length;
+
+	while (!input->buffer.length) {
+		if (!input->prev) return;
+		delInput(obj, input);
+	}
 }
 
 typedef enum {
@@ -387,7 +438,7 @@ static inline Macro fetchMacroArg(BRP* const obj, InputCtx* const input, const M
 	Macro res = { .name = arg.name, .def_loc = arg.def_loc };
 	bool isnt_last_arg = true;
 	while (true) {
-		sbuf delim = sbufsplit(&input->buffer, &res.def, SBUF(','), SBUF('('), SBUF('['), SBUF('{'), SBUF(')'), NEWLINE);
+		sbuf delim = sbufsplit(&input->buffer, &res.def, SBUF(','), SBUF('('), SBUF('['), SBUF('{'), SBUF(')'));
 		if (delim.length ? sbufeq(delim, NEWLINE) : true) {
 			obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 			obj->error_loc = input->cur_loc;
@@ -487,10 +538,6 @@ static inline InputCtx* expandMacro(BRP* const obj, InputCtx* const input, const
 
 static void preprocessInput(BRP* obj, InputCtx* const input)
 {
-	while (!input->buffer.length) {
-		if (!input->prev) return;
-		delInput(obj, input);
-	}
 // stripping unwanted symbols from the start of the buffer
 	cleanInput(obj, input);
 // processing directives
@@ -602,7 +649,7 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 					input->cur_loc.colno = 1;
 					input->cur_loc.lineno += sbufcount_v(macro.def, nl_arg);
 				} else {
-					if (!sbufsplit(&input->buffer, &macro.def, CSBUF("\n#endmacro")).data) {
+					if (!sbufsplit(&input->buffer, &macro.def, CSBUF("#endmacro")).data) {
 						obj->error_code = BRP_ERR_UNCLOSED_MACRO;
 						obj->error_loc = input->cur_loc;
 						obj->handler(obj);
@@ -611,7 +658,7 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 					}
 					macro.def = sbufcopy(macro.def);
 					input->cur_loc.colno = brp_directives[BRP_ENDMACRO].length + 2;
-					input->cur_loc.lineno += sbufcount_v(macro.def, nl_arg) + 1;
+					input->cur_loc.lineno += sbufcount_v(macro.def, nl_arg);
 				}
 
 				arrayForeach(Macro, prev_macro, obj->macros) {
@@ -639,8 +686,8 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 				}
 
 				bool defined = false;
-				for (int i = 0; i < obj->macros.length; i++) {
-					if (sbufeq(macro_name, obj->macros.data[i].name)) {
+				arrayForeach (Macro, macro, obj->macros) {
+					if (sbufeq(macro_name, macro->name)) {
 						defined = true;
 						break;
 					}
@@ -1147,7 +1194,7 @@ BRP* initBRP(BRP* obj, BRPErrorHandler handler, char flags)
 
 void delBRP(BRP* obj)
 {
-	free(obj->keywords);
+	//free(obj->keywords);
 	free(obj->symbols);
 	free(obj->hidden_symbols);
 	TokenArray_clear(&obj->pending);

@@ -1,4 +1,4 @@
-#!brc -rs
+#!brc -Ai
 main() {
     sys write(builtin STDOUT, "Hello, World\n", 13);
 }

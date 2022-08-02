@@ -299,12 +299,12 @@ int main(int argc, char* argv[])
 	}
 
 	ExecEnv env;
-	initExecEnv(&env, &module, module_argv);
+	initExecEnv(&env, &module, (const char**)module_argv);
 	addDefaultCallback(&env, handler);
 	addCallBack(&env, OP_END, opEndCallback);
 	addCallBack(&env, OP_SYS, opSysCallback);
  
-		sbuf cmd = smalloc(256);
+	sbuf cmd = smalloc(256);
 	sbuf cmd_original = cmd;
 	while (true) {
 		cmd = cmd_original;

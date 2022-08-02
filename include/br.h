@@ -28,9 +28,9 @@
 #define comment(msg) puts(__FILE__":"_s2(__LINE__)": "msg)
 #endif
 
-#define BRB_EXT ".brb"
-#define VBRB_EXT ".vbrb"
-#define BR_EXT ".br"
+#define BRB_EXT "brb"
+#define VBRB_EXT "vbrb"
+#define BR_EXT "br"
 
 static struct timespec TIME;
 
@@ -57,6 +57,11 @@ bool execProcess_s(sbuf command, ProcessInfo* info);
 bool isPathDir(char* path);
 // same as isPathDir(), but path is provided in the form of a sized buffer
 bool isPathDir_s(sbuf path);
+
+// returns a null-terminated string that is a copy of the file extension of the null-terminated `path`
+char* getFileExt(char* path);
+// same as `getFileExt`, but operates on and returns a sized buffer, without additional allocations
+sbuf getFileExt_s(sbuf path);
 
 // string function that changes the extension of the file path `path` to `ext`
 char* setFileExt(char* path, char* ext);

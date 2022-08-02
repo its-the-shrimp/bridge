@@ -529,6 +529,31 @@ typedef struct vbrb_error {
 	};
 } VBRBError;
 
+static sbuf vbrb_symbols[] = {
+	BRP_SYMBOL("{"),
+	BRP_SYMBOL("}"),
+	BRP_SYMBOL(":"),
+	BRP_HIDDEN_SYMBOL(" "),
+	BRP_HIDDEN_SYMBOL("\t"),
+	BRP_HIDDEN_SYMBOL("\n"),
+	(sbuf){0}
+};
+
+static sbuf vbrb_keywords[] = {
+	_opNames,
+	_syscallNames,
+	_conditionNames,
+	BRP_KEYWORD(".data"),
+	BRP_KEYWORD(".load"),
+	BRP_KEYWORD("int16"),
+	BRP_KEYWORD("int32"),
+	BRP_KEYWORD("int64"),
+	BRP_KEYWORD("db_addr"),
+	BRP_KEYWORD("mut"),
+	BRP_KEYWORD("zero"),
+	(sbuf){0}
+};
+
 VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* search_paths[]);
 void printVBRBError(FILE* dst, VBRBError err);
 void cleanupVBRBCompiler(VBRBError status);
@@ -579,7 +604,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, const char* search_paths[]);
 // implemented in `src/brb_optimize.c`
 void optimizeModule(Module* module, const char* search_paths[], FILE* output, unsigned int level);
 // implemented in `src/brb_exec.c`
-void initExecEnv(ExecEnv* env, Module* module, char** args);
+void initExecEnv(ExecEnv* env, Module* module, const char** args);
 bool addDefaultCallback(ExecEnv* env, ExecCallback callback);
 bool addCallBack(ExecEnv* env, uint8_t op_id, ExecCallback callback);
 void execOp(ExecEnv* env, Module* module);

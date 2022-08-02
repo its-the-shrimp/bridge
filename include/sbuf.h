@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 #define sbuf_format "%.*s"
-#define unpack(array) (int)array.length, array.data
+#define unpack(array) (int)(array).length, (array).data
 
 #define sbufshift(obj, offset) { obj.length -= offset; obj.data += offset; }
 #define sbufpshift(obj, offset) { obj->length -= offset; obj->data += offset; }
@@ -467,7 +467,7 @@ int _sbufsub(sbuf src, sbuf* dst, sbuf sub_src, sbuf sub_dst)
 bool _sbufeq(sbuf item1, sbuf item2)
 {
 	if ( item1.length != item2.length ) return false;
-	for (int i = 0; i < item1.length; i++) {
+	for (int i = 0; i < item1.length; ++i) {
 		if (item1.data[i] != item2.data[i]) return false;
 	}
 	return true;
@@ -767,9 +767,7 @@ sbuf_size_t _sbufcount(sbuf obj, ...)
 // copies data of the sized buffer `obj` to the heap and returns sized string with the copied data 
 sbuf sbufcopy(sbuf obj)
 {
-	sbuf res = smalloc(obj.length);
-	memcpy(res.data, obj.data, obj.length);
-	return res;
+	return (sbuf){.data = memcpy(malloc(obj.length), obj.data, obj.length), .length = obj.length};
 }
 
 char _sbufcutc(sbuf* src, sbuf set)

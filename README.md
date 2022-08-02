@@ -10,7 +10,6 @@ $ make
 ```
 
 ## Tools
-- [brbx](src/brbx.c) - BRidge Bytecode eXecution environment. Interprets operations from a `.brb` file, can also provide exhaustive debugging abilities.
 - [brbc](src/brbc.c) - BRidge Bytecode Compiler, compiles `.brb` files to native assembly, code object or executable file.
 - [brs](src/brs.c) - BRidge aSsembler, translates BRidge assembly `.vbrb` files to executable bytecode `.brb` files.
 - [brc](src/brc.c) - BRidge source code Compiler, compiles BRidge Source Code `.br` files to executable bytecode `.brb` files.

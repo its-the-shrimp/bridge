@@ -109,19 +109,33 @@ bool isPathDir_s(sbuf path)
 	return isPathDir(temp);
 }
 
+char* getFileExt(char* path)
+{
+	char* dot = strrchr(path, '.');
+	if (!dot || dot == path) return "";
+	return strcopy(dot + 1);
+}
+
+sbuf getFileExt_s(sbuf path)
+{
+	sbuf noext;
+	if (!sbufsplitr(&path, &noext, CSBUF(".")).data) return CSBUF("");
+	return path;
+}
+
 char* setFileExt(char* path, char* ext)
 {
 	sbuf src = SBUF(path);
 	sbuf noext;
 	sbufsplitr(&src, &noext, CSBUF("."));
-	return tostr(noext, SBUF(ext));
+	return *ext ? tostr(noext, CSBUF("."), SBUF(ext)) : tostr(noext);
 }
 
 sbuf setFileExt_s(sbuf path, sbuf ext)
 {
 	sbuf noext;
 	sbufsplitr(&path, &noext, CSBUF("."));
-	return sbufconcat(noext, ext);
+	return ext.length ? sbufconcat(noext, SBUF("."), ext) : sbufcopy(noext);
 }
 
 char* fileBaseName(char* path)

@@ -79,7 +79,7 @@ void assembleDataBlock(ExecEnv* env, DataBlock block, sbuf dst)
 	}
 }
 
-void initExecEnv(ExecEnv* env, Module* module, char** args)
+void initExecEnv(ExecEnv* env, Module* module, const char** args)
 {
 	env->exec_callbacks = NULL;
 	env->stack_brk = malloc(module->stack_size);
@@ -98,10 +98,10 @@ void initExecEnv(ExecEnv* env, Module* module, char** args)
 	}
 
 	env->exec_argc = 0;
-	while (args[++env->exec_argc]);
+	if (*args) while (args[++env->exec_argc]);
 	env->exec_argv = malloc(env->exec_argc * sizeof(sbuf));
 	for (int i = 0; i < env->exec_argc; i++) {
-		env->exec_argv[i] = SBUF(args[i]);
+		env->exec_argv[i] = fromstr((char*)args[i]);
 		env->exec_argv[i].length++;
 	}
 }

@@ -4,22 +4,7 @@ SRC = src
 UTILFLAGS = -I include -L $(LIB) -lbrb -O3 -Wno-nullability-completeness -ferror-limit=1
 GLOBAL = /usr/local/bin
 
-main: $(BIN) $(LIB)/libbrb.dylib $(GLOBAL)/brs $(GLOBAL)/brbx $(GLOBAL)/brbc $(GLOBAL)/brc $(GLOBAL)/brbd
-
-$(GLOBAL)/brs: $(BIN)/brs
-ifeq ("$(wildcard $(GLOBAL)/brs)", "")
-	sudo ln -sF $(PWD)/$(BIN)/brs $(GLOBAL)/brs
-endif
-
-$(GLOBAL)/brbx: $(BIN)/brbx
-ifeq ("$(wildcard $(GLOBAL)/brbx)", "")
-	sudo ln -sF $(PWD)/$(BIN)/brbx $(GLOBAL)/brbx
-endif
-
-$(GLOBAL)/brbc: $(BIN)/brbc
-ifeq ("$(wildcard $(GLOBAL)/brbc)", "")
-	sudo ln -sF $(PWD)/$(BIN)/brbc $(GLOBAL)/brbc
-endif
+main: $(BIN)/* $(LIB)/libbrb.dylib $(GLOBAL)/brc $(GLOBAL)/brbd
 
 $(GLOBAL)/brc: $(BIN)/brc
 ifeq ("$(wildcard $(GLOBAL)/brc)", "")
@@ -35,15 +20,6 @@ $(LIB)/libbrb.dylib: src/brb_*.c include/*
 	cc -c $(SRC)/brb_*.c -Wno-initializer-overrides -I include -ferror-limit=1
 	cc -shared -o $(LIB)/libbrb.dylib brb_*.o
 	rm brb_*.o
-
-$(BIN)/brs: src/brs.c
-	cc $(UTILFLAGS) -o $(BIN)/brs $(SRC)/brs.c
-
-$(BIN)/brbx: src/brbx.c
-	cc $(UTILFLAGS) -o $(BIN)/brbx $(SRC)/brbx.c
-
-$(BIN)/brbc: src/brbc.c
-	cc $(UTILFLAGS) -o $(BIN)/brbc $(SRC)/brbc.c
 
 $(BIN)/brc: src/brc.c
 	cc $(UTILFLAGS) -Wno-initializer-overrides -o $(BIN)/brc $(SRC)/brc.c
