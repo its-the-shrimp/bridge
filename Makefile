@@ -4,11 +4,11 @@ SRC = src
 UTILFLAGS = -I include -L $(LIB) -lbrb -O3 -Wno-nullability-completeness -ferror-limit=1
 GLOBAL = /usr/local/bin
 
-main: $(BIN)/* $(LIB)/libbrb.dylib $(GLOBAL)/brc $(GLOBAL)/brbd
+main: $(BIN)/* $(LIB)/libbrb.dylib $(GLOBAL)/bridge $(GLOBAL)/brbd
 
-$(GLOBAL)/brc: $(BIN)/brc
-ifeq ("$(wildcard $(GLOBAL)/brc)", "")
-	sudo ln -sF $(PWD)/$(BIN)/brc $(GLOBAL)/brc
+$(GLOBAL)/bridge: $(BIN)/bridge
+ifeq ("$(wildcard $(GLOBAL)/bridge)", "")
+	sudo ln -sF $(PWD)/$(BIN)/bridge $(GLOBAL)/bridge
 endif
 
 $(GLOBAL)/brbd: $(BIN)/brbd
@@ -21,8 +21,8 @@ $(LIB)/libbrb.dylib: src/brb_*.c include/*
 	cc -shared -o $(LIB)/libbrb.dylib brb_*.o
 	rm brb_*.o
 
-$(BIN)/brc: src/brc.c
-	cc $(UTILFLAGS) -Wno-initializer-overrides -o $(BIN)/brc $(SRC)/brc.c
+$(BIN)/bridge: src/brc.c
+	cc $(UTILFLAGS) -Wno-initializer-overrides -o $(BIN)/bridge $(SRC)/brc.c
 
 $(BIN)/brbd: src/brbd.c
 	cc $(UTILFLAGS) -o $(BIN)/brbd $(SRC)/brbd.c

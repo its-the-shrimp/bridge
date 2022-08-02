@@ -10,9 +10,7 @@ $ make
 ```
 
 ## Tools
-- [brbc](src/brbc.c) - BRidge Bytecode Compiler, compiles `.brb` files to native assembly, code object or executable file.
-- [brs](src/brs.c) - BRidge aSsembler, translates BRidge assembly `.vbrb` files to executable bytecode `.brb` files.
-- [brc](src/brc.c) - BRidge source code Compiler, compiles BRidge Source Code `.br` files to executable bytecode `.brb` files.
+- [bridge](src/bridge.c) - The main tool for everything about the language; It's a compiler, assembler and interpreter, all in one
 - [brbd](src/brbd.c) - BRidge Bytecode Debugger, a tool for debugging BRB modules
 
 ## Documentation
