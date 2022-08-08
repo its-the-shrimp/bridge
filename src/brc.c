@@ -405,7 +405,6 @@ static inline Expr* getSubexpr(Expr* expr, int id)
 
 static inline int getSubexprsCount(Expr* expr)
 {
-	assert(expr_flags[expr->type] & EXPR_VARIADIC, "attempted to get the subexpressions count of a non-variadic expression %d", expr->type);
 	return ExprChain_length(*getSubexprs(expr));
 }
 
@@ -2267,8 +2266,8 @@ bool parseKwFor(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc,
 		.type = EXPR_WHILE,
 		.loc = token.loc,
 		.block = dst,
-		.arg1 = malloc(sizeof(Expr)),
-		.arg2 = malloc(sizeof(Expr))
+		.arg1 = calloc(1, sizeof(Expr)),
+		.arg2 = calloc(1, sizeof(Expr))
 	});
 	parseExpr(ast, loop->arg1, dst, dst, proc, EXPRTERM_FULL | EXPRTYPE_EVALUATABLE | EXPRTYPE_LOGICAL);
 	fetchToken(ast->preprocessor);
@@ -2391,7 +2390,7 @@ bool parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 		}
 		if (flags & EXPRTYPE_EVALUATABLE && !(flags & (EXPRTERM_BRACKET | EXPRTERM_ARG))) raiseUnbracketedAssignExprError(ast, token.loc);
 
-		dst->arg2 = malloc(sizeof(Expr));
+		dst->arg2 = calloc(1, sizeof(Expr));
 		Token entry_loc = peekToken(ast->preprocessor);
 		parseExpr(ast, dst->arg2, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
 	}
@@ -4741,7 +4740,6 @@ void handleExecInt(int sig)
 
 int main(int argc, char* argv[])
 {
-	//assert(false, "TODO: extract different parts of main function into separate functions\n");
 	TYPE_STR_LITERAL.kind = KIND_PTR;
 	TypeDef str_lit_base = (TypeDef){ .kind = KIND_INT, .size = 1 };
 	TYPE_STR_LITERAL.base = &str_lit_base;

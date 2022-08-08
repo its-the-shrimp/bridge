@@ -188,6 +188,7 @@ void sfree(sbuf* obj);
 
 #if defined(SBUF_IMPLEMENTATION) && !defined(_SBUF_IMPL_LOCK)
 #define _SBUF_IMPL_LOCK
+#include <errno.h>
 
 // concatenates the buffers provided as variadic arguments in a newly allocated buffer, returns the resulting buffer
 sbuf _sbufconcat(int _, ...)
@@ -873,7 +874,7 @@ bool srealloc(sbuf* obj, sbuf_size_t new_length)
 {
 	sbuf_size_t prevlen = obj->length;
 	void* new;
-	if ((new = realloc(obj->data, new_length))) {
+	if ((new = realloc(obj->data, new_length)) || new_length == 0) {
 		obj->length = new_length;
 		obj->data = new;
 		return true;

@@ -534,7 +534,8 @@ OpLoader op_loaders[] = {
 	[OP_MOD] = &load2RegImmOp,
 	[OP_MODS] = &load2RegImmOp,
 	[OP_MODR] = &load3RegOp,
-	[OP_MODSR] = &load3RegOp
+	[OP_MODSR] = &load3RegOp,
+	[OP_ARG] = &loadOpVar
 };
 static_assert(N_OPS == sizeof(op_loaders) / sizeof(op_loaders[0]), "Some BRB operations have unmatched loaders");
 

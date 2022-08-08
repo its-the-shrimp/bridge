@@ -405,7 +405,8 @@ const OpWriter op_writers[] = {
 	[OP_MOD] = &write2RegImmOp,
 	[OP_MODS] = &write2RegImmOp,
 	[OP_MODR] = &write3RegOp,
-	[OP_MODSR] = &write3RegOp
+	[OP_MODSR] = &write3RegOp,
+	[OP_ARG] = &writeOpVar
 };
 static_assert(N_OPS == sizeof(op_writers) / sizeof(op_writers[0]), "Some BRB operations have unmatched writers");
 

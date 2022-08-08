@@ -85,6 +85,7 @@ void initExecEnv(ExecEnv* env, Module* module, const char** args)
 	env->stack_brk = malloc(module->stack_size);
 	env->exitcode = 0;
 	env->op_id = 0;
+	env->calling_proc = false;
 	env->registers = calloc(N_REGS, sizeof(uint64_t));
 	env->prev_stack_head = env->stack_head = env->stack_brk + module->stack_size;
 
@@ -154,42 +155,42 @@ bool handleExitSyscall(ExecEnv* env, Module* module)
 bool handleWriteSyscall(ExecEnv* env, Module* module)
 {
 	env->registers[0] = write(env->registers[0], (char*)env->registers[1], env->registers[2]);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
 bool handleArgcSyscall(ExecEnv* env, Module* module)
 {
 	env->registers[0] = env->exec_argc;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
 bool handleArgvSyscall(ExecEnv* env, Module* module)
 {
 	env->registers[0] = inRange(env->registers[0], 0, env->exec_argc) ? (uint64_t)env->exec_argv[env->registers[0]].data : 0;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
 bool handleReadSyscall(ExecEnv* env, Module* module)
 {
 	env->registers[0] = read(env->registers[0], (void*)env->registers[1], env->registers[2]);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
 bool handleGetErrnoSyscall(ExecEnv* env, Module* module)
 {
 	env->registers[0] = errno;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
 bool handleSetErrnoSyscall(ExecEnv* env, Module* module)
 {
 	errno = env->registers[0];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -226,7 +227,7 @@ bool handleCondition(ExecEnv* env, ConditionCode cond_id) {
 
 bool handleNop(ExecEnv* env, Module* module)
 {
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -240,7 +241,7 @@ bool handleOpSet(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -248,7 +249,7 @@ bool handleOpSetr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -256,7 +257,7 @@ bool handleOpSetd(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = (uint64_t)env->seg_data.data[op.symbol_id].data;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -264,7 +265,7 @@ bool handleOpSetb(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = builtins[op.symbol_id].value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -272,7 +273,7 @@ bool handleOpAdd(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] + op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -280,7 +281,7 @@ bool handleOpAddr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] + env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -288,7 +289,7 @@ bool handleOpSub(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] - op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -296,7 +297,7 @@ bool handleOpSubr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] - env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -316,7 +317,7 @@ bool handleOpCmp(ExecEnv* env, Module* module)
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[CONDREG1_ID] = env->registers[op.src_reg];
 	env->registers[CONDREG2_ID] = op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -325,7 +326,7 @@ bool handleOpCmpr(ExecEnv* env, Module* module)
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[CONDREG1_ID] = env->registers[op.src_reg];
 	env->registers[CONDREG2_ID] = env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -333,7 +334,7 @@ bool handleOpAnd(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] & op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -341,7 +342,7 @@ bool handleOpAndr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] & env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -349,7 +350,7 @@ bool handleOpOr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] | op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -357,7 +358,7 @@ bool handleOpOrr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] | env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -365,7 +366,7 @@ bool handleOpNot(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = ~env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -373,7 +374,7 @@ bool handleOpXor(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] ^ op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -381,7 +382,7 @@ bool handleOpXorr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] ^ env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -389,7 +390,7 @@ bool handleOpShl(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] << op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -397,7 +398,7 @@ bool handleOpShlr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] << env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -405,7 +406,7 @@ bool handleOpShr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >> op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -413,7 +414,7 @@ bool handleOpShrr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] >> env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -421,7 +422,7 @@ bool handleOpShrs(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >> op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -429,7 +430,7 @@ bool handleOpShrsr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] >> env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -464,7 +465,7 @@ bool handleOpLd64(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = *(int64_t*)env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -472,7 +473,7 @@ bool handleOpStr64(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int64_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -480,7 +481,7 @@ bool handleOpLd32(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = *(int32_t*)env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -488,7 +489,7 @@ bool handleOpStr32(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int32_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -496,7 +497,7 @@ bool handleOpLd16(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = *(int16_t*)env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -504,7 +505,7 @@ bool handleOpStr16(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int16_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -512,7 +513,7 @@ bool handleOpLd8(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = *(int8_t*)env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -520,7 +521,7 @@ bool handleOpStr8(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int8_t*)env->registers[op.dst_reg] = env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -528,7 +529,7 @@ bool handleOpVar(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->stack_head -= op.new_var_size;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -536,7 +537,7 @@ bool handleOpSetv(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->prev_stack_head - op.symbol_id;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -544,7 +545,7 @@ bool handleOpMul(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] * (uint64_t)op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -552,7 +553,7 @@ bool handleOpMulr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] * env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -560,7 +561,7 @@ bool handleOpDiv(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] / (uint64_t)op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -568,7 +569,7 @@ bool handleOpDivr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] / env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -576,7 +577,7 @@ bool handleOpDivs(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] / op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -584,7 +585,7 @@ bool handleOpDivsr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] / (int64_t)env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -593,7 +594,7 @@ bool handleOpLdv(ExecEnv* env, Module* module)
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = 0;
 	memcpy(env->registers + op.dst_reg, env->prev_stack_head - op.symbol_id, op.var_size);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -601,7 +602,7 @@ bool handleOpStrv(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	memcpy(env->prev_stack_head - op.symbol_id, env->registers + op.src_reg, op.var_size);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -611,7 +612,7 @@ bool handleOpPopv(ExecEnv* env, Module* module)
 	env->registers[op.dst_reg] = 0;
 	memcpy(env->registers + op.dst_reg, env->stack_head, op.var_size);
 	env->stack_head += op.var_size;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -619,7 +620,7 @@ bool handleOpPushv(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	memcpy((env->stack_head -= op.var_size), env->registers + op.src_reg, op.var_size);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -627,14 +628,14 @@ bool handleOpAtf(ExecEnv* env, Module* module)
 {
 	env->src_path = module->seg_exec.data[env->op_id].mark_name;
 	env->src_line = 0;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
 bool handleOpAtl(ExecEnv* env, Module* module)
 {
 	env->src_line = module->seg_exec.data[env->op_id].symbol_id;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -642,7 +643,7 @@ bool handleOpSetc(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = handleCondition(env, op.cond_arg);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -650,7 +651,7 @@ bool handleOpDelnv(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->stack_head += op.symbol_id;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -658,7 +659,7 @@ bool handleOpLd64S(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int64_t*)(env->registers + op.dst_reg) = *(int64_t*)env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -666,7 +667,7 @@ bool handleOpLd32S(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int64_t*)(env->registers + op.dst_reg) = *(int32_t*)env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -674,7 +675,7 @@ bool handleOpLd16S(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int64_t*)(env->registers + op.dst_reg) = *(int16_t*)env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -682,7 +683,7 @@ bool handleOpLd8S(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int64_t*)(env->registers + op.dst_reg) = *(int8_t*)env->registers[op.src_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -694,7 +695,7 @@ bool handleOpLdvs(ExecEnv* env, Module* module)
 	if (op.var_size < 8 ? env->registers[op.dst_reg] & (1LL << (op.var_size * 8 - 1)) : false) {
 		env->registers[op.dst_reg] |= ~byteMask(op.var_size);
 	}
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -702,7 +703,7 @@ bool handleOpSx32(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int64_t*)(env->registers + op.dst_reg) = *(int32_t*)(env->registers + op.src_reg);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -710,7 +711,7 @@ bool handleOpSx16(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int64_t*)(env->registers + op.dst_reg) = *(int16_t*)(env->registers + op.src_reg);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -718,7 +719,7 @@ bool handleOpSx8(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	*(int64_t*)(env->registers + op.dst_reg) = *(int8_t*)(env->registers + op.src_reg);
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -726,7 +727,7 @@ bool handleOpMod(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] % op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -734,7 +735,7 @@ bool handleOpMods(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] % (int64_t)op.value;
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -742,7 +743,7 @@ bool handleOpModr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = env->registers[op.src_reg] % env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -750,7 +751,7 @@ bool handleOpModsr(ExecEnv* env, Module* module)
 {
 	Op op = module->seg_exec.data[env->op_id];
 	env->registers[op.dst_reg] = (int64_t)env->registers[op.src_reg] % (int64_t)env->registers[op.src2_reg];
-	env->op_id++;
+	env->op_id += 1;
 	return false;
 }
 
@@ -833,7 +834,8 @@ ExecHandler op_handlers[] = {
 	[OP_MOD] = &handleOpMod,
 	[OP_MODS] = &handleOpMods,
 	[OP_MODR] = &handleOpModr,
-	[OP_MODSR] = &handleOpModsr
+	[OP_MODSR] = &handleOpModsr,
+	[OP_ARG] = &handleNop
 };
 static_assert(N_OPS == sizeof(op_handlers) / sizeof(op_handlers[0]), "Some BRB operations have unmatched execution handlers");
 
@@ -842,7 +844,7 @@ void execOp(ExecEnv* env, Module* module)
 	Op* op = module->seg_exec.data + env->op_id;
 	if (op->cond_id) {
 		if (!handleCondition(env, op->cond_id)) {
-			env->op_id++;
+			env->op_id += 1;
 			return;
 		}
 	}
@@ -860,7 +862,7 @@ void _execModule(ExecEnv* env, Module* module, volatile bool* interruptor)
 		register Op* op = module->seg_exec.data + env->op_id;
 		if (op->cond_id) {
 			if (!handleCondition(env, op->cond_id)) {
-				env->op_id++;
+				env->op_id += 1;
 				continue;
 			}
 		}
@@ -876,7 +878,7 @@ void _execModuleWithCallbacks(ExecEnv* env, Module* module, volatile bool* inter
 		Op* op = module->seg_exec.data + env->op_id;
 		if (op->cond_id) {
 			if (!handleCondition(env, op->cond_id)) {
-				env->op_id++;
+				env->op_id += 1;
 				continue;
 			}
 		}

@@ -15,7 +15,7 @@ T##Array CONCAT(_lc,__LINE__)=(array);for(T*item=CONCAT(_lc,__LINE__).data;item-
 #define arrayRevForeach(T, item, array) \
 T##Array CONCAT(_lc,__LINE__)=(array);for(T*item=CONCAT(_lc,__LINE__).data+CONCAT(_lc,__LINE__).length-1;item!=CONCAT(_lc,__LINE__).data;--item)
 #define chainForeach(T, item, chain) \
-T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&CONCAT(_lc,__LINE__).start->value;item!=&(CONCAT(_lc,__LINE__).end->next->value);item=&(((T##Node*)((void**)item-1))->next->value))
+T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&CONCAT(_lc,__LINE__).start->value;item!=&CONCAT(_lc,__LINE__).end->next->value;item=&((T##Node*)((void**)item-1))->next->value)
 
 #define repeat(n) for(long CONCAT(_rep, __LINE__) = (n); CONCAT(_rep, __LINE__) > 0; --CONCAT(_rep, __LINE__))
 
@@ -26,6 +26,7 @@ T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&
 	typedef struct { int length; t* data; } t##Array; \
 	static t##Array t##Array_new(int n, ...); \
 	static t* t##Array_append(t##Array* array, t object); \
+	static t* t##Array_prepend(t##Array* array, t object); \
 	static t* t##Array_extend(t##Array* array, t##Array sub); \
 	static t t##Array_get(t##Array array, int index); \
 	static t* t##Array_getref(t##Array array, int index); \
@@ -60,6 +61,14 @@ T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&
 		array->data[array->length++] = object; \
 		return arrayhead(*array); \
 	} \
+	static t* t##Array_prepend(t##Array* array, t object) { \
+		void* res = realloc(array->data, array->length * sizeof(t) + sizeof(t)); \
+		if (!res) return NULL; \
+		memmove(res + sizeof(t), res, array->length++ * sizeof(t)); \
+		array->data = res; \
+		array->data[0] = object; \
+		return &array->data[0]; \
+	} \
 	static t* t##Array_extend(t##Array* array, t##Array sub) { \
 		void* res = realloc(array->data, (array->length + sub.length) * sizeof(t)); \
 		if (!res) return NULL; \
@@ -89,7 +98,7 @@ T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&
 			array->data[i] = array->data[i + n]; \
 		} \
 		void* res = realloc(array->data, (array->length - n) * sizeof(t)); \
-		if (res) { \
+		if (res || array->length == n) { \
 			array->data = res; \
 			array->length -= n; \
 			return true; \
@@ -256,17 +265,17 @@ T##Chain CONCAT(_lc,__LINE__)=(chain);if(CONCAT(_lc,__LINE__).start)for(T*item=&
 	} \
 	static t t##Chain_pop(t##Chain* chain, int index) { \
 		t##Node* node = t##Chain_getnode(*chain, index); \
-		if (node == chain->start) { chain->start = chain->start->next; } \
-		if (node == chain->end) { chain->end = chain->end->prev; } \
-		if (node->prev) { node->prev->next = node->next; } \
-		if (node->next) { node->next->prev = node->prev; } \
+		if (node == chain->start) chain->start = chain->start->next; \
+		if (node == chain->end) chain->end = chain->end->prev; \
+		if (node->prev) node->prev->next = node->next; \
+		if (node->next) node->next->prev = node->prev; \
 		t res = node->value; \
 		free(node); \
 		return res; \
 	} \
 	static int t##Chain_length(t##Chain chain) { \
 		int res = 0; \
-		chainForeach(t, item, chain) {res++;} \
+		chainForeach(t, item, chain) res += 1; \
 		return res; \
 	} \
 	static bool t##Chain_clear(t##Chain* chain) { \

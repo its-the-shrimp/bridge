@@ -813,10 +813,10 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 	if (!input->buffer.length) delInput(obj, input);
 }
 
-Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pending)
+Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const queue)
 {
 	Token res = {0};
-	res = TokenArray_pop(&obj->pending, 0);
+	res = TokenArray_pop(queue, 0);
 	static_assert(N_TOKEN_TYPES == 6, "not all token types are handled");
 	switch (res.type) {
 		case TOKEN_NONE: break;
@@ -877,14 +877,11 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pendi
 				sbuf str_literal_res = str_literal;
 				if (obj->flags & BRP_ESC_STR_LITERALS) str_literal_res = sbufunesc(str_literal, NULL);
 
-				TokenArray_append(
-					&obj->pending,
-					(Token){
-						.type = TOKEN_STRING,
-						.loc = input->cur_loc,
-						.string = str_literal_res
-					}
-				);
+				TokenArray_append(queue, (Token){
+					.type = TOKEN_STRING,
+					.loc = input->cur_loc,
+					.string = str_literal_res
+				});
 				input->cur_loc.colno += sbufutf8len(str_literal) + DQUOTE.length;
 			} else if (delim_id == obj->_quote_symbol_id) {
 				sbuf char_literal;
@@ -900,24 +897,18 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pendi
 				sbufunesc(char_literal, &unesc);
 				if (IS_BIG_ENDIAN) reverseByteOrder(unesc.data, unesc.length);
 
-				TokenArray_append(
-					&obj->pending,
-					(Token){
-						.type = TOKEN_INT,
-						.loc = input->cur_loc,
-						.value = *(int64_t*)unesc_buffer
-					}
-				);
+				TokenArray_append(queue, (Token){
+					.type = TOKEN_INT,
+					.loc = input->cur_loc,
+					.value = *(int64_t*)unesc_buffer
+				});
 				input->cur_loc.colno += sbufutf8len(char_literal) + QUOTE.length;
 			} else if (!isSymbolSpecHidden(obj->symbols[delim_id])) {
-				TokenArray_append(
-					&obj->pending,
-					(Token){
-						.type = TOKEN_SYMBOL,
-						.loc = input->cur_loc,
-						.symbol_id = delim_id
-					}
-				);
+				TokenArray_append(queue, (Token){
+					.type = TOKEN_SYMBOL,
+					.loc = input->cur_loc,
+					.symbol_id = delim_id
+				});
 			} 
 		}
 	} else if (delim_id >= 0) {
@@ -978,25 +969,20 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const pendi
 
 Token peekToken(BRP* obj)
 {
-	Token res = {0};
 	if (obj->pending.length) {
 		return obj->pending.data[0];
 	} else {
-		res = fetchToken(obj);
+		Token res = fetchToken(obj);
 		if (obj->pending.length) {
-			Token swapped = obj->pending.data[0];
-			obj->pending.data[0] = res;
-			TokenArray_append(&obj->pending, swapped);
-		} else {
-			TokenArray_append(&obj->pending, res);
-		}
+			TokenArray_append(&obj->pending, obj->pending.data[0]);
+			return (obj->pending.data[0] = res);
+		} else return *TokenArray_append(&obj->pending, res);
 	}
-	return res;
 }
 
 bool unfetchToken(BRP* obj, Token token)
 {
-	return TokenArray_insert(&obj->pending, (TokenArray){ .data = &token, .length = 1 }, 0);
+	return TokenArray_prepend(&obj->pending, token) != NULL;
 }
 
 void fprintTokenLoc(FILE* fd, TokenLoc loc)
@@ -1194,7 +1180,7 @@ BRP* initBRP(BRP* obj, BRPErrorHandler handler, char flags)
 
 void delBRP(BRP* obj)
 {
-	//free(obj->keywords);
+	free(obj->keywords);
 	free(obj->symbols);
 	free(obj->hidden_symbols);
 	TokenArray_clear(&obj->pending);

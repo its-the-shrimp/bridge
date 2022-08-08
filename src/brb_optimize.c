@@ -15,6 +15,7 @@ typedef struct {
 	SymbolArray used_db;
 	SymbolArray vars;
 	int frame_size;
+	int frame_start;
 	FILE* temp_out;
 } OptimizerCtx;
 
@@ -331,6 +332,7 @@ void optimizeOpEndproc(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	fprintf(ctx->temp_out, "endproc\n");
 	ctx->frame_size = 0;
+	ctx->frame_start = 0;
 	SymbolArray_clear(&ctx->vars);
 }
 
@@ -385,7 +387,7 @@ void printVar(OptimizerCtx* ctx, int32_t offset, int32_t var_size)
 		return;
 	}
 
-	int32_t acc = 0;
+	int32_t acc = ctx->frame_start;
 	arrayForeach (Symbol, cur_var_size, ctx->vars) {
 		if (inRange(offset, acc, acc + *cur_var_size)) break;
 		acc += *cur_var_size;
@@ -715,7 +717,20 @@ void optimizeOpModsr(Module* module, OptimizerCtx* ctx, Op* op)
 	}
 }
 
-static Optimizer optimizers[N_OPS] = {
+void optimizeOpArg(Module* module, OptimizerCtx* ctx, Op* op)
+{
+	if (!ctx->frame_start) {
+		ctx->frame_start = -STACKFRAME_SIZE;
+		ctx->frame_size += STACKFRAME_SIZE;
+		SymbolArray_prepend(&ctx->vars, STACKFRAME_SIZE);
+	}
+	fprintf(ctx->temp_out, "\targ \".v%d\" %lld\n", ctx->frame_start, op->new_var_size);
+	SymbolArray_prepend(&ctx->vars, op->new_var_size);
+	ctx->frame_start -= op->new_var_size;
+	ctx->frame_size += op->new_var_size;
+}
+
+static Optimizer optimizers[] = {
 	[OP_NONE] = optimizeNop,
 	[OP_END] = optimizeOpEnd,
 	[OP_MARK] = optimizeOpMark,
@@ -784,8 +799,10 @@ static Optimizer optimizers[N_OPS] = {
 	[OP_MOD] = optimizeOpMod,
 	[OP_MODR] = optimizeOpModr,
 	[OP_MODS] = optimizeOpMods,
-	[OP_MODSR] = optimizeOpModsr
+	[OP_MODSR] = optimizeOpModsr,
+	[OP_ARG] = optimizeOpArg
 };
+static_assert(N_OPS == sizeof(optimizers) / sizeof(optimizers[0]), "not all BRB operations have optimizers defined");
 
 void optimizeModule(Module* module, const char* search_paths[], FILE* output, unsigned int level)
 {
@@ -874,6 +891,7 @@ void optimizeModule(Module* module, const char* search_paths[], FILE* output, un
 	if (err.code) {
 		eprintf("unexpected internal error during optimization:\n");
 		printVBRBError(stderr, err);
+		putsbufln(temp_buf);
 		abort();
 	}
 

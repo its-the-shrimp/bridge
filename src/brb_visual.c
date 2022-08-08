@@ -85,6 +85,7 @@ typedef enum {
 	KW_MODS,
 	KW_MODR,
 	KW_MODSR,
+	KW_ARG,
 	KW_SYS_NONE,
 	KW_SYS_EXIT,
 	KW_SYS_WRITE,
@@ -114,7 +115,7 @@ typedef enum {
 	KW_ZERO,
 	N_VBRB_KWS
 } VBRBKeyword;
-static_assert(N_OPS == 69, "Some BRB operations have unmatched keywords");
+static_assert(N_OPS == 70, "Some BRB operations have unmatched keywords");
 static_assert(N_SYS_OPS == 8, "there might be system ops with unmatched keywords");
 
 typedef struct {
@@ -196,7 +197,7 @@ void printVBRBError(FILE* dst, VBRBError err) {
 			 	fprintf(dst, "operation `%.*s` cannot be conditional\n", unpack(opNames[err.op_type]));
 				break;
 			case VBRB_ERR_UNKNOWN_VAR_NAME:
-				fprintf(dst, "unknown variable name %s\n", getTokenWord(err.prep, err.loc));
+				fprintf(dst, "unknown variable name %.*s\n", unpack(err.loc.string));
 				break;
 			case VBRB_ERR_UNCLOSED_PROC:
 				fprintf(dst, "procedure must start in the global scope, i.e. not inside another procedure\n");
@@ -276,6 +277,7 @@ typedef struct {
 	ExecMarkArray proc_gotos;
 	ExecMarkArray proc_marks;
 	VarArray vars;
+	int frame_start;
 	ExecMarkArray global_gotos;
 	ExecMarkArray global_marks;
 	VarArray global_vars;
@@ -285,10 +287,61 @@ typedef struct {
 } CompilerCtx;
 typedef VBRBError (*OpCompiler) (CompilerCtx*, Module*);
 
+VBRBError getIntArg(CompilerCtx* ctx, Token src, uint64_t* dst, char op_type, char arg_id, bool for_data_block)
+{
+	if (src.type != TOKEN_INT) return (VBRBError){
+		.prep = ctx->prep,
+		.code = for_data_block ? VBRB_ERR_INVALID_DATA_BLOCK_FMT : VBRB_ERR_INVALID_ARG,
+		.loc = src,
+		.op_type = op_type,
+		.arg_id = arg_id,
+		.expected_token_type = TOKEN_INT
+	};
+	*dst = src.value;
+	return (VBRBError){ .prep = ctx->prep };
+}
+
+VBRBError getIdent_s(CompilerCtx* ctx, Token src, sbuf* ident_p, char op_type, char arg_id, bool for_data_block)
+{
+	if (src.type != TOKEN_STRING) return (VBRBError){
+		.prep = ctx->prep,
+		.code = for_data_block ? VBRB_ERR_INVALID_DATA_BLOCK_FMT : VBRB_ERR_INVALID_ARG,
+		.loc = src,
+		.op_type = op_type,
+		.arg_id = arg_id,
+		.expected_token_type = TOKEN_WORD
+	};
+	if (memchr(src.string.data, '\0', src.string.length))
+		return (VBRBError){
+			.prep = ctx->prep,
+			.code = VBRB_ERR_INVALID_NAME,
+			.loc = src
+		};
+	
+	*ident_p = src.string;
+	return (VBRBError){.prep = ctx->prep};
+}
+
+VBRBError getIdent(CompilerCtx* ctx, Token src, char** ident_p, char op_type, char arg_id, bool for_data_block)
+{
+	sbuf res;
+	VBRBError err = getIdent_s(ctx, src, &res, op_type, arg_id, for_data_block);
+	if (err.code) {
+		sfree(&res);
+		return err;
+	}
+	*ident_p = tostr(res);
+	sfree(&res);
+	return (VBRBError){.prep = ctx->prep};
+}
+
+VBRBError getSubmodule(CompilerCtx* ctx, Token src, int32_t* submodule_id_p, char op_type, char arg_id, bool for_data_block); // TODO
+
 VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool is_mutable)
 {
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `getDataPiece`");
 
+	VBRBError err;
 	Token spec = fetchToken(ctx->prep);
 	if (spec.type == TOKEN_STRING) {
 		piece->data = spec.string;
@@ -311,17 +364,9 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 		case KW_INT16:
 		case KW_INT32:
 		case KW_INT64:
-			arg = fetchToken(ctx->prep);
 			piece->type = spec.keyword_id - KW_INT16 + PIECE_INT16;
-			if (arg.type != TOKEN_INT) return (VBRBError){
-				.prep = ctx->prep,
-				.code = VBRB_ERR_INVALID_DATA_BLOCK_FMT,
-				.loc = arg,
-				.data_piece_type = piece->type,
-				.arg_id = 0,
-				.expected_token_type = TOKEN_INT
-			};
-			piece->integer = arg.value;
+			err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&piece->integer, piece->type, 0, true);
+			if (err.code) return err;
 			break;
 		case KW_DB_ADDR:
 			arg = fetchToken(ctx->prep);
@@ -356,34 +401,13 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 				};
 			}
 
-			arg = fetchToken(ctx->prep);
-			if (arg.type != TOKEN_STRING) return (VBRBError){
-				.prep = ctx->prep,
-				.code = VBRB_ERR_INVALID_DATA_BLOCK_FMT,
-				.loc = arg,
-				.data_piece_type = piece->type,
-				.arg_id = 1,
-				.expected_token_type = TOKEN_STRING
-			};
-			if (memchr(arg.string.data, '\0', arg.string.length)) return (VBRBError){
-				.prep = ctx->prep,
-				.code = VBRB_ERR_INVALID_NAME,
-				.loc = arg
-			};
-			piece->mark_name = arg.string.data;
+			err = getIdent(ctx, fetchToken(ctx->prep), &piece->mark_name, piece->type, 1, true);
+			if (err.code) return err;
 			break;
 		case KW_ZERO:
 			piece->type = PIECE_ZERO;
-			arg = fetchToken(ctx->prep);
-			if (arg.type != TOKEN_INT) return (VBRBError){
-				.prep = ctx->prep,
-				.code = VBRB_ERR_INVALID_DATA_BLOCK_FMT,
-				.loc = arg,
-				.data_piece_type = piece->type,
-				.arg_id = 0,
-				.expected_token_type = TOKEN_INT
-			};
-			piece->n_bytes = arg.value;
+			err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&piece->n_bytes, piece->type, 0, true);
+			if (err.code) return err;
 			break;
 		default:
 			return (VBRBError){
@@ -440,20 +464,6 @@ VBRBError getCondArg(CompilerCtx* ctx, Token src, uint8_t* dst, char op_type, ch
 	return (VBRBError){0};
 }
 
-VBRBError getIntArg(CompilerCtx* ctx, Token src, uint64_t* dst, char op_type, char arg_id)
-{
-	if (src.type != TOKEN_INT) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = src,
-		.op_type = op_type,
-		.arg_id = arg_id,
-		.expected_token_type = TOKEN_INT
-	};
-	*dst = src.value;
-	return (VBRBError){ .prep = ctx->prep };
-}
-
 VBRBError getVarArg(CompilerCtx* ctx, Token src, int32_t* offset_p, uint8_t* var_size_p, char op_type, char arg_id)
 {
 	int32_t stub_offset;
@@ -461,22 +471,10 @@ VBRBError getVarArg(CompilerCtx* ctx, Token src, int32_t* offset_p, uint8_t* var
 	if (!offset_p) offset_p = &stub_offset;
 	if (!var_size_p) var_size_p = &stub_var_size;
 
-	if (src.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = src,
-		.op_type = op_type,
-		.arg_id = arg_id,
-		.expected_token_type = TOKEN_WORD
-	};
-	if (memchr(src.string.data, '\0', src.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = src
-		};
+	VBRBError err = getIdent_s(ctx, src, &src.string, op_type, arg_id, false);
+	if (err.code) return err;
 	
-	*offset_p = 0;
+	*offset_p = ctx->frame_start;
 	VarArray* vars = ctx->in_proc ? &ctx->vars : &ctx->global_vars;
 	for (int i = 0; i < vars->length; ++i) {
 		if (sbufeq(vars->data[i].name, src.string)) { 
@@ -541,20 +539,8 @@ VBRBError compileOpMark(CompilerCtx* ctx, Module* dst)
 	Op* op = arrayhead(dst->seg_exec);
 
 	Token name_spec = fetchToken(ctx->prep);
-	if (name_spec.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = name_spec,
-		.op_type = OP_MARK,
-		.arg_id = 0,
-		.expected_token_type = TOKEN_STRING
-	};
-	if (memchr(name_spec.string.data, '\0', name_spec.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = name_spec
-		};
+	VBRBError err = getIdent_s(ctx, name_spec, &name_spec.string, OP_MARK, 0, false);
+	if (err.code) return err;
 
 	ExecMarkArray_append(
 		ctx->in_proc ? &ctx->proc_marks : &ctx->global_marks,
@@ -573,7 +559,7 @@ VBRBError compileRegImmOp(CompilerCtx* ctx, Module* dst)
 	if (err.code != VBRB_ERR_OK) return err;
 	op->dst_reg = dst_reg;
 
-	err = getIntArg(ctx, fetchToken(ctx->prep), &op->value, op->type, 1);
+	err = getIntArg(ctx, fetchToken(ctx->prep), &op->value, op->type, 1, false);
 	if (err.code != VBRB_ERR_OK) return err;
 
 	return (VBRBError){ .prep = ctx->prep };
@@ -631,23 +617,7 @@ VBRBError compileOpSetd(CompilerCtx* ctx, Module* dst)
 		};
 	}
 
-	Token datablock_name_spec = fetchToken(ctx->prep);
-	if (datablock_name_spec.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.op_type = OP_SETD,
-		.arg_id = 2,
-		.expected_token_type = TOKEN_STRING
-	};
-	if (memchr(datablock_name_spec.string.data, '\0', datablock_name_spec.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = datablock_name_spec
-		};
-	op->mark_name = datablock_name_spec.string.data;
-
-	return (VBRBError){ .prep = ctx->prep };
+	return getIdent(ctx, fetchToken(ctx->prep), &op->mark_name, OP_SETD, 2, false);
 }
 
 VBRBError compileOpSetb(CompilerCtx* ctx, Module* dst)
@@ -706,21 +676,12 @@ VBRBError compileOpGoto(CompilerCtx* ctx, Module* dst)
 	Op* op = arrayhead(dst->seg_exec);
 
 	Token name_spec = fetchToken(ctx->prep);
-	if (name_spec.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = name_spec,
-		.op_type = op->type,
-		.arg_id = 0,
-		.expected_token_type = TOKEN_STRING
-	};
-	if (memchr(name_spec.string.data, '\0', name_spec.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = name_spec
-		};
-	ExecMarkArray_append(ctx->in_proc ? &ctx->proc_gotos : &ctx->global_gotos, (ExecMark){ .name = name_spec, .id = dst->seg_exec.length - 1 });
+	VBRBError err = getIdent_s(ctx, name_spec, &name_spec.string, OP_GOTO, 0, false);
+	if (err.code) return err;
+	ExecMarkArray_append(
+		ctx->in_proc ? &ctx->proc_gotos : &ctx->global_gotos,
+		(ExecMark){ .name = name_spec, .id = dst->seg_exec.length - 1 }
+	);
 
 	return (VBRBError){ .prep = ctx->prep };
 }
@@ -738,7 +699,7 @@ VBRBError compile2RegImmOp(CompilerCtx* ctx, Module* dst)
 	if (err.code != VBRB_ERR_OK) return err;
 	op->src_reg = src_reg;
 
-	err = getIntArg(ctx, fetchToken(ctx->prep), &op->value, op->type, 2);
+	err = getIntArg(ctx, fetchToken(ctx->prep), &op->value, op->type, 2, false);
 	if (err.code != VBRB_ERR_OK) return err;
 
 	return (VBRBError){ .prep = ctx->prep };
@@ -795,24 +756,7 @@ VBRBError compileOpCall(CompilerCtx* ctx, Module* dst)
 		};
 	}
 
-	Token name_spec = fetchToken(ctx->prep);
-	if (name_spec.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = name_spec,
-		.op_type = OP_CALL,
-		.arg_id = 1,
-		.expected_token_type = TOKEN_WORD
-	};
-	if (memchr(name_spec.string.data, '\0', name_spec.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = name_spec
-		};
-	op->mark_name = name_spec.string.data;
-
-	return (VBRBError){ .prep = ctx->prep };
+	return getIdent(ctx, fetchToken(ctx->prep), &op->mark_name, OP_CALL, 1, false);
 }
 
 VBRBError compileOpCmp(CompilerCtx* ctx, Module* dst)
@@ -824,10 +768,7 @@ VBRBError compileOpCmp(CompilerCtx* ctx, Module* dst)
 	if (err.code != VBRB_ERR_OK) return err;
 	op->src_reg = src_reg;
 
-	err = getIntArg(ctx, fetchToken(ctx->prep), &op->value, op->type, 1);
-	if (err.code != VBRB_ERR_OK) return err;
-
-	return (VBRBError){ .prep = ctx->prep };
+	return getIntArg(ctx, fetchToken(ctx->prep), &op->value, op->type, 1, false);
 }
 
 VBRBError compileOpCmpr(CompilerCtx* ctx, Module* dst)
@@ -840,10 +781,9 @@ VBRBError compileOpCmpr(CompilerCtx* ctx, Module* dst)
 	op->src_reg = src_reg;
 
 	err = getRegIdArg(ctx, fetchToken(ctx->prep), &src2_reg, op->type, 1);
-	if (err.code != VBRB_ERR_OK) return err;
-	op->src2_reg = src2_reg;
+	if (!err.code) op->src2_reg = src2_reg;
 
-	return (VBRBError){ .prep = ctx->prep };
+	return err;
 }
 
 VBRBError compileOpProc(CompilerCtx* ctx, Module* dst)
@@ -858,24 +798,7 @@ VBRBError compileOpProc(CompilerCtx* ctx, Module* dst)
 	}
 	ctx->in_proc = true;
 
-	Token name_spec = fetchToken(ctx->prep);
-	if (name_spec.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = name_spec,
-		.op_type = op->type,
-		.arg_id = 0,
-		.expected_token_type = TOKEN_STRING
-	};
-	if (memchr(name_spec.string.data, '\0', name_spec.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = name_spec
-		};
-	op->mark_name = name_spec.string.data;
-
-	return (VBRBError){ .prep = ctx->prep };
+	return getIdent(ctx, fetchToken(ctx->prep), &op->mark_name, op->type, 0, false);
 }
 
 VBRBError compileOpEndproc(CompilerCtx* ctx, Module* dst)
@@ -915,42 +838,19 @@ VBRBError compileOpVar(CompilerCtx* ctx, Module* dst)
 {
 	Op* op = arrayhead(dst->seg_exec);
 
-	Token token = fetchToken(ctx->prep);
 	Var* new_var;
 	if (!(new_var = VarArray_append(ctx->in_proc ? &ctx->vars : &ctx->global_vars, (Var){0}))) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_NO_MEMORY,
-		.loc = token
 	};
 
-	if (token.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = token,
-		.op_type = op->type,
-		.arg_id = 0,
-		.expected_token_type = TOKEN_STRING
-	};
-	if (memchr(token.string.data, '\0', token.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = token
-		};
-	new_var->name = token.string.data;
+	VBRBError err = getIdent(ctx, fetchToken(ctx->prep), &new_var->name, op->type, 0, false);
+	if (err.code) return err;
 
-	token = fetchToken(ctx->prep);
-	if (token.type != TOKEN_INT) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = token,
-		.op_type = op->type,
-		.arg_id = 1,
-		.expected_token_type = TOKEN_INT
-	};
-	op->new_var_size = new_var->size = token.value;
+	err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&new_var->size, op->type, 1, false);
+	if (!err.code) op->new_var_size = new_var->size;
 
-	return (VBRBError){ .prep = ctx->prep };
+	return err;
 }
 
 VBRBError compileOpSetv(CompilerCtx* ctx, Module* dst)
@@ -962,10 +862,7 @@ VBRBError compileOpSetv(CompilerCtx* ctx, Module* dst)
 	if (err.code) return err;
 	op->dst_reg = dst_reg;
 
-	err = getVarArg(ctx, fetchToken(ctx->prep), &op->symbol_id, NULL, op->type, 1);
-	if (err.code) return err;
-
-	return (VBRBError){ .prep = ctx->prep };
+	return getVarArg(ctx, fetchToken(ctx->prep), &op->symbol_id, NULL, op->type, 1);
 }
 
 VBRBError compileOpLdv(CompilerCtx* ctx, Module* dst)
@@ -1043,98 +940,52 @@ VBRBError compileOpPopv(CompilerCtx* ctx, Module* dst)
 
 	uint8_t dst_reg;
 	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &dst_reg, op->type, 0);
-	if (err.code) return err;
-	op->dst_reg = dst_reg;
+	if (!err.code) op->dst_reg = dst_reg;
 
-	return (VBRBError){ .prep = ctx->prep };
+	return err;
 }
 
 VBRBError compileOpPushv(CompilerCtx* ctx, Module* dst)
 {
 	Op* op = arrayhead(dst->seg_exec);
 
-	Token token = fetchToken(ctx->prep);
 	Var* new_var;
 	if (!(new_var = VarArray_append(ctx->in_proc ? &ctx->vars : &ctx->global_vars, (Var){0}))) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_NO_MEMORY,
-		.loc = token
 	};
 
-	if (token.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = token,
-		.op_type = op->type,
-		.arg_id = 0,
-		.expected_token_type = TOKEN_WORD
-	};
-	if (memchr(token.string.data, '\0', token.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = token
-		};
-	new_var->name = token.string.data;
+	VBRBError err = getIdent(ctx, fetchToken(ctx->prep), &new_var->name, op->type, 0, false);
+	if (err.code) return err;
 
-	token = fetchToken(ctx->prep);
-	if (token.type != TOKEN_INT) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = token,
-		.op_type = op->type,
-		.arg_id = 1,
-		.expected_token_type = TOKEN_INT
-	};
-	op->var_size = new_var->size = (int8_t)token.value;
+	err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&new_var->size, op->type, 1, false);
+	if (err.code) return err;
 
-	if (token.value > 8) return (VBRBError){
+	if (new_var->size > 8) return (VBRBError){
 		.prep = ctx->prep,
 		.code = VBRB_ERR_VAR_TOO_LARGE,
 		.loc = ctx->op_token,
 		.var = *new_var
 	};
+	op->var_size = new_var->size;
 
 	uint8_t src_reg;
-	VBRBError err = getRegIdArg(ctx, fetchToken(ctx->prep), &src_reg, op->type, 2);
-	if (err.code) return err;
-	op->src_reg = src_reg;
+	err = getRegIdArg(ctx, fetchToken(ctx->prep), &src_reg, op->type, 2);
+	if (!err.code) op->src_reg = src_reg;
 
-	return (VBRBError){ .prep = ctx->prep };
+	return err;
 }
 
 VBRBError compileOpAtf(CompilerCtx* ctx, Module* dst)
 {
-	Op* op = arrayhead(dst->seg_exec);
-
-	Token src_path = fetchToken(ctx->prep);
-	if (src_path.type != TOKEN_STRING) return (VBRBError){
-		.prep = ctx->prep,
-		.code = VBRB_ERR_INVALID_ARG,
-		.loc = src_path,
-		.op_type = op->type,
-		.arg_id = 0,
-		.expected_token_type = TOKEN_STRING
-	};
-	if (memchr(src_path.string.data, '\0', src_path.string.length))
-		return (VBRBError){
-			.prep = ctx->prep,
-			.code = VBRB_ERR_INVALID_NAME,
-			.loc = src_path
-		};
-	op->mark_name = src_path.string.data;
-
-	return (VBRBError){ .prep = ctx->prep };
+	register Op* op = arrayhead(dst->seg_exec);
+	return getIdent(ctx, fetchToken(ctx->prep), &op->mark_name, op->type, 0, false);
 }
 
 VBRBError compileOpAtl(CompilerCtx* ctx, Module* dst)
 {
-	Op* op = arrayhead(dst->seg_exec);
-
-	VBRBError err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&op->symbol_id, op->type, 0);
-	if (err.code) return err;
-
-	return (VBRBError){ .prep = ctx->prep };
+	register Op* op = arrayhead(dst->seg_exec);
+	return getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&op->symbol_id, op->type, 0, false);
 }
 
 VBRBError compileOpSetc(CompilerCtx* ctx, Module* dst)
@@ -1147,10 +998,9 @@ VBRBError compileOpSetc(CompilerCtx* ctx, Module* dst)
 	op->dst_reg = dst_reg;
 
 	err = getCondArg(ctx, fetchToken(ctx->prep), &cond_arg, op->type, 1);
-	if (err.code) return err;
-	op->cond_arg = cond_arg;
+	if (!err.code) op->cond_arg = cond_arg;
 
-	return (VBRBError){ .prep = ctx->prep };
+	return err;
 }
 
 VBRBError compileOpDelnv(CompilerCtx* ctx, Module* dst)
@@ -1159,7 +1009,7 @@ VBRBError compileOpDelnv(CompilerCtx* ctx, Module* dst)
 
 	uint64_t n_vars;
 	Token token = fetchToken(ctx->prep);
-	VBRBError err = getIntArg(ctx, token, &n_vars, op->type, 0);
+	VBRBError err = getIntArg(ctx, token, &n_vars, op->type, 0, false);
 	if (err.code) return err;
 
 	VarArray* vars = ctx->in_proc ? &ctx->vars : &ctx->global_vars;
@@ -1189,76 +1039,105 @@ VBRBError compileOpRet(CompilerCtx* ctx, Module* dst)
 	return (VBRBError){ .prep = ctx->prep };
 }
 
+VBRBError compileOpArg(CompilerCtx* ctx, Module* dst)
+{
+	if (!ctx->in_proc) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_OP_OUTSIDE_OF_PROC,
+		.loc = ctx->op_token
+	};
+	if (ctx->frame_start == 0) {
+		VarArray_prepend(&ctx->vars, (Var){ .name = "", .size = STACKFRAME_SIZE });
+		ctx->frame_start = -STACKFRAME_SIZE;
+	}
+
+	Op* op = arrayhead(dst->seg_exec);
+	Var* new_var;
+	if (!(new_var = VarArray_prepend(&ctx->vars, (Var){0}))) return (VBRBError){
+		.prep = ctx->prep,
+		.code = VBRB_ERR_NO_MEMORY,
+	};
+
+	VBRBError err = getIdent(ctx, fetchToken(ctx->prep), &new_var->name, op->type, 0, false);
+	if (err.code) return err;
+
+	err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&new_var->size, op->type, 1, false);
+	if (!err.code) ctx->frame_start -= op->new_var_size = new_var->size;
+
+	return err;
+}
+
 OpCompiler op_compilers[] = {
-	[OP_NONE] = &compileNoArgOp,
-	[OP_END] = &compileNoArgOp,
-	[OP_MARK] = &compileOpMark,
-	[OP_SET] = &compileRegImmOp,
-	[OP_SETR] = &compile2RegOp,
-	[OP_SETD] = &compileOpSetd,
-	[OP_SETB] = &compileOpSetb,
-	[OP_ADD] = &compile2RegImmOp,
-	[OP_ADDR] = &compile3RegOp,
-	[OP_SUB] = &compile2RegImmOp,
-	[OP_SUBR] = &compile3RegOp,
-	[OP_SYS] = &compileOpSyscall,
-	[OP_GOTO] = &compileOpGoto,
-	[OP_CMP] = &compileOpCmp,
-	[OP_CMPR] = &compileOpCmpr,
-	[OP_AND] = &compile2RegImmOp,
-	[OP_ANDR] = &compile3RegOp,
-	[OP_OR] = &compile2RegImmOp,
-	[OP_ORR] = &compile3RegOp,
-	[OP_NOT] = &compile2RegOp,
-	[OP_XOR] = &compile2RegImmOp,
-	[OP_XORR] = &compile3RegOp,
-	[OP_SHL] = &compile2RegImmOp,
-	[OP_SHLR] = &compile3RegOp,
-	[OP_SHR] = &compile2RegImmOp,
-	[OP_SHRR] = &compile3RegOp,
-	[OP_SHRS] = &compile2RegImmOp,
-	[OP_SHRSR] = &compile3RegOp,
-	[OP_PROC] = &compileOpProc,
-	[OP_CALL] = &compileOpCall,
-	[OP_RET] = &compileOpRet,
-	[OP_ENDPROC] = &compileOpEndproc,
-	[OP_LD64] = &compile2RegOp,
-	[OP_STR64] = &compile2RegOp,
-	[OP_LD32] = &compile2RegOp,
-	[OP_STR32] = &compile2RegOp,
-	[OP_LD16] = &compile2RegOp,
-	[OP_STR16] = &compile2RegOp,
-	[OP_LD8] = &compile2RegOp,
-	[OP_STR8] = &compile2RegOp,
-	[OP_VAR] = &compileOpVar,
-	[OP_SETV] = &compileOpSetv,
-	[OP_MUL] = &compile2RegImmOp,
-	[OP_MULR] = &compile3RegOp,
-	[OP_DIV] = &compile2RegImmOp,
-	[OP_DIVR] = &compile3RegOp,
-	[OP_DIVS] = &compile2RegImmOp,
-	[OP_DIVSR] = &compile3RegOp,
-	[OP_EXTPROC] = &compileOpProc,
-	[OP_LDV] = &compileOpLdv,
-	[OP_STRV] = &compileOpStrv,
-	[OP_POPV] = &compileOpPopv,
-	[OP_PUSHV] = &compileOpPushv,
-	[OP_ATF] = &compileOpAtf,
-	[OP_ATL] = &compileOpAtl,
-	[OP_SETC] = &compileOpSetc,
-	[OP_DELNV] = &compileOpDelnv,
-	[OP_LD64S] = &compile2RegOp,
-	[OP_LD32S] = &compile2RegOp,
-	[OP_LD16S] = &compile2RegOp,
-	[OP_LD8S] = &compile2RegOp,
-	[OP_LDVS] = &compileOpLdv,
-	[OP_SX32] = &compile2RegOp,
-	[OP_SX16] = &compile2RegOp,
-	[OP_SX8] = &compile2RegOp,
-	[OP_MOD] = &compile2RegImmOp,
-	[OP_MODS] = &compile2RegImmOp,
-	[OP_MODR] = &compile3RegOp,
-	[OP_MODSR] = &compile3RegOp
+	[OP_NONE] = compileNoArgOp,
+	[OP_END] = compileNoArgOp,
+	[OP_MARK] = compileOpMark,
+	[OP_SET] = compileRegImmOp,
+	[OP_SETR] = compile2RegOp,
+	[OP_SETD] = compileOpSetd,
+	[OP_SETB] = compileOpSetb,
+	[OP_ADD] = compile2RegImmOp,
+	[OP_ADDR] = compile3RegOp,
+	[OP_SUB] = compile2RegImmOp,
+	[OP_SUBR] = compile3RegOp,
+	[OP_SYS] = compileOpSyscall,
+	[OP_GOTO] = compileOpGoto,
+	[OP_CMP] = compileOpCmp,
+	[OP_CMPR] = compileOpCmpr,
+	[OP_AND] = compile2RegImmOp,
+	[OP_ANDR] = compile3RegOp,
+	[OP_OR] = compile2RegImmOp,
+	[OP_ORR] = compile3RegOp,
+	[OP_NOT] = compile2RegOp,
+	[OP_XOR] = compile2RegImmOp,
+	[OP_XORR] = compile3RegOp,
+	[OP_SHL] = compile2RegImmOp,
+	[OP_SHLR] = compile3RegOp,
+	[OP_SHR] = compile2RegImmOp,
+	[OP_SHRR] = compile3RegOp,
+	[OP_SHRS] = compile2RegImmOp,
+	[OP_SHRSR] = compile3RegOp,
+	[OP_PROC] = compileOpProc,
+	[OP_CALL] = compileOpCall,
+	[OP_RET] = compileOpRet,
+	[OP_ENDPROC] = compileOpEndproc,
+	[OP_LD64] = compile2RegOp,
+	[OP_STR64] = compile2RegOp,
+	[OP_LD32] = compile2RegOp,
+	[OP_STR32] = compile2RegOp,
+	[OP_LD16] = compile2RegOp,
+	[OP_STR16] = compile2RegOp,
+	[OP_LD8] = compile2RegOp,
+	[OP_STR8] = compile2RegOp,
+	[OP_VAR] = compileOpVar,
+	[OP_SETV] = compileOpSetv,
+	[OP_MUL] = compile2RegImmOp,
+	[OP_MULR] = compile3RegOp,
+	[OP_DIV] = compile2RegImmOp,
+	[OP_DIVR] = compile3RegOp,
+	[OP_DIVS] = compile2RegImmOp,
+	[OP_DIVSR] = compile3RegOp,
+	[OP_EXTPROC] = compileOpProc,
+	[OP_LDV] = compileOpLdv,
+	[OP_STRV] = compileOpStrv,
+	[OP_POPV] = compileOpPopv,
+	[OP_PUSHV] = compileOpPushv,
+	[OP_ATF] = compileOpAtf,
+	[OP_ATL] = compileOpAtl,
+	[OP_SETC] = compileOpSetc,
+	[OP_DELNV] = compileOpDelnv,
+	[OP_LD64S] = compile2RegOp,
+	[OP_LD32S] = compile2RegOp,
+	[OP_LD16S] = compile2RegOp,
+	[OP_LD8S] = compile2RegOp,
+	[OP_LDVS] = compileOpLdv,
+	[OP_SX32] = compile2RegOp,
+	[OP_SX16] = compile2RegOp,
+	[OP_SX8] = compile2RegOp,
+	[OP_MOD] = compile2RegImmOp,
+	[OP_MODS] = compile2RegImmOp,
+	[OP_MODR] = compile3RegOp,
+	[OP_MODSR] = compile3RegOp,
+	[OP_ARG] = compileOpArg
 };
 static_assert(N_OPS == sizeof(op_compilers) / sizeof(op_compilers[0]), "Some BRB operations have unmatched compilers");
 
@@ -1276,6 +1155,7 @@ VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* 
 	dst->stack_size = DEFAULT_STACK_SIZE;
 
 	CompilerCtx compctx = {.prep = obj};
+	VBRBError err;
 
 	while (true) {
 		Token op_name = fetchToken(obj);
@@ -1299,7 +1179,7 @@ VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* 
 
 			if (getTokenSymbolId(cond_spec) == SYMBOL_COLON) {
 				if (op_flags[new_op->type] & OPF_UNCONDITIONAL) return (VBRBError){
-					.prep = compctx.prep,
+					.prep = obj,
 					.code = VBRB_ERR_UNCONDITIONAL_OP,
 					.loc = cond_spec,
 					.op_type = new_op->type
@@ -1318,8 +1198,8 @@ VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* 
 				new_op->cond_id = cond_spec.keyword_id - KW_COND_NON;
 			}
 
-			VBRBError err = op_compilers[kw_id](&compctx, dst);
-			if (err.code != VBRB_ERR_OK) {
+			err = op_compilers[kw_id](&compctx, dst);
+			if (err.code) {
 				delCompilerCtx(&compctx);
 				return err;
 			}
@@ -1340,17 +1220,11 @@ VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* 
 				token = fetchToken(compctx.prep);
 			}
 
-			if (token.type != TOKEN_STRING) return (VBRBError){
-				.prep = compctx.prep,
-				.code = VBRB_ERR_BLOCK_NAME_EXPECTED,
-				.loc = token
-			};
-			if (memchr(token.string.data, '\0', token.string.length)) return (VBRBError){
-				.prep = compctx.prep,
-				.code = VBRB_ERR_INVALID_NAME,
-				.loc = token
-			};
-			block->name = token.string.data;
+			err = getIdent(&compctx, token, &block->name, 0, 0, true);
+			if (err.code) {
+				if (err.code == VBRB_ERR_INVALID_DATA_BLOCK_FMT) err.code = VBRB_ERR_BLOCK_NAME_EXPECTED;
+				return err;
+			}
 
 			token = peekToken(compctx.prep);
 			if (getTokenSymbolId(token) == SYMBOL_SEGMENT_START) {

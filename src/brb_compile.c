@@ -131,6 +131,7 @@ const char* intLiteral(FILE* dst, int8_t reg_id, int64_t value, int flag)
 
 typedef struct comp_ctx {
 	FILE* dst;
+	int cur_frame_start;
 	int cur_frame_size;
 	char* src_path;
 	int src_line;
@@ -1044,6 +1045,14 @@ void compileOpModsrNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
+void compileOpArgNative(Module* module, int index, CompCtx* ctx)
+{
+	Op op = module->seg_exec.data[index];
+	if (!ctx->cur_frame_start) ctx->cur_frame_start = -STACKFRAME_SIZE;
+	ctx->cur_frame_start -= op.new_var_size;
+	ctx->cur_frame_size += op.new_var_size;
+}
+
 OpNativeCompiler native_op_compilers[] = {
 	[OP_NONE] = &compileNopNative,
 	[OP_END] = &compileOpEndNative,
@@ -1113,7 +1122,8 @@ OpNativeCompiler native_op_compilers[] = {
 	[OP_MOD] = &compileOpModNative,
 	[OP_MODS] = &compileOpModsNative,
 	[OP_MODR] = &compileOpModrNative,
-	[OP_MODSR] = &compileOpModsrNative
+	[OP_MODSR] = &compileOpModsrNative,
+	[OP_ARG] = &compileOpArgNative
 };
 static_assert(
 	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),

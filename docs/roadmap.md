@@ -22,5 +22,7 @@
 - ~Bytecode optimization: level 1~
 - ~`static` variables~
 - Classes
+- Interfaces
+- Exceptions
 - Bytecode optimization: level 2
-- Option to pre-evaluate an expression to be used as a literal value
+- x86-64 support

@@ -73,6 +73,7 @@ typedef enum {
 	OP_MODS, // uses Op::dst_reg, Op::src_reg and Op::value
 	OP_MODR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	OP_MODSR, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	OP_ARG, // uses Op::new_var_size
 	N_OPS
 } OpType;
 
@@ -166,6 +167,7 @@ const static unsigned short op_flags[N_OPS] = {
 	[OP_MODS] = OPF_IS_2REG_IMM, // uses Op::dst_reg, Op::src_reg and Op::value
 	[OP_MODR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
 	[OP_MODSR] = OPF_IS_3REG, // uses Op::dst_reg, Op::src_reg and Op::src2_reg
+	[OP_ARG] = OPF_USES_NEW_VAR_SIZE | OPF_UNCONDITIONAL, // uses Op::new_var_size
 };
 
 #define _opNames \
@@ -237,7 +239,8 @@ const static unsigned short op_flags[N_OPS] = {
 	BRP_KEYWORD("mod"), \
 	BRP_KEYWORD("mods"), \
 	BRP_KEYWORD("modr"), \
-	BRP_KEYWORD("modsr") \
+	BRP_KEYWORD("modsr"), \
+	BRP_KEYWORD("arg")
 
 static sbuf opNames[] = { _opNames };
 
