@@ -6,7 +6,7 @@ BRidge is a procedural and object-oriented statically typed language with the ab
 
 To build all of the BRidge toolchain, simply run the following command:
 ```console
-$ make
+$ python3 build.py --release
 ```
 
 ## Tools
@@ -14,8 +14,7 @@ $ make
 - [brbd](src/brbd.c) - BRidge Bytecode Debugger, a tool for debugging BRB modules
 
 ## Documentation
-
-- [BRidge Assembly Documentation](docs/brb.md).
+Not yet :(
 
 ## Examples
 
@@ -23,27 +22,24 @@ $ make
 'Hello World' program in BRidge assembly is [there](examples/hello_world.vbrb) and can be compiled and executed with these commands:
 To execute bytecode, run:
 ```console
-$ brs examples/hello_world.vbrb
-$ brbx examples/hello_world.brb
+$ bridge -Ai examples/hello_world.vbrb
 ```
 To execute native executable, run:
 ```console
-$ brs examples/hello_world.vbrb
-$ brbc examples/hello_world.brb
+$ bridge -Ax examples/hello_world.vbrb
 $ examples/hello_world
 ```
 
-### BRidge examples
+### BRidge example
 'Hello World' program in BRidge is [there](examples/hello_world.br) and can be compiled and executed using the following commands:
 To execute in the BRidge runtime, run:
+```console
+$ bridge -Ai examples/hello_world.br
 ```
-$ brc -r examples/hello_world.br
-```
-P.S.: the `-r` flag makes the compiler execute the compiled program with `brbx` immediately after it's compiled
+P.S.: the `-Ai` flag makes the compiler behave like an interpreter
 
 To compile the program to a native executable, run:
-```
-$ brc examples/hello_world.br
-$ brbc examples/hello_world.brb
+```console
+$ bridge -Ax examples/hello_world.br
 $ examples/hello_world
 ```
