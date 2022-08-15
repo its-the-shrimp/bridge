@@ -10,14 +10,14 @@
 #include <sys/mman.h>
 
 
-#define DQUOTE CSBUF('"')
-#define QUOTE CSBUF('\'')
-#define NT_PATHSEP CSBUF('\\')
-#define POSIX_PATHSEP CSBUF('/')
-#define NT_NEWLINE CSBUF("\r\n")
-#define POSIX_NEWLINE CSBUF('\n')
-#define SPACE CSBUF(' ')
-#define TAB CSBUF('\t')
+#define DQUOTE fromcstr("\"")
+#define QUOTE fromcstr("'")
+#define NT_PATHSEP fromcstr("\\")
+#define POSIX_PATHSEP fromcstr("/")
+#define NT_NEWLINE fromcstr("\r\n")
+#define POSIX_NEWLINE fromcstr("\n")
+#define SPACE fromcstr(" ")
+#define TAB fromcstr("\t")
 
 #ifdef _WIN32_
 #define PATHSEP NT_PATHSEP
@@ -40,7 +40,7 @@ typedef enum token_type {
 typedef struct token_loc {
 	int32_t lineno;
 	int32_t colno;
-	const char* src_name;
+	char* src_name;
 	struct token_loc* included_from;
 } TokenLoc;
 declArray(TokenLoc);
@@ -131,8 +131,8 @@ typedef struct brp {
 	MacroArray macros;
 	TokenLocArray conditional_blocks;
 } BRP;
-#define BRP_KEYWORD(spec) CSBUF(spec)
-#define BRP_SYMBOL(spec) CSBUF(spec)
+#define BRP_KEYWORD(spec) fromcstr(spec)
+#define BRP_SYMBOL(spec) fromcstr(spec)
 // hidden symbols are delimiters that are not returned as generated tokens
 #define BRP_HIDDEN_SYMBOL(spec) ((sbuf){ .data = spec"\n", .length = sizeof(spec) - 1 })
 
@@ -196,46 +196,13 @@ defArray(sbuf);
 defArray(Token);
 defArray(MacroArg);
 
-char* getNormPath(char* src)
-{
-	sbuf input = SBUF(src);
-
-	sbuf res = smalloc(input.length + 1);
-	if (!res.data) return NULL;
-	memset(res.data, 0, res.length);
-
-	sbufArray components = sbufArray_new(sbufcount(input, PATHSEP) * -1 - 1);
-	sbuf new;
-	
-	while (input.length) {
-		sbufsplit(&input, &new, PATHSEP);
-		if (sbufeq(new, "..")) {
-			sbufArray_pop(&components, -1);
-		} else if ((new.length || !components.length) && !sbufeq(new, ".")) {
-			sbufArray_append(&components, new);
-		}
-	}
-
-	res.length = 0;
-	arrayForeach(sbuf, component, components) {
-	 	if (res.length) {
-			memcpy(res.data + res.length, PATHSEP.data, PATHSEP.length);
-			res.length += PATHSEP.length;
-		}
-		memcpy(res.data + res.length, component->data, component->length);
-		res.length += component->length;
-	}
-	free(components.data);
-	return res.data;
-}
-
 bool pathEquals(const char path1[], const char path2[])
 {
 	char path1_r[256];
 	char path2_r[256];
 	realpath(path1, path1_r);
 	realpath(path2, path2_r);
-	return sbufeq(path1_r, path2_r);
+	return streq(path1_r, path2_r);
 }
 
 bool setKeywords(BRP* const obj, sbuf* const kws)
@@ -290,13 +257,13 @@ sbuf removeComments(sbuf buffer)
 {
 	char* to_free = buffer.data;
 	static sbuf comment_delims[5] = {
-		CSBUF('"'),
-		CSBUF("'"),
-		CSBUF("//"),
-		CSBUF("/*"),
+		fromcstr("\""),
+		fromcstr("'"),
+		fromcstr("//"),
+		fromcstr("/*"),
 		(sbuf){0}
 	};
-	sbuf res = CSBUF("");
+	sbuf res = fromcstr("");
 	
 	while (buffer.length) {
 		sbuf part, other_part;
@@ -314,7 +281,7 @@ sbuf removeComments(sbuf buffer)
 				res = sbufconcat(res, part);
 				break;
 			case 3: /* free-form comment (like the one this text is in) */
-				sbufsplit(&buffer, &other_part, CSBUF("*/"));
+				sbufsplit(&buffer, &other_part, fromcstr("*/"));
 				res = sbufconcat(res, part);
 				break;
 			default:
@@ -331,7 +298,7 @@ bool appendInput(BRP *obj, InputCtx* const input, FILE* input_fd, TokenLoc initi
 	if (!input_fd) {
 		obj->error_code = BRP_ERR_FILE_NOT_FOUND;
 		obj->error_loc = include_loc;
-		obj->error_symbol = SBUF(initial_loc.src_name);
+		obj->error_symbol = fromstr((char*)initial_loc.src_name);
 		obj->handler(obj);
 		return false;
 	}
@@ -416,18 +383,18 @@ typedef enum {
 } BRPDirectiveCode;
 
 static const sbuf brp_directives[N_BRP_CMDS + 1] = {
-	[BRP_INCLUDE] = CSBUF("include"),
-	[BRP_DEFINE] = CSBUF("define"),
-	[BRP_MACRO] = CSBUF("macro"),
-	[BRP_COMMENT] = CSBUF('!'),
-	[BRP_IFDEF] = CSBUF("ifdef"),
-	[BRP_ENDIF] = CSBUF("endif"),
-	[BRP_ENDMACRO] = CSBUF("endmacro"),
-	[BRP_IFNDEF] = CSBUF("ifndef"),
-	[BRP_ELSE] = CSBUF("else")
+	[BRP_INCLUDE] = fromcstr("include"),
+	[BRP_DEFINE] = fromcstr("define"),
+	[BRP_MACRO] = fromcstr("macro"),
+	[BRP_COMMENT] = fromcstr("!"),
+	[BRP_IFDEF] = fromcstr("ifdef"),
+	[BRP_ENDIF] = fromcstr("endif"),
+	[BRP_ENDMACRO] = fromcstr("endmacro"),
+	[BRP_IFNDEF] = fromcstr("ifndef"),
+	[BRP_ELSE] = fromcstr("else")
 };
 
-static const char oppositeBrackets[INT8_MAX] = {
+static uint8_t oppositeBrackets[UINT8_MAX] = {
 	['('] = ')', [')'] = '(',
 	['['] = ']', [']'] = '[',
 	['{'] = '}', ['}'] = '{'
@@ -438,7 +405,7 @@ static inline Macro fetchMacroArg(BRP* const obj, InputCtx* const input, const M
 	Macro res = { .name = arg.name, .def_loc = arg.def_loc };
 	bool isnt_last_arg = true;
 	while (true) {
-		sbuf delim = sbufsplit(&input->buffer, &res.def, SBUF(','), SBUF('('), SBUF('['), SBUF('{'), SBUF(')'));
+		sbuf delim = sbufsplit(&input->buffer, &res.def, fromcstr(","), fromcstr("("), fromcstr("["), fromcstr("{"), fromcstr(")"));
 		if (delim.length ? sbufeq(delim, NEWLINE) : true) {
 			obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 			obj->error_loc = input->cur_loc;
@@ -454,7 +421,7 @@ static inline Macro fetchMacroArg(BRP* const obj, InputCtx* const input, const M
 			break;
 		}
 		sbuf also_def;
-		delim = sbufsplit(&input->buffer, &also_def, SBUF(oppositeBrackets[delim.data[0]]), NEWLINE);
+		delim = sbufsplit(&input->buffer, &also_def, fromchar(oppositeBrackets[(unsigned)delim.data[0]]), NEWLINE);
 		if (!delim.data ? sbufeq(delim, NEWLINE) : false) {
 			obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 			obj->error_loc = input->cur_loc;
@@ -487,9 +454,9 @@ static inline InputCtx* expandMacro(BRP* const obj, InputCtx* const input, const
 	sbufshift(prev_ctx->buffer, name_length);
 	prev_ctx->cur_loc.colno += name_length;
 
-	if (sbufcutc(&prev_ctx->buffer, '(')) {
-		prev_ctx->cur_loc.colno++;
-		for (int i = 0; i < macro.args.length; i++) {
+	if (sbufcutc(&prev_ctx->buffer, fromcstr("("))) {
+		prev_ctx->cur_loc.colno += 1;
+		arrayForeach (MacroArg, arg, macro.args) {
 			if (!prev_ctx->buffer.length) {
 				obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 				obj->error_loc = prev_ctx->cur_loc;
@@ -507,7 +474,7 @@ static inline InputCtx* expandMacro(BRP* const obj, InputCtx* const input, const
 				return NULL;
 			}
 
-			input->locals.data[i] = fetchMacroArg(obj, prev_ctx, macro.args.data[i]);
+			input->locals.data[arg - macro.args.data] = fetchMacroArg(obj, prev_ctx, *arg);
 		}
 		if (prev_ctx->buffer.length ? prev_ctx->buffer.data[0] != ')' : true) {
 			obj->error_code = BRP_ERR_MACRO_ARG_COUNT_MISMATCH;
@@ -541,7 +508,7 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 // stripping unwanted symbols from the start of the buffer
 	cleanInput(obj, input);
 // processing directives
-	while (sbufcutc(&input->buffer, '#')) {
+	while (sbufcutc(&input->buffer, fromcstr("#"))) {
 		input->cur_loc.colno += sbufstripl(&input->buffer, SPACE, TAB).length + 1;
 		BRPDirectiveCode directive_id = sbufcutv(&input->buffer, brp_directives);
 
@@ -556,7 +523,7 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 			}
 			case BRP_INCLUDE: {
 				input->cur_loc.colno += brp_directives[BRP_INCLUDE].length + sbufstripl(&input->buffer, SPACE, TAB).length;
-				char path_start = sbufcutc(&input->buffer, CSBUF("<\""));
+				char path_start = sbufcutc(&input->buffer, fromcstr("<\""));
 				if (!path_start) {
 					obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 					obj->error_loc = input->cur_loc;
@@ -564,7 +531,7 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 					return;
 				}
 				sbuf path_spec;
-				sbufsplit(&input->buffer, &path_spec, path_start == '"' ? DQUOTE : CSBUF('>'));
+				sbufsplit(&input->buffer, &path_spec, path_start == '"' ? DQUOTE : fromcstr(">"));
 				input->cur_loc.colno += path_spec.length + 2;
 				char path_spec_c[path_spec.length + 1];
 				memcpy(path_spec_c, path_spec.data, path_spec.length);
@@ -589,32 +556,32 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 			}
 			case BRP_MACRO:
 			case BRP_DEFINE: {
-				input->cur_loc.colno += brp_directives[directive_id].length + sbufstriplc(&input->buffer, " \t").length;
+				input->cur_loc.colno += brp_directives[directive_id].length + sbufstriplc(&input->buffer, fromcstr(" \t")).length;
 				Macro macro = {0};
 				sbuf macro_name;
-				sbuf delim = sbufsplit(&input->buffer, &macro_name, SPACE, TAB, NEWLINE, CSBUF('('));
+				sbuf delim = sbufsplit(&input->buffer, &macro_name, SPACE, TAB, NEWLINE, fromcstr("("));
 				
 				input->cur_loc.colno += delim.length + macro_name.length;
 				macro.name = tostr(macro_name);
 // parsing macro arguments declaration
-				if (sbufeq(delim, '(')) {
-					while (!sbufcutc(&input->buffer, ')')) {
-						input->cur_loc.colno += sbufstriplc(&input->buffer, " \t").length;
+				if (sbufeq(delim, fromcstr("("))) {
+					while (!sbufcutc(&input->buffer, fromcstr(")"))) {
+						input->cur_loc.colno += sbufstriplc(&input->buffer, fromcstr(" \t")).length;
 						sbuf arg_name;
 						MacroArg arg = { .def_loc = input->cur_loc };
 
-						sbuf arg_name_delim = sbufsplit(&input->buffer, &arg_name, SPACE, TAB, NEWLINE, CSBUF(','), CSBUF(')'));
+						sbuf arg_name_delim = sbufsplit(&input->buffer, &arg_name, SPACE, TAB, NEWLINE, fromcstr(","), fromcstr(")"));
 						input->cur_loc.colno += arg_name.length + arg_name_delim.length;
 						arg.name = tostr(arg_name);
 						if (sbufeq(arg_name_delim, NEWLINE)) {
 							obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 							obj->error_loc = input->cur_loc;
 							obj->handler(obj);
-						} else if (sbufeq(arg_name_delim, ')')) {
+						} else if (sbufeq(arg_name_delim, fromcstr(")"))) {
 							sbufshift(input->buffer, -1);
-						} else if (!sbufeq(arg_name_delim, ',')) {
+						} else if (!sbufeq(arg_name_delim, fromcstr(","))) {
 							sbuf leftovers;
-							sbuf comma_or_bracket = sbufsplit(&input->buffer, &leftovers, NEWLINE, CSBUF(','), CSBUF(')'));
+							sbuf comma_or_bracket = sbufsplit(&input->buffer, &leftovers, NEWLINE, fromcstr(","), fromcstr(")"));
 							if (!sbufspace(leftovers)) {
 								obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 								obj->error_loc = input->cur_loc;
@@ -623,9 +590,9 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 							}
 
 							input->cur_loc.colno += leftovers.length + comma_or_bracket.length;
-							if (sbufeq(comma_or_bracket, ')')) {
+							if (sbufeq(comma_or_bracket, fromcstr(")"))) {
 								sbufshift(input->buffer, -1);
-							} else if (!sbufeq(comma_or_bracket, ',')) {
+							} else if (!sbufeq(comma_or_bracket, fromcstr(","))) {
 								obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
 								obj->error_loc = input->cur_loc;
 								obj->handler(obj);
@@ -644,12 +611,12 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 						sbufstriprv(&macro.def, obj->hidden_symbols);
 
 						sbuf macro_def = macro.def;
-						sbufsub(macro_def, &macro.def, "\\\n", NEWLINE);
+						sbufsub(macro_def, &macro.def, fromcstr("\\\n"), NEWLINE);
 					}
 					input->cur_loc.colno = 1;
 					input->cur_loc.lineno += sbufcount_v(macro.def, nl_arg);
 				} else {
-					if (!sbufsplit(&input->buffer, &macro.def, CSBUF("#endmacro")).data) {
+					if (!sbufsplit(&input->buffer, &macro.def, fromcstr("#endmacro")).data) {
 						obj->error_code = BRP_ERR_UNCLOSED_MACRO;
 						obj->error_loc = input->cur_loc;
 						obj->handler(obj);
@@ -662,7 +629,7 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 				}
 
 				arrayForeach(Macro, prev_macro, obj->macros) {
-					if (sbufeq(macro.name, prev_macro->name)) {
+					if (sbufeq(fromstr(macro.name), fromstr(prev_macro->name))) {
 						free(macro.name);
 						macro.name = NULL;
 						free(prev_macro->def.data);
@@ -687,7 +654,7 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 
 				bool defined = false;
 				arrayForeach (Macro, macro, obj->macros) {
-					if (sbufeq(macro_name, macro->name)) {
+					if (sbufeq(macro_name, fromstr(macro->name))) {
 						defined = true;
 						break;
 					}
@@ -791,21 +758,19 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 	}
 // replacing a macro name with its definition if one is found
 	sbuf macro_name, buffer_view = input->buffer;
-	sbuf delim = obj->symbols[sbufsplitv(&buffer_view, &macro_name, obj->symbols)];
+	sbufsplitv(&buffer_view, &macro_name, obj->symbols);
 	
 	InputCtx* prev_ctx = NULL;
-	for (int i = 0; i < input->locals.length; i++) {
-		Macro macro = input->locals.data[i];
-		if (sbufeq(macro_name, macro.name)) {
-			prev_ctx = expandMacro(obj, input, macro);
+	arrayForeach (Macro, macro, input->locals) {
+		if (sbufeq(macro_name, fromstr(macro->name))) {
+			prev_ctx = expandMacro(obj, input, *macro);
 			break;
 		}
 	}
 	if (!prev_ctx) {
-		for (int i = 0; i < obj->macros.length; i++) {
-			Macro macro = obj->macros.data[i];
-			if (sbufeq(macro_name, macro.name)) {
-				prev_ctx = expandMacro(obj, input, macro);
+		arrayForeach(Macro, macro, obj->macros) {
+			if (sbufeq(macro_name, fromstr(macro->name))) {
+				prev_ctx = expandMacro(obj, input, *macro);
 				break;
 			}
 		}
@@ -824,7 +789,7 @@ Token _fetchToken(BRP* const obj, InputCtx* const input, TokenArray* const queue
 			return res;
 		case TOKEN_STRING: if (res.string.length == 0) break;
 			return res;
-		case TOKEN_WORD: if (sbufspace(res.word)) break;
+		case TOKEN_WORD: if (sbufspace(fromstr(res.word))) break;
 		case TOKEN_KEYWORD:
 		case TOKEN_INT:
 			return res;

@@ -29,13 +29,7 @@ def exec_cmd(*args):
 	print("[CMD] ", *args)
 	proc_data = subprocess.run(args, stderr=subprocess.PIPE)
 	if proc_data.returncode:
-		print(*map(
-			lambda line: "[ERR] " + line,
-			proc_data.stderr
-			.read()
-			.decode("\n")
-			.splitlines(keepends=True)
-		))
+		print("[ERR]:\n" + proc_data.stderr.decode("utf-8") + "\n[END]")
 		sys.exit(1)
 
 PWD: Path = Path(".")
@@ -44,7 +38,15 @@ BIN: Path = PWD/"build"/"bin"
 SRC: Path = PWD/"src"
 INCLUDE: Path = PWD/"include"
 GLOBAL: Path = Path("/usr")/"local"/"bin"
-CFLAGS: list[str] = ["-I", "include", "-Wno-initializer-overrides", "-Wno-nullability-completeness", "-ferror-limit=1", "-O3"]
+CFLAGS: list[str] = [
+	"-std=c11",
+	"-I", "include",
+	"-Wall", "-Wextra", "-pedantic",
+	"-Wno-initializer-overrides", "-Wno-nullability-completeness", "-Wno-extra-semi", "-Wno-unused-parameter",
+	"-Wno-gnu-designator", # TODO: remove this option
+	"-Werror", "-Wfatal-errors",
+	"-O3"
+]
 LFLAGS: list[str] = ["-L", LIB, "-lbrb"]
 if not is_release:
 	CFLAGS[-1] = "-O0"
@@ -54,7 +56,7 @@ if not is_release:
 if not LIB.exists(): LIB.mkdir(parents=True)
 if not BIN.exists(): BIN.mkdir(parents=True)
 
-if is_outdated(LIB/"libbrb.dylib", *SRC.glob("*"), *INCLUDE.glob("*")):
+if is_outdated(LIB/"libbrb.dylib", *SRC.glob("brb_*"), *INCLUDE.glob("*")):
 	exec_cmd("cc", *CFLAGS, "-c", *SRC.glob("brb_*.c"))
 	exec_cmd("cc", *CFLAGS, "-shared", "-o", LIB/"libbrb.dylib", *PWD.glob("brb_*.o"))
 	for path in PWD.glob("brb_*.o"): path.unlink()

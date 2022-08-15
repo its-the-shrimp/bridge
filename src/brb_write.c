@@ -13,50 +13,55 @@ typedef struct {
 	strArray consts;
 } ModuleWriter;
 
-void writeInt(FILE* fd, int64_t x, uint8_t hb)
+#define SIGN_BIT_SET(x) ((int64_t)(x) < 0)
+#define FITS_IN_8BITS(x) inRange((int64_t)x, INT8_MIN, INT8_MAX + 1)
+#define FITS_IN_16BITS(x) inRange((int64_t)x, INT16_MIN, INT16_MAX + 1)
+#define FITS_IN_32BITS(x) inRange((int64_t)x, INT32_MIN, CONCAT(INT32_MAX, LL) + 1)
+
+void writeInt(FILE* fd, uint64_t x, uint8_t hb)
 {
-	if (x == (int64_t)(x & 0xFF)) {
+	if (FITS_IN_8BITS(x)) {
 		if (x < 8) {
 			fputc(x | hb << 4, fd);
 		} else {
-			fputc((x < 0 ? 12 : 8) | hb << 4, fd);
-			fputc((char)(x < 0 ? ~x : x), fd);
+			fputc((SIGN_BIT_SET(x) ? 12 : 8) | hb << 4, fd);
+			fputc((int8_t)(SIGN_BIT_SET(x) ? ~x : x), fd);
 		}
-	} else if (x == (int64_t)(x & 0xFFFF)) {
-		fputc((x < 0 ? 13 : 9) | hb << 4, fd);
-		int16_t x16 = x < 0 ? ~x : x;
+	} else if (FITS_IN_16BITS(x)) {
+		fputc((SIGN_BIT_SET(x) ? 13 : 9) | hb << 4, fd);
+		int16_t x16 = SIGN_BIT_SET(x) ? ~x : x;
 		fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
-	} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
-		fputc((x < 0 ? 14 : 10) | hb << 4, fd);
-		int32_t x32 = x < 0 ? ~x : x;
+	} else if (FITS_IN_32BITS(x)) {
+		fputc((SIGN_BIT_SET(x) ? 14 : 10) | hb << 4, fd);
+		int32_t x32 = SIGN_BIT_SET(x) ? ~x : x;
 		fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 	} else {
-		fputc((x < 0 ? 15 : 11) | hb << 4, fd);
-		int64_t x64 = x < 0 ? ~x : x;
+		fputc((SIGN_BIT_SET(x) ? 15 : 11) | hb << 4, fd);
+		int64_t x64 = SIGN_BIT_SET(x) ? ~x : x;
 		fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 	}
 }
 
-void writeInt_swapped(FILE* fd, int64_t x, uint8_t hb)
+void writeInt_swapped(FILE* fd, uint64_t x, uint8_t hb)
 {
-	if (x == (int64_t)(x & 0xFF)) {
+	if (FITS_IN_8BITS(x)) {
 		if (x < 8) {
 			fputc(hb | x << 4, fd);
 		} else {
-			fputc((x < 0 ? 12 : 8) << 4 | hb, fd);
-			fputc((char)(x < 0 ? ~x : x), fd);
+			fputc((SIGN_BIT_SET(x) ? 12 : 8) << 4 | hb, fd);
+			fputc((int8_t)(SIGN_BIT_SET(x) ? ~x : x), fd);
 		}
-	} else if (x == (int64_t)(x & 0xFFFF)) {
-		fputc((x < 0 ? 13 : 9) << 4 | hb, fd);
-		int16_t x16 = x < 0 ? ~x : x;
+	} else if (FITS_IN_16BITS(x)) {
+		fputc((SIGN_BIT_SET(x) ? 13 : 9) << 4 | hb, fd);
+		int16_t x16 = SIGN_BIT_SET(x) ? ~x : x;
 		fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
-	} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
-		fputc((x < 0 ? 14 : 10) << 4 | hb, fd);
-		int32_t x32 = x < 0 ? ~x : x;
+	} else if (FITS_IN_32BITS(x)) {
+		fputc((SIGN_BIT_SET(x) ? 14 : 10) << 4 | hb, fd);
+		int32_t x32 = SIGN_BIT_SET(x) ? ~x : x;
 		fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 	} else {
-		fputc((x < 0 ? 15 : 11) << 4 | hb, fd);
-		int64_t x64 = x < 0 ? ~x : x;
+		fputc((SIGN_BIT_SET(x) ? 15 : 11) << 4 | hb, fd);
+		int64_t x64 = SIGN_BIT_SET(x) ? ~x : x;
 		fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 	}
 }
@@ -66,11 +71,11 @@ void write2HalfBytes(FILE* fd, uint8_t hb1, uint8_t hb2)
 	fputc(((hb1 << 4) | hb2) & 255, fd);
 }
 
-void write2Ints(FILE* fd, int64_t x, int64_t y)
+void write2Ints(FILE* fd, uint64_t x, uint64_t y)
 {
 	if (x < 8) {
 		if (y < 8) {
-			fputc(x << 4 | y, fd);
+			fputc((int8_t)(x << 4 | y), fd);
 		} else {
 			writeInt(fd, y, x);
 		}
@@ -78,91 +83,90 @@ void write2Ints(FILE* fd, int64_t x, int64_t y)
 		if (y < 8) {
 			writeInt_swapped(fd, x, y);
 		} else {
-			if (x == (int64_t)(x & 0xFF)) {
-				if (y == (int64_t)(y & 0xFF)) {
-					fputc((x < 0 ? 12 : 8) << 4 | (y < 0 ? 12 : 8), fd);
-					fputc((char)(x < 0 ? ~x : x), fd);
-					fputc((char)(y < 0 ? ~y : y), fd);
-				} else if (y == (int64_t)(y & 0xFFFF)) {
-					fputc((x < 0 ? 12 : 8) << 4 | (y < 0 ? 13 : 9), fd);
-					int16_t y16 = y < 0 ? ~y : y;
-					fputc((char)(x < 0 ? ~x : x), fd);
+			if (FITS_IN_8BITS(x)) {
+				if (FITS_IN_8BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 12 : 8) << 4 | (SIGN_BIT_SET(y) ? 12 : 8), fd);
+					fputc((int8_t)(SIGN_BIT_SET(x) ? ~x : x), fd);
+					fputc((int8_t)(SIGN_BIT_SET(y) ? ~y : y), fd);
+				} else if (FITS_IN_16BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 12 : 8) << 4 | (SIGN_BIT_SET(y) ? 13 : 9), fd);
+					uint16_t y16 = SIGN_BIT_SET(y) ? ~y : y;
+					fputc((int8_t)(SIGN_BIT_SET(x) ? ~x : x), fd);
 					fwrite(BRByteOrder(&y16, 2), 2, 1, fd);
-				} else if (y == (int64_t)(y & 0xFFFFFFFFLL)) {
-					fputc((x < 0 ? 12 : 8) << 4 | (y < 0 ? 14 : 10), fd);
-					int32_t y32 = y < 0 ? ~y : y;
-					fputc((char)(x < 0 ? ~x : x), fd);
+				} else if (FITS_IN_32BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 12 : 8) << 4 | (SIGN_BIT_SET(y) ? 14 : 10), fd);
+					uint32_t y32 = SIGN_BIT_SET(y) ? ~y : y;
+					fputc((int8_t)(SIGN_BIT_SET(x) ? ~x : x), fd);
 					fwrite(BRByteOrder(&y32, 4), 4, 1, fd);
 				} else {
-					fputc((x < 0 ? 12 : 8) << 4 | (y < 0 ? 15 : 11), fd);
-					int64_t y64 = y < 0 ? ~y : y;
-					fputc((char)(x < 0 ? ~x : x), fd);
+					fputc((SIGN_BIT_SET(x) ? 12 : 8) << 4 | (SIGN_BIT_SET(y) ? 15 : 11), fd);
+					uint64_t y64 = SIGN_BIT_SET(y) ? ~y : y;
+					fputc((int8_t)(SIGN_BIT_SET(x) ? ~x : x), fd);
 					fwrite(BRByteOrder(&y64, 8), 8, 1, fd);
 				}
-			} else if (x == (int64_t)(x & 0xFFFF)) {
-				int16_t x16 = x < 0 ? ~x : x;
-				if (y == (int64_t)(y & 0xFF)) {
-					fputc((x < 0 ? 13 : 9) << 4 | (y < 0 ? 12 : 8), fd);
+			} else if (FITS_IN_16BITS(x)) {
+				uint16_t x16 = x < 0 ? ~x : x;
+				if (FITS_IN_8BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 13 : 9) << 4 | (SIGN_BIT_SET(y) ? 12 : 8), fd);
 					fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
-					fputc((char)(y < 0 ? ~y : y), fd);
-				} else if (y == (int64_t)(y & 0xFFFF)) {
-					fputc((x < 0 ? 13 : 9) << 4 | (y < 0 ? 13 : 9), fd);
-					int16_t y16 = y < 0 ? ~y : y;
+					fputc((int8_t)(y < 0 ? ~y : y), fd);
+				} else if (FITS_IN_16BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 13 : 9) << 4 | (SIGN_BIT_SET(y) ? 13 : 9), fd);
+					uint16_t y16 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
 					fwrite(BRByteOrder(&y16, 2), 2, 1, fd);
-				} else if (y == (int64_t)(y & 0xFFFFFFFFLL)) {
-					fputc((x < 0 ? 13 : 9) << 4 | (y < 0 ? 14 : 10), fd);
-					int32_t y32 = y < 0 ? ~y : y;
+				} else if (FITS_IN_32BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 13 : 9) << 4 | (SIGN_BIT_SET(y) ? 14 : 10), fd);
+					uint32_t y32 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
 					fwrite(BRByteOrder(&y32, 4), 4, 1, fd);
 				} else {
-					fputc((x < 0 ? 13 : 9) << 4 | (y < 0 ? 15 : 11), fd);
-					int64_t y64 = y < 0 ? ~y : y;
+					fputc((SIGN_BIT_SET(x) ? 13 : 9) << 4 | (SIGN_BIT_SET(y) ? 15 : 11), fd);
+					uint64_t y64 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x16, 2), 2, 1, fd);
 					fwrite(BRByteOrder(&y64, 8), 8, 1, fd);
 				}
-			} else if (x == (int64_t)(x & 0xFFFFFFFFLL)) {
-				int32_t x32 = x < 0 ? ~x : x;
-				if (y == (int64_t)(y & 0xFF)) {
-					fputc((x < 0 ? 14 : 10) << 4 | (y < 0 ? 12 : 8), fd);
+			} else if (FITS_IN_32BITS(x)) {
+				uint32_t x32 = SIGN_BIT_SET(x) ? ~x : x;
+				if (FITS_IN_8BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 14 : 10) << 4 | (SIGN_BIT_SET(y) ? 12 : 8), fd);
 					fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
-					fputc((char)(y < 0 ? ~y : y), fd);
-				} else if (y == (int64_t)(y & 0xFFFF)) {
-					fputc((x < 0 ? 14 : 10) << 4 | (y < 0 ? 13 : 9), fd);
-					int16_t y16 = y < 0 ? ~y : y;
+					fputc((int8_t)(y < 0 ? ~y : y), fd);
+				} else if (FITS_IN_16BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 14 : 10) << 4 | (SIGN_BIT_SET(y) ? 13 : 9), fd);
+					uint16_t y16 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 					fwrite(BRByteOrder(&y16, 2), 2, 1, fd);
-				} else if (y == (int64_t)(y & 0xFFFFFFFFLL)) {
-					fputc((x < 0 ? 14 : 10) << 4 | (y < 0 ? 14 : 10), fd);
-					int32_t y32 = y < 0 ? ~y : y;
+				} else if (FITS_IN_32BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 14 : 10) << 4 | (SIGN_BIT_SET(y) ? 14 : 10), fd);
+					uint32_t y32 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 					fwrite(BRByteOrder(&y32, 4), 4, 1, fd);
 				} else {
-					fputc((x < 0 ? 14 : 10) << 4 | (y < 0 ? 15 : 11), fd);
-					int64_t y64 = y < 0 ? ~y : y;
+					fputc((SIGN_BIT_SET(x) ? 14 : 10) << 4 | (SIGN_BIT_SET(y) ? 15 : 11), fd);
+					uint64_t y64 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x32, 4), 4, 1, fd);
 					fwrite(BRByteOrder(&y64, 8), 8, 1, fd);
 				}
 			} else {
-				int64_t x64 = x < 0 ? ~x : x;
-				fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
-				if (y == (int64_t)(y & 0xFF)) {
-					fputc((x < 0 ? 15 : 11) << 4 | (y < 0 ? 12 : 8), fd);
+				uint64_t x64 = SIGN_BIT_SET(x) ? ~x : x;
+				if (FITS_IN_8BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 15 : 11) << 4 | (SIGN_BIT_SET(y) ? 12 : 8), fd);
 					fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
-					fputc((char)(y < 0 ? ~y : y), fd);
-				} else if (y == (int64_t)(y & 0xFFFF)) {
-					fputc((x < 0 ? 15 : 11) << 4 | (y < 0 ? 13 : 9), fd);
-					int16_t y16 = y < 0 ? ~y : y;
+					fputc((int8_t)(SIGN_BIT_SET(y) ? ~y : y), fd);
+				} else if (FITS_IN_16BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 15 : 11) << 4 | (SIGN_BIT_SET(y) ? 13 : 9), fd);
+					uint16_t y16 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 					fwrite(BRByteOrder(&y16, 2), 2, 1, fd);
-				} else if (y == (int64_t)(y & 0xFFFFFFFFLL)) {
-					fputc((x < 0 ? 15 : 11) << 4 | (y < 0 ? 14 : 10), fd);
-					int32_t y32 = y < 0 ? ~y : y;
+				} else if (FITS_IN_32BITS(y)) {
+					fputc((SIGN_BIT_SET(x) ? 15 : 11) << 4 | (SIGN_BIT_SET(y) ? 14 : 10), fd);
+					uint32_t y32 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 					fwrite(BRByteOrder(&y32, 4), 4, 1, fd);
 				} else {
-					fputc((x < 0 ? 15 : 11) << 4 | (y < 0 ? 15 : 11), fd);
-					int64_t y64 = y < 0 ? ~y : y;
+					fputc((SIGN_BIT_SET(x) ? 15 : 11) << 4 | (SIGN_BIT_SET(y) ? 15 : 11), fd);
+					uint64_t y64 = SIGN_BIT_SET(y) ? ~y : y;
 					fwrite(BRByteOrder(&x64, 8), 8, 1, fd);
 					fwrite(BRByteOrder(&y64, 8), 8, 1, fd);
 				}
@@ -171,12 +175,10 @@ void write2Ints(FILE* fd, int64_t x, int64_t y)
 	}
 }
 
-int getNameId(ModuleWriter* writer, char* name)
+uint32_t getNameId(ModuleWriter* writer, char* name)
 {
-	for (int i = 0; i < writer->consts.length; i++) {
-		if (sbufeq(name, writer->consts.data[i])) {
-			return i;
-		}
+	arrayForeach (str, iter, writer->consts) {
+		if (streq(name, *iter)) return iter - writer->consts.data;
 	}
 	strArray_append(&writer->consts, name);
 	return writer->consts.length - 1;
@@ -193,8 +195,7 @@ void writeDataBlock(ModuleWriter* writer, DataBlock block)
 
 	writeName(writer, block.name, block.is_mutable);
 	writeInt(writer->dst, block.pieces.length, 0);
-	for (int i = 0; i < block.pieces.length; ++i) {
-		DataPiece* piece = block.pieces.data + i;
+	arrayForeach (DataPiece, piece, block.pieces) {
 		fputc(piece->type, writer->dst);
 		switch (piece->type) {
 			case PIECE_BYTES:
@@ -228,7 +229,9 @@ void writeMemoryBlock(ModuleWriter* writer, char* name, int32_t size)
 
 typedef void (*OpWriter) (ModuleWriter*, Op);
 
-void writeNoArgOp(ModuleWriter* writer, Op op) {}
+void writeNoArgOp(ModuleWriter* writer, Op op) {
+	(void)writer; (void)op;
+}
 
 void writeMarkOp(ModuleWriter* writer, Op op)
 {
@@ -435,11 +438,11 @@ void writeModule(Module* src, FILE* dst)
 // writing dependencies
 	int n_dependencies = 0;
 	arrayForeach (Submodule, submodule, src->submodules) {
-		if (submodule->direct && submodule - src->submodules.data < src->submodules.length - 1) n_dependencies += 1;
+		if (submodule->direct && (uint64_t)(submodule - src->submodules.data) < src->submodules.length - 1) n_dependencies += 1;
 	}
 	writeInt(dst, n_dependencies, 0);
 	arrayForeach (Submodule, submodule, src->submodules) {
-		if (submodule->direct && submodule - src->submodules.data < src->submodules.length - 1) {
+		if (submodule->direct && (uint64_t)(submodule - src->submodules.data) < src->submodules.length - 1) {
 			fputs(submodule->name, dst);
 			fputc('\n', dst);
 		}
@@ -449,12 +452,12 @@ void writeModule(Module* src, FILE* dst)
 	
 //  dumping data blocks
 	writeInt(dst, root->ds_length, 0);
-	for (int i = root->ds_offset; i < src->seg_data.length; ++i) {
+	for (uint32_t i = root->ds_offset; i < src->seg_data.length; ++i) {
 		writeDataBlock(&writer, src->seg_data.data[i]);
 	}
 //  dumping operations
 	writeInt(dst, root->es_length - 1, 0);
-	for (int i = root->es_offset; i < src->seg_exec.length - 1; ++i) {
+	for (uint32_t i = root->es_offset; i < src->seg_exec.length - 1; ++i) {
 		writeOp(&writer, src->seg_exec.data[i]);
 	}
 //  dumping constants pool

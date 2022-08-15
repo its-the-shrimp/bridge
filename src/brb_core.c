@@ -109,40 +109,40 @@ bool isPathDir_s(sbuf path)
 	return isPathDir(temp);
 }
 
-char* getFileExt(char* path)
+char* getFileExt(const char* path)
 {
 	char* dot = strrchr(path, '.');
 	if (!dot || dot == path) return "";
-	return strcopy(dot + 1);
+	return strdup(dot + 1);
 }
 
 sbuf getFileExt_s(sbuf path)
 {
 	sbuf noext;
-	if (!sbufsplitr(&path, &noext, CSBUF(".")).data) return CSBUF("");
+	if (!sbufsplitr(&path, &noext, fromcstr(".")).data) return fromcstr("");
 	return path;
 }
 
-char* setFileExt(char* path, char* ext)
+char* setFileExt(const char* path, const char* ext)
 {
-	sbuf src = SBUF(path);
+	sbuf src = fromstr((char*)path);
 	sbuf noext;
-	sbufsplitr(&src, &noext, CSBUF("."));
-	return *ext ? tostr(noext, CSBUF("."), SBUF(ext)) : tostr(noext);
+	sbufsplitr(&src, &noext, fromcstr("."));
+	return *ext ? tostr(noext, fromcstr("."), fromstr((char*)ext)) : tostr(noext);
 }
 
 sbuf setFileExt_s(sbuf path, sbuf ext)
 {
 	sbuf noext;
-	sbufsplitr(&path, &noext, CSBUF("."));
-	return ext.length ? sbufconcat(noext, SBUF("."), ext) : sbufcopy(noext);
+	sbufsplitr(&path, &noext, fromcstr("."));
+	return ext.length ? sbufconcat(noext, fromcstr("."), ext) : sbufcopy(noext);
 }
 
-char* fileBaseName(char* path)
+char* fileBaseName(const char* path)
 {
-	sbuf src = SBUF(path);
+	sbuf src = fromstr((char*)path);
 	sbuf res;
-	if (sbufeq(sbufsplitr(&src, &res, CSBUF("."), PATHSEP), '.')) {
+	if (sbufeq(sbufsplitr(&src, &res, fromcstr("."), PATHSEP), fromcstr("."))) {
 		return tostr(sbufsplitr(&res, &src, PATHSEP).length ? res : src);
 	} else {
 		return tostr(src.length ? src : res);
@@ -152,7 +152,7 @@ char* fileBaseName(char* path)
 sbuf fileBaseName_s(sbuf path)
 {
 	sbuf res;
-	if (sbufeq(sbufsplitr(&path, &res, CSBUF("."), PATHSEP), '.')) {
+	if (sbufeq(sbufsplitr(&path, &res, fromcstr("."), PATHSEP), fromcstr("."))) {
 		return sbufsplitr(&res, &path, PATHSEP).length ? res : path;
 	} else {
 		return path.length ? path : res;
@@ -161,7 +161,7 @@ sbuf fileBaseName_s(sbuf path)
 
 FILE* findModule(const char* name, const char* search_paths[])
 {
-	for (int i = 0; search_paths[i]; i++) {
+	for (uint64_t i = 0; search_paths[i]; i += 1) {
 		char path[256];
 		snprintf(path, sizeof(path), "%s/%s.brb", search_paths[i], name);
 
@@ -169,14 +169,15 @@ FILE* findModule(const char* name, const char* search_paths[])
 		if (module_fd) return module_fd;
 		errno = 0;
 	}
+	
 	return NULL;
 }
 
 Submodule* getOpSubmodule(Module* module, Op* op)
 {
-	int index = op - module->seg_exec.data;
+	uint64_t index = op - module->seg_exec.data;
 	
-	for (Submodule* submodule = module->submodules.data; submodule - module->submodules.data < module->submodules.length; ++submodule) {
+	arrayForeach (Submodule, submodule, module->submodules) {
 		if (inRange(index, submodule->es_offset, submodule->es_offset + submodule->es_length)) 
 			return submodule;
 	}
@@ -186,9 +187,9 @@ Submodule* getOpSubmodule(Module* module, Op* op)
 
 Submodule* getDataBlockSubmodule(Module* module, DataBlock* block)
 {
-	int index = block - module->seg_data.data;
+	uint64_t index = block - module->seg_data.data;
 	
-	for (Submodule* submodule = module->submodules.data; submodule - module->submodules.data < module->submodules.length; ++submodule) {
+	arrayForeach (Submodule, submodule, module->submodules) {
 		if (inRange(index, submodule->ds_offset, submodule->ds_offset + submodule->ds_length)) 
 			return submodule;
 	}
@@ -226,18 +227,14 @@ Submodule getRootSubmodule(Module* module, const char* name)
 Module* mergeModule(Module* restrict src, Module* dst, char* src_name)
 {
 	SubmoduleArray_append(&src->submodules, getRootSubmodule(src, src_name));
-	for (
-		Submodule* submodule = src->submodules.data;
-		submodule - src->submodules.data < src->submodules.length;
-		++submodule
-	) {
+	arrayForeach (Submodule, submodule, src->submodules) {
 		submodule->ds_offset += dst->seg_data.length;
 		submodule->es_offset += dst->seg_exec.length;
-		if (submodule - src->submodules.data != src->submodules.length - 1)
+		if ((uint64_t)(submodule - src->submodules.data) != src->submodules.length - 1)
 			submodule->direct = false;
 	}
 
-	for (Op* op = src->seg_exec.data; op - src->seg_exec.data < src->seg_exec.length; ++op) {
+	arrayForeach (Op, op, src->seg_exec) {
 		if (op_flags[op->type] & OPF_USES_MODULE_ID)
 			op->module_id += dst->submodules.length;
 	}

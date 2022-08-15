@@ -3,7 +3,6 @@
 #include <signal.h>
 
 defArray(sbuf);
-
 declArray(int);
 defArray(int);
 defArray(str);
@@ -433,13 +432,20 @@ static Expr* getProcDef(Expr* expr)
 
 static char* getFullDeclName(Expr* expr)
 {
-	char* res = strcopy(getDeclName(expr));
+	char* res = strdup(getDeclName(expr));
 	expr = expr->block;
 	for (; expr->block != NULL; expr = expr->block) {
 		char* namespace = getSubexpr(expr->block, 0)->name;
-		if (namespace) res = tostr(SBUF(namespace), CSBUF('.'), SBUF(res));
+		if (namespace) res = tostr(fromstr(namespace), fromcstr("."), fromstr(res));
 	}
 	return res;
+}
+
+bool isLValue(Expr expr)
+{
+	if (expr.type == EXPR_GET_ATTR) {
+		return isLValue(*expr.arg1);
+	} else  return expr.type == EXPR_GET || expr.type == EXPR_DEREF;
 }
 
 const int COUNTER_BASE = __COUNTER__;
@@ -927,9 +933,9 @@ BR_ERROR_DEF(InvalidClassFieldKindError, (AST* ast, Expr field, Expr type_decl))
 
 TypeDef getBaseType(TypeDef type)
 {
-	if (isPtrType(type)) {
-		return getBaseType(*type.base);
-	} else return type;
+	TypeDef* iter;
+	for (iter = &type; isPtrType(*iter); iter = iter->base);
+	return *iter;
 }
 
 BR_ERROR_DEF(ExcessBaseTypeError, (AST* ast, TokenLoc loc, TypeDef type1, TypeDef type2))
@@ -1014,6 +1020,13 @@ int getAttrOffset(Expr* attr)
 	return res;
 }
 
+uint64_t getIndirLevel(TypeDef type)
+{
+	uint64_t res = 0;
+	for (TypeDef* iter = &type; isPtrType(*iter); iter = iter->base) res += 1;
+	return res;
+}
+
 bool _typeMatches(TypeDef field, TypeDef entry)
 {
 	static_assert(N_TYPE_KINDS == 8, "not all type kinds are handled in typeMatches");
@@ -1057,7 +1070,7 @@ static Expr* getDecl(Expr* block, char* name, Expr* bound)
 				"unexpected expression type %d in the declaration chain",
 				expr->type
 			);
-			if (sbufeq(name, getDeclName(expr))) return expr;
+			if (streq(name, getDeclName(expr))) return expr;
 		}
 	}
 	return NULL;
@@ -1474,29 +1487,31 @@ static int64_t getIntLiteral(Expr* expr)
 	assert(false, "attempted to get an integer literal from an expression which does not produce an integer literal");
 }
 
-static void wrapExpr(Expr* expr, ExprType new_expr_type, Expr arg2)
+static Expr* wrapExpr(Expr* expr, ExprType new_expr_type, ...)
 {
-	Expr arg1 = *expr;
+	Expr arg = *expr;
 	expr->type = new_expr_type;
+	va_list args;
+	va_start(args, new_expr_type);
+	
 	switch (expr_flags[new_expr_type] & EXPR_ARITY) {
 		case EXPR_VARIADIC:
 			initExpr(expr);
-			addSubexpr(expr, arg1);
-			if (arg2.type) addSubexpr(expr, arg2);
+			addSubexpr(expr, arg);
 		case EXPR_NULLARY:
-			return;
+			break;
 		case EXPR_BINARY:
-			if (arg2.type) {
-				expr->arg2 = malloc(sizeof(Expr));
-				*expr->arg2 = arg2;
-			}
+			*(expr->arg1 = malloc(sizeof(Expr))) = arg;
+			*(expr->arg2 = malloc(sizeof(Expr))) = va_arg(args, Expr);
+			break;
 		case EXPR_UNARY:
-			expr->arg1 = malloc(sizeof(Expr));
-			*expr->arg1 = arg1;
-			return;
+			*(expr->arg1 = malloc(sizeof(Expr))) = arg;
+			break;
 		default:
 			assert(false, "unknown expression arity type %d", expr_flags[new_expr_type] & EXPR_ARITY);
 	}
+	va_end(args);
+	return expr;
 }
 
 static void wrapExprInCast(Expr* expr, TypeDef new_type)
@@ -1535,6 +1550,9 @@ void setBinaryExprType(AST* ast, Expr* expr, ExprType new_type)
 DEF_WITH_ATTRS(bool setExprType(AST* ast, Expr* expr, Expr* parent_expr, ExprType new_type), __result_use_check)
 // changes the type of the expression if the new type is suitable in place of the current expression type
 {
+#ifndef __GNUC__
+#error "Range initializers are not supported by the compiler"
+#endif
 	static_assert(N_EXPR_TYPES == 56, "not all expression types are handled in setExprType");
 	static ExprTypeSetter override_table[N_EXPR_TYPES][N_EXPR_TYPES] = {
 		[EXPR_INVALID   ] = {
@@ -1720,7 +1738,7 @@ TypeDef getExprValueType(AST* ast, Expr expr)
 					return arg1_type.size == arg2_type.size ? INT_TYPE(minInt(arg1_type.size * 2, 8)) : (arg1_type.size > arg2_type.size ? arg1_type : arg2_type);
 				case KIND_ARRAY:
 				case KIND_PTR:
-					return isPtrType(arg2_type) || expr.arg2->type == EXPR_INT && expr.arg2->int_literal < 0 ? INT_TYPE(8) : arg1_type; 
+					return isPtrType(arg2_type) || (expr.arg2->type == EXPR_INT && expr.arg2->int_literal < 0) ? INT_TYPE(8) : arg1_type; 
 				case KIND_BUILTIN_VAL:
 					return INT_TYPE(8);
 				case KIND_BOOL: {
@@ -1980,7 +1998,7 @@ bool parseDecl(AST* ast, Token token, TypeDef var_type, int decl_attrs, Expr* ds
 			}
 		}
 
-		if (sbufeq(proc_name, "main")) {
+		if (sbufeq(fromstr(proc_name), fromcstr("main"))) {
 			proc_info->attrs |= ATTR_EXTERNAL;
 			if (proc_info->var_type->kind != KIND_VOID) raiseMainProcRetTypeMismatchError(ast, type_loc, *proc_info->var_type);
 			if (proc_info->n_args) raiseMainProcArgCountMismatchError(ast, token.loc, proc_info->n_args);
@@ -2071,7 +2089,7 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc,
 	if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a syscall name", wordToken(NULL));
 	bool name_vaildated = false;
 	for (int i = 0; i < N_SYS_OPS; i++) {
-		if (sbufeq(syscallNames[i], token.word)) {
+		if (sbufeq(syscallNames[i], fromstr(token.word))) {
 			name_vaildated = true;
 			break;
 		}
@@ -2117,7 +2135,7 @@ bool parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* p
 	if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a built-in name", wordToken(NULL));
 	bool name_vaildated = false;
 	for (int i = 0; i < N_BUILTINS; i++) {
-		if (sbufeq(builtins[i].name, token.word)) {
+		if (sbufeq(builtins[i].name, fromstr(token.word))) {
 			name_vaildated = true;
 			break;
 		}
@@ -2178,7 +2196,7 @@ bool parseSymbolNot(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* p
 	}
 
 	dst->arg1 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg1, dst, dst->block, proc, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
+	parseExpr(ast, dst->arg1, dst, dst->block, proc, (flags & EXPRTERM) | EXPRTYPE_EVALUATABLE);
 
 	return false;
 }
@@ -2391,8 +2409,7 @@ bool parseSymbolAssignment(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 		if (flags & EXPRTYPE_EVALUATABLE && !(flags & (EXPRTERM_BRACKET | EXPRTERM_ARG))) raiseUnbracketedAssignExprError(ast, token.loc);
 
 		dst->arg2 = calloc(1, sizeof(Expr));
-		Token entry_loc = peekToken(ast->preprocessor);
-		parseExpr(ast, dst->arg2, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
+		parseExpr(ast, dst->arg2, dst, dst->block, func, (flags & EXPRTERM) | EXPRTYPE_EVALUATABLE);
 	}
 
 	return false;
@@ -2442,7 +2459,7 @@ bool parseSymbolBlockStart(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 			if (getTokenSymbolId(token) == SYMBOL_BLOCK_END) break;
 
 			Expr* expr = addSubexpr(dst, (Expr){0});
-			parseExpr(ast, expr, dst, dst, func, flags & EXPRTYPE | EXPRTERM_FULL);
+			parseExpr(ast, expr, dst, dst, func, (flags & EXPRTYPE) | EXPRTERM_FULL);
 			fetchToken(ast->preprocessor);
 		}
 	}
@@ -2459,7 +2476,7 @@ bool parseBinaryExprSymbol(AST* ast, Token token, Expr* dst, Expr* parent_expr, 
 	}
 
 	dst->arg2 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg2, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
+	parseExpr(ast, dst->arg2, dst, dst->block, func, (flags & EXPRTERM) | EXPRTYPE_EVALUATABLE);
 
 	return false;
 }
@@ -2473,7 +2490,7 @@ bool parseSymbolTilde(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr*
 	}
 
 	dst->arg1 = calloc(1, sizeof(Expr));
-	parseExpr(ast, dst->arg1, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
+	parseExpr(ast, dst->arg1, dst, dst->block, func, (flags & EXPRTERM) | EXPRTYPE_EVALUATABLE);
 
 	return false;
 }
@@ -2525,7 +2542,7 @@ bool parseComparisonOperatorSymbol(AST* ast, Token token, Expr* dst, Expr* paren
 
 	dst->arg2 = calloc(1, sizeof(Expr));
 	token = peekToken(ast->preprocessor);
-	parseExpr(ast, dst->arg2, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
+	parseExpr(ast, dst->arg2, dst, dst->block, func, (flags & EXPRTERM) | EXPRTYPE_EVALUATABLE);
 
 	return false;
 }
@@ -2540,7 +2557,7 @@ bool parseSymbolAmpersand(AST* ast, Token token, Expr* dst, Expr* parent_expr, E
 		}
 
 		dst->arg1 = calloc(1, sizeof(Expr));
-		parseExpr(ast, dst->arg1, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
+		parseExpr(ast, dst->arg1, dst, dst->block, func, (flags & EXPRTERM) | EXPRTYPE_EVALUATABLE);
 	} else return parseBinaryExprSymbol(ast, token, dst, parent_expr, func, flags);
 
 	return false;
@@ -2556,7 +2573,7 @@ bool parseSymbolStar(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* 
 		}
 
 		dst->arg1 = calloc(1, sizeof(Expr));
-		parseExpr(ast, dst->arg1, dst, dst->block, func, flags & EXPRTERM | EXPRTYPE_EVALUATABLE);
+		parseExpr(ast, dst->arg1, dst, dst->block, func, (flags & EXPRTERM) | EXPRTYPE_EVALUATABLE);
 	} else return parseBinaryExprSymbol(ast, token, dst, parent_expr, func, flags);
 
 	return false;
@@ -3236,15 +3253,42 @@ void optimizeExprGetAttr(AST* ast, Expr* expr, Expr* proc)
 {
 	optimizeExpr(ast, expr->arg1, proc);
 	TypeDef obj_type = getExprValueType(ast, *expr->arg1);
+	TypeDef base_obj_type = getBaseType(obj_type);
 
-	if (obj_type.kind != KIND_CUSTOM) raiseAttrOfPrimitiveError(ast, expr->loc, obj_type);
-	Expr* block = getSubexpr(obj_type.decl, 2);
+	if (base_obj_type.kind != KIND_CUSTOM) raiseAttrOfPrimitiveError(ast, expr->loc, obj_type);
+	Expr* block = getSubexpr(base_obj_type.decl, 2);
 
 	if (!block) raiseNoTypeDefError(ast, *obj_type.decl);
 	Expr* attr = getDecl(block, expr->name, block->block);
 
 	if (!attr) raiseAttrNotFoundError(ast, expr->loc, obj_type, expr->name);
 	expr->arg2 = attr;
+// handling case if the attribute is a static variable or a procedure
+	if (attr->type == EXPR_NEW_PROC ? true : getSubexpr(attr, 2)->attrs & ATTR_STATIC) {
+		expr->type = EXPR_GET;
+		expr->arg1 = attr;
+		return;
+	} 
+
+	repeat (getIndirLevel(obj_type))
+		wrapExpr(expr->arg1, EXPR_DEREF);
+
+	if (expr->arg1->type == EXPR_GET)
+		wrapExpr(wrapExpr(expr->arg1, EXPR_GET_REF), EXPR_DEREF);
+
+	if (expr->arg1->type == EXPR_DEREF) {
+		*(wrapExpr(wrapExpr(expr->arg1->arg1, EXPR_ADD, (Expr){
+			.type = EXPR_INT,
+			.int_literal = getAttrOffset(expr->arg2),
+			.block = expr->block,
+			.loc = expr->loc
+		}), EXPR_CAST)->var_type = malloc(sizeof(Expr))) = PTR_TYPE(*getSubexpr(expr->arg2, 2)->var_type);
+		Expr lvalue = *expr->arg1;
+		free(expr->arg1);
+		*expr = lvalue;
+	} else assert(false, "codegen for getting attributes of r-values is not implmented yet");
+		
+		
 }
 
 static_assert(N_EXPR_TYPES == 56, "not all expressions have any optimizations defined");
@@ -3394,7 +3438,7 @@ void freeRegister(ASTCompilerCtx* ctx, regstate_t* reg_state, int reg_id, int ca
 
 void compileSrcRef(ASTCompilerCtx* ctx, TokenLoc loc)
 {
-	sbuf path_s = SBUF((char*)loc.src_name);
+	sbuf path_s = fromstr((char*)loc.src_name);
 	if (!sbufeq(ctx->cur_src_path, path_s)) {
 		fprintf(
 			ctx->dst, 
@@ -3444,9 +3488,9 @@ void compileExprString(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 	compileSrcRef(ctx, expr.loc);
 
 	int str_index = -1;
-	for (int i = 0; i < ctx->data_blocks.length; i++) {
-		if (sbufeq(ctx->data_blocks.data[i], expr.string)) {
-			str_index = i;
+	arrayForeach (sbuf, data_block, ctx->data_blocks) {
+		if (sbufeq(*data_block, expr.string)) {
+			str_index = data_block - ctx->data_blocks.data;
 			break;
 		}
 	}
@@ -3507,7 +3551,7 @@ void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 
 					if (initializer_size == 1) {
 						int iter_reg, iter_cache_id;
-						getRegister(ctx, &reg_state, dst_reg, &iter_reg, &cache_id);
+						getRegister(ctx, &reg_state, dst_reg, &iter_reg, &iter_cache_id);
 
 						initializer = getSubexpr(initializer, 0);
 						expr_compilers[initializer->type](ctx, *initializer, reg_state | (1 << dst_reg) | (1 << iter_reg), element_reg);
@@ -3614,14 +3658,15 @@ void compileExprAssign(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 		if (getSubexpr(expr.arg1->arg1, 2)->attrs & ATTR_STATIC) {
 			int ptr_reg, cache_id;
 			getRegister(ctx, &reg_state, dst_reg, &ptr_reg, &cache_id);
+			const char *const decl_name = getFullDeclName(expr.arg1->arg1);
 			fprintf(
 				ctx->dst,
 				"\tsetd r%1$d . \"%2$s\"\n"
 				"\tstr%3$d r%1$d r%4$d\n",
-				ptr_reg, getDeclName(expr.arg1->arg1), getTypeSize(*getSubexpr(expr.arg1->arg1, 2)->var_type) * 8, dst_reg
+				ptr_reg, decl_name, getTypeSize(*getSubexpr(expr.arg1->arg1, 2)->var_type) * 8, dst_reg
 			);
 			freeRegister(ctx, &reg_state, ptr_reg, cache_id);
-		} else fprintf(ctx->dst, "\tstrv \"%s\" r%d\n", getSubexpr(expr.arg1->arg1, 0)->name, dst_reg);
+		} else fprintf(ctx->dst, "\tstrv \"%s\" r%d\n", getDeclName(expr.arg1->arg1), dst_reg);
 	} else if (expr.arg1->type == EXPR_DEREF) {
 		int ptr_reg, cache_id;
 		getRegister(ctx, &reg_state, dst_reg, &ptr_reg, &cache_id);
@@ -4356,12 +4401,12 @@ void compileExprCast(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int d
 
 void compileExprNewProc(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
-	sbuf proc_name = SBUF(getDeclName(&expr));
+	sbuf proc_name = fromstr(getDeclName(&expr));
 	Expr* proc_info = getSubexpr(&expr, 2);
 	Expr* proc_args = getSubexpr(&expr, 3);
 	Expr* proc_body = getSubexpr(proc_args, proc_info->n_args + 1);
 
-	if (sbufeq(proc_name, CSBUF("main"))) ctx->has_entry_point = true;
+	if (sbufeq(proc_name, fromcstr("main"))) ctx->has_entry_point = true;
 
 	compileSrcRef(ctx, expr.loc);
 	fprintf(ctx->dst, "%sproc \"%.*s\"\n", proc_info->attrs & ATTR_EXTERNAL ? "ext" : "", unpack(proc_name));
@@ -4377,7 +4422,6 @@ void compileExprNewProc(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 	fprintf(ctx->dst, "endproc\n");
 
 	chainForeach(Expr, static_var_decl, ctx->static_vars) {
-		printf("%p\n", static_var_decl);
 		expr_compilers[static_var_decl->type](ctx, *static_var_decl, 0, -1);
 	}
 	ExprChain_clear(&ctx->static_vars);
@@ -4395,7 +4439,37 @@ void compileExprNewType(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 void compileExprGetAttr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
 {
 	compileSrcRef(ctx, expr.loc);
-	assert(false, "codegen for EXPR_GET_ATTR is not implemented yet");
+	if (expr.arg1->type == EXPR_GET) {
+		Expr* decl_info = getSubexpr(expr.arg1->arg1, 2);
+		Expr* attr_info = getSubexpr(expr.arg2, 2);
+		int attr_size = getTypeMemorySize(*attr_info->var_type);
+		if (attr_size <= 8) {
+			if (decl_info->attrs & ATTR_STATIC) {
+				char* decl_name = getFullDeclName(expr.arg1->arg1);
+				fprintf(
+					ctx->dst,
+					"ldds r%x \"%s\":%d :%d\n",
+					dst_reg,
+					decl_name,
+					getTypeMemorySize(*getSubexpr(expr.arg2, 2)->var_type),
+					getAttrOffset(expr.arg2)
+				);
+				free(decl_name);
+			} else {
+				fprintf(
+					ctx->dst,
+					"ldvs r%x \"%s\":%d :%d\n",
+					dst_reg,
+					getDeclName(expr.arg1->arg1),
+					getTypeMemorySize(*getSubexpr(expr.arg2, 2)->var_type),
+					getAttrOffset(expr.arg2)
+				);
+			}
+		} else {
+			printf("%d\n", attr_size);
+			assert(false, "codegen for EXPR_GET_ATTR for this case is not implemented yet");
+		}
+	} else assert(false, "codegen for EXPR_GET_ATTR for this case is not implemented yet");
 }
 
 ExprCompiler expr_compilers[] = {
@@ -4498,13 +4572,13 @@ void printUsageMsg(FILE* dst, char* program_name)
 }
 
 sbuf EXTS[] = {
-	['p'] = CSBUF("br"),
-	['v'] = CSBUF("vbrb"),
-	['b'] = CSBUF("brb"),
-	['s'] = CSBUF("S"),
-	['o'] = CSBUF("o"),
-	['x'] = CSBUF(""),
-	['i'] = CSBUF(".brb.temp")
+	['p'] = fromcstr("br"),
+	['v'] = fromcstr("vbrb"),
+	['b'] = fromcstr("brb"),
+	['s'] = fromcstr("S"),
+	['o'] = fromcstr("o"),
+	['x'] = fromcstr(""),
+	['i'] = fromcstr("brb.temp")
 };
 
 void printMacros(BRP* prep) {
@@ -4512,7 +4586,7 @@ void printMacros(BRP* prep) {
 		printTokenLoc(macro->def_loc);
 		printf("#define %s%c", macro->name, macro->args.length ? '(' : '\0');
 		arrayForeach(MacroArg, arg, macro->args) {
-			printf("%s%s", arg->name, arg - macro->args.data < macro->args.length - 1 ? ", " : "");
+			printf("%s%s", arg->name, (uint64_t)(arg - macro->args.data) < macro->args.length - 1 ? ", " : "");
 		}
 		printf("%c %.*s\n", macro->args.length ? ')' : '\0', unpack(macro->def));
 	}
@@ -4604,7 +4678,7 @@ void preprocessSourceCode(const char* input_path, bool output_macros, sbuf symbo
 	symbols[n_symbols - 1] = BRP_SYMBOL(" ");
 	setSymbols(&prep, symbols);
 	setKeywords(&prep, keywords);
-	setInput(&prep, input_path, fopen(input_path, "r"));
+	setInput(&prep, (char*)input_path, fopen(input_path, "r"));
 
 	while (true) {
 		Token token = fetchToken(&prep);
@@ -4635,7 +4709,7 @@ void sourceCode2VBRB(const char* input_path, const char* output_path, bool outpu
 		eprintf("error: could not open file: `%s` (reason: %s)\n", input_path, strerror(errno));
 		exit(1);
 	}
-	setInput(&prep, input_path, fd);
+	setInput(&prep, (char*)input_path, fd);
 
 	AST ast;
 	parseSourceCode(&prep, &ast);
@@ -4756,6 +4830,7 @@ int main(int argc, char* argv[])
 						printUsageMsg(stdout, argv[0]);
 						return 0;
 					case 'd':
+						argv[i] += 1;
 						if (argv[i][0] == 'M') {
 							output_macros = true;
 						} else if (argv[i][0] == 'E') {
@@ -4764,7 +4839,6 @@ int main(int argc, char* argv[])
 							eprintf("error: unknown option `-d%c`\n", argv[i][0]);
 							return 1;
 						}
-						argv[i]--;
 						break;
 					case 'A': 
 						argv[i] += 1;
@@ -4794,7 +4868,7 @@ int main(int argc, char* argv[])
 						break;
 					case '-':
 						argv[i] += 1;
-						if (sbufeq(argv[i], "no-opt")) {
+						if (streq(argv[i], "no-opt")) {
 							optimize = false;
 						} else {
 							eprintf("error: unknown option `--%s`\n", argv[i]);
@@ -4825,12 +4899,12 @@ int main(int argc, char* argv[])
 	if (output_path) {
 		if (isPathDir(output_path))
 			output_path = tostr(
-				SBUF(output_path),
+				fromstr(output_path),
 				PATHSEP,
-				fileBaseName_s(SBUF(input_path)),
-				EXTS[compiler_action]
+				fileBaseName_s(fromstr(input_path)),
+				EXTS[(unsigned)compiler_action]
 			);
-	} else output_path = setFileExt(input_path, EXTS[compiler_action].data);
+	} else output_path = setFileExt(input_path, EXTS[(unsigned)compiler_action].data);
 
 	Module res;
 	FILE* fd;
@@ -5006,10 +5080,4 @@ int main(int argc, char* argv[])
 			callNativeLinker(output_path, output_path);
 			return 0;
 	}
-	eprintf(
-		"error: unknown input type `%s`;\n"
-		"the compiler recognises the following input types: `br`, `vbrb` and `brb`\n",
-		input_type
-	);
-	return 1;
 }

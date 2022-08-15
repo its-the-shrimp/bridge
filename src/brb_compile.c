@@ -70,13 +70,6 @@ void endConditionalOp(FILE* dst, int cond_ctx)
 
 static char literal_buf[32];
 
-static int bitOffset(int64_t value) {
-	for (int i = 0; i < 64; ++i) {
-		if (value & (1 << i)) return i;
-	}
-	return 64;
-}
-
 #define INTL_REG_ONLY 0x1
 #define INTL_ADDR_OFFSET 0x2
 #define INTL_REG_ARG 0x4
@@ -142,17 +135,17 @@ uint64_t nativeStackOffset(CompCtx* ctx, uint64_t offset)
 	return alignby(ctx->cur_frame_size, STACK_ALIGNMENT) - ctx->cur_frame_size + offset;
 }
 
-typedef void (*OpNativeCompiler) (Module*, int, CompCtx*);
+typedef void (*OpNativeCompiler) (Module*, uint32_t, CompCtx*);
 
-void compileSysNoneNative(Module* module, int index, CompCtx* ctx) {}
+void compileSysNoneNative(Module* module, uint32_t index, CompCtx* ctx) {}
 
-void compileSysExitNative(Module* module, int index, CompCtx* ctx)
+void compileSysExitNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 2);
 	fprintf(ctx->dst, "\tmov x16, 1\n\tsvc 0\n");
 }
 
-void compileSysWriteNative(Module* module, int index, CompCtx* ctx)
+void compileSysWriteNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 5);
 	fprintf(ctx->dst,
@@ -164,13 +157,13 @@ void compileSysWriteNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileSysArgcNative(Module* module, int index, CompCtx* ctx)
+void compileSysArgcNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 1);
 	fprintf(ctx->dst, "\tmov x0, x28\n");
 }
 
-void compileSysArgvNative(Module* module, int index, CompCtx* ctx)
+void compileSysArgvNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 3);
 	fprintf(ctx->dst,
@@ -179,7 +172,7 @@ void compileSysArgvNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileSysReadNative(Module* module, int index, CompCtx* ctx)
+void compileSysReadNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 5);
 	fprintf(ctx->dst,
@@ -191,13 +184,13 @@ void compileSysReadNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileSysGetErrnoNative(Module* module, int index, CompCtx* ctx)
+void compileSysGetErrnoNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 1);
 	fprintf(ctx->dst, "\tmov x0, x26\n");
 }
 
-void compileSysSetErrnoNative(Module* module, int index, CompCtx* ctx)
+void compileSysSetErrnoNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 1);
 	fprintf(ctx->dst, "\tmov x26, x0\n");
@@ -218,12 +211,12 @@ static_assert(
 	"not all syscalls have matching native compilers"
 );
 
-void compileNopNative(Module* module, int index, CompCtx* ctx)
+void compileNopNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	fprintf(ctx->dst, "\tnop\n");
 }
 
-void compileOpEndNative(Module* module, int index, CompCtx* ctx)
+void compileOpEndNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	if (index == module->seg_exec.length - 1) return;
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 3);
@@ -235,12 +228,12 @@ void compileOpEndNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpMarkNative(Module* module, int index, CompCtx* ctx)
+void compileOpMarkNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	fprintf(ctx->dst, ".m%d:\n", index);
 }
 
-void compileOpSetNative(Module* module, int index, CompCtx* ctx)
+void compileOpSetNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -249,14 +242,14 @@ void compileOpSetNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpSetrNative(Module* module, int index, CompCtx* ctx)
+void compileOpSetrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tmov %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpSetdNative(Module* module, int index, CompCtx* ctx)
+void compileOpSetdNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	DataBlock* block = module->seg_data.data + op.symbol_id;
@@ -277,7 +270,7 @@ void compileOpSetdNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpSetbNative(Module* module, int index, CompCtx* ctx)
+void compileOpSetbNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -291,7 +284,7 @@ void compileOpSetbNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpAddNative(Module* module, int index, CompCtx* ctx)
+void compileOpAddNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -300,7 +293,7 @@ void compileOpAddNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpAddrNative(Module* module, int index, CompCtx* ctx)
+void compileOpAddrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
@@ -313,7 +306,7 @@ void compileOpAddrNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpSubNative(Module* module, int index, CompCtx* ctx)
+void compileOpSubNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -322,7 +315,7 @@ void compileOpSubNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpSubrNative(Module* module, int index, CompCtx* ctx)
+void compileOpSubrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
@@ -335,18 +328,18 @@ void compileOpSubrNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpSyscallNative(Module* module, int index, CompCtx* ctx)
+void compileOpSyscallNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	native_syscall_compilers[module->seg_exec.data[index].symbol_id](module, index, ctx);
 }
 
-void compileOpGotoNative(Module* module, int index, CompCtx* ctx)
+void compileOpGotoNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	fprintf(ctx->dst, "\tb%s .m%lld\n", conditionNames_arm64[op.cond_id], index + op.op_offset);
 }
 
-void compileOpCmpNative(Module* module, int index, CompCtx* ctx)
+void compileOpCmpNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	if (op.cond_id) {
@@ -364,7 +357,7 @@ void compileOpCmpNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpCmprNative(Module* module, int index, CompCtx* ctx)
+void compileOpCmprNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -381,7 +374,7 @@ void compileOpCmprNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpAndNative(Module* module, int index, CompCtx* ctx)
+void compileOpAndNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -390,7 +383,7 @@ void compileOpAndNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpAndrNative(Module* module, int index, CompCtx* ctx)
+void compileOpAndrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -404,7 +397,7 @@ void compileOpAndrNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpOrNative(Module* module, int index, CompCtx* ctx)
+void compileOpOrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -413,7 +406,7 @@ void compileOpOrNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpOrrNative(Module* module, int index, CompCtx* ctx)
+void compileOpOrrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -427,14 +420,14 @@ void compileOpOrrNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpNotNative(Module* module, int index, CompCtx* ctx)
+void compileOpNotNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tmvn %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpXorNative(Module* module, int index, CompCtx* ctx)
+void compileOpXorNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -443,7 +436,7 @@ void compileOpXorNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpXorrNative(Module* module, int index, CompCtx* ctx)
+void compileOpXorrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -457,7 +450,7 @@ void compileOpXorrNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpShlNative(Module* module, int index, CompCtx* ctx)
+void compileOpShlNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
@@ -469,14 +462,14 @@ void compileOpShlNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpShlrNative(Module* module, int index, CompCtx* ctx)
+void compileOpShlrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tlsl %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
 }
 
-void compileOpShrNative(Module* module, int index, CompCtx* ctx)
+void compileOpShrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
@@ -488,14 +481,14 @@ void compileOpShrNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpShrrNative(Module* module, int index, CompCtx* ctx)
+void compileOpShrrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tlsr %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
 }
 
-void compileOpShrsNative(Module* module, int index, CompCtx* ctx)
+void compileOpShrsNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
@@ -507,14 +500,14 @@ void compileOpShrsNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpShrsrNative(Module* module, int index, CompCtx* ctx)
+void compileOpShrsrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tasr %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
 }
 
-void compileOpProcNative(Module* module, int index, CompCtx* ctx)
+void compileOpProcNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	fprintf(
@@ -526,7 +519,7 @@ void compileOpProcNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpCallNative(Module* module, int index, CompCtx* ctx)
+void compileOpCallNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	Op* proc = module->seg_exec.data + op.symbol_id;
@@ -538,7 +531,7 @@ void compileOpCallNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpRetNative(Module* module, int index, CompCtx* ctx)
+void compileOpRetNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 3);
 	fprintf(ctx->dst,
@@ -548,9 +541,8 @@ void compileOpRetNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpEndprocNative(Module* module, int index, CompCtx* ctx)
+void compileOpEndprocNative(Module* module, uint32_t index, CompCtx* ctx)
 {
-	Op op = module->seg_exec.data[index];
 	ctx->cur_frame_size = 0;
 	if (module->seg_exec.data[index - 1].type == OP_RET) return;
 	fputs(
@@ -561,63 +553,63 @@ void compileOpEndprocNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpLd64Native(Module* module, int index, CompCtx* ctx)
+void compileOpLd64Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tldr %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpStr64Native(Module* module, int index, CompCtx* ctx)
+void compileOpStr64Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tstr %s, [%s]\n", regNames64[op.src_reg], regNames64[op.dst_reg]);
 }
 
-void compileOpLd32Native(Module* module, int index, CompCtx* ctx)
+void compileOpLd32Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tldr %s, [%s]\n", regNames32[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpStr32Native(Module* module, int index, CompCtx* ctx)
+void compileOpStr32Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tstr %s, [%s]\n", regNames32[op.src_reg], regNames64[op.dst_reg]);
 }
 
-void compileOpLd16Native(Module* module, int index, CompCtx* ctx)
+void compileOpLd16Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tldrh %s, [%s]\n", regNames32[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpStr16Native(Module* module, int index, CompCtx* ctx)
+void compileOpStr16Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tstrh %s, [%s]\n", regNames32[op.src_reg], regNames64[op.dst_reg]);
 }
 
-void compileOpLd8Native(Module* module, int index, CompCtx* ctx)
+void compileOpLd8Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tldrb %s, [%s]\n", regNames32[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpStr8Native(Module* module, int index, CompCtx* ctx)
+void compileOpStr8Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tstrb %s, [%s]\n", regNames32[op.src_reg], regNames64[op.dst_reg]);
 }
 
-void compileOpVarNative(Module* module, int index, CompCtx* ctx)
+void compileOpVarNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	uint64_t offset = alignby(ctx->cur_frame_size, STACK_ALIGNMENT);
@@ -627,7 +619,7 @@ void compileOpVarNative(Module* module, int index, CompCtx* ctx)
 	if (offset) fprintf(ctx->dst, "\tsub sp, sp, %s\n", intLiteral(ctx->dst, 8, offset, 0));
 }
 
-void compileOpSetvNative(Module* module, int index, CompCtx* ctx)
+void compileOpSetvNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -635,11 +627,11 @@ void compileOpSetvNative(Module* module, int index, CompCtx* ctx)
 	fprintf(ctx->dst, "\tsub %s, fp, %d\n", regNames64[op.dst_reg], op.symbol_id);
 }
 
-void compileOpMulNative(Module* module, int index, CompCtx* ctx)
+void compileOpMulNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
-	if (op.value == -1) {
+	if ((signed)op.value == -1) {
 		compileCondition(ctx->dst, op.cond_id, 1);
 		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 	} else {
@@ -649,17 +641,17 @@ void compileOpMulNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpMulrNative(Module* module, int index, CompCtx* ctx)
+void compileOpMulrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tmul %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
 }
 
-void compileOpDivNative(Module* module, int index, CompCtx* ctx)
+void compileOpDivNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
-	if (op.value == -1) {
+	if ((signed)op.value == -1) {
 		compileCondition(ctx->dst, op.cond_id, 1);
 		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 	} else {
@@ -669,17 +661,17 @@ void compileOpDivNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpDivrNative(Module* module, int index, CompCtx* ctx)
+void compileOpDivrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tudiv %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
 }
 
-void compileOpDivsNative(Module* module, int index, CompCtx* ctx)
+void compileOpDivsNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
-	if (op.value == -1) {
+	if ((signed)op.value == -1) {
 		compileCondition(ctx->dst, op.cond_id, 1);
 		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 	} else {
@@ -689,14 +681,14 @@ void compileOpDivsNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpDivsrNative(Module* module, int index, CompCtx* ctx)
+void compileOpDivsrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tsdiv %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
 }
 
-void compileOpExtprocNative(Module* module, int index, CompCtx* ctx)
+void compileOpExtprocNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	Submodule* submodule = getOpSubmodule(module, module->seg_exec.data + index);
@@ -716,7 +708,7 @@ void compileOpExtprocNative(Module* module, int index, CompCtx* ctx)
 	);
 }
 
-void compileOpLdvNative(Module* module, int index, CompCtx* ctx)
+void compileOpLdvNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -742,7 +734,7 @@ void compileOpLdvNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpStrvNative(Module* module, int index, CompCtx* ctx)
+void compileOpStrvNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -768,7 +760,7 @@ void compileOpStrvNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpPopvNative(Module* module, int index, CompCtx* ctx)
+void compileOpPopvNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	uint64_t offset = nativeStackOffset(ctx, 0);
@@ -791,17 +783,17 @@ void compileOpPopvNative(Module* module, int index, CompCtx* ctx)
 	}
 
 	if (offset + op.var_size >= STACK_ALIGNMENT) {
-		fprintf(ctx->dst, "\tadd sp, sp, "_s2(STACK_ALIGNMENT)"\n");
+		fprintf(ctx->dst, "\tadd sp, sp, "_s(STACK_ALIGNMENT)"\n");
 	}
 	ctx->cur_frame_size -= op.var_size;
 }
 
-void compileOpPushvNative(Module* module, int index, CompCtx* ctx)
+void compileOpPushvNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
 	if (alignby(ctx->cur_frame_size, STACK_ALIGNMENT) < alignby(ctx->cur_frame_size + op.var_size, STACK_ALIGNMENT)) {
-		fprintf(ctx->dst, "\tsub sp, sp, "_s2(STACK_ALIGNMENT)"\n");
+		fprintf(ctx->dst, "\tsub sp, sp, "_s(STACK_ALIGNMENT)"\n");
 	}
 	ctx->cur_frame_size += op.var_size;
 	uint64_t offset = nativeStackOffset(ctx, 0);
@@ -825,27 +817,27 @@ void compileOpPushvNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpAtfNative(Module* module, int index, CompCtx* ctx)
+void compileOpAtfNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	ctx->src_path = module->seg_exec.data[index].mark_name;
 	ctx->src_line = 0;
 	fprintf(ctx->dst, "// %s:%d\n", ctx->src_path, ctx->src_line);
 }
 
-void compileOpAtlNative(Module* module, int index, CompCtx* ctx)
+void compileOpAtlNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	ctx->src_line = module->seg_exec.data[index].symbol_id;
 	fprintf(ctx->dst, "// %s:%d\n", ctx->src_path, ctx->src_line);
 }
 
-void compileOpSetcNative(Module* module, int index, CompCtx* ctx)
+void compileOpSetcNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tcset %s, %s\n", regNames64[op.dst_reg], conditionNames_arm64[op.cond_arg]);
 }
 
-void compileOpDelnvNative(Module* module, int index, CompCtx* ctx)
+void compileOpDelnvNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -860,35 +852,35 @@ void compileOpDelnvNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpLd64SNative(Module* module, int index, CompCtx* ctx)
+void compileOpLd64SNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tldr %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpLd32SNative(Module* module, int index, CompCtx* ctx)
+void compileOpLd32SNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tldrsw %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpLd16SNative(Module* module, int index, CompCtx* ctx)
+void compileOpLd16SNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tldrsh %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpLd8SNative(Module* module, int index, CompCtx* ctx)
+void compileOpLd8SNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	compileCondition(ctx->dst, op.cond_id, 1);
 	fprintf(ctx->dst, "\tldrsb %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
 }
 
-void compileOpLdvsNative(Module* module, int index, CompCtx* ctx)
+void compileOpLdvsNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -914,25 +906,25 @@ void compileOpLdvsNative(Module* module, int index, CompCtx* ctx)
 	endConditionalOp(ctx->dst, cond_ctx);
 }
 
-void compileOpSx32Native(Module* module, int index, CompCtx* ctx)
+void compileOpSx32Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	fprintf(ctx->dst, "\tsxtw %s, %s\n", regNames64[op.dst_reg], regNames32[op.src_reg]);
 }
 
-void compileOpSx16Native(Module* module, int index, CompCtx* ctx)
+void compileOpSx16Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	fprintf(ctx->dst, "\tsxth %s, %s\n", regNames64[op.dst_reg], regNames32[op.src_reg]);
 }
 
-void compileOpSx8Native(Module* module, int index, CompCtx* ctx)
+void compileOpSx8Native(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	fprintf(ctx->dst, "\tsxtb %s, %s\n", regNames64[op.dst_reg], regNames32[op.src_reg]);
 }
 
-void compileOpModNative(Module* module, int index, CompCtx* ctx)
+void compileOpModNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 
@@ -958,7 +950,7 @@ void compileOpModNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpModsNative(Module* module, int index, CompCtx* ctx)
+void compileOpModsNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	if (op.dst_reg == op.src_reg) {
@@ -981,7 +973,7 @@ void compileOpModsNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpModrNative(Module* module, int index, CompCtx* ctx)
+void compileOpModrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	if (op.dst_reg == op.src_reg) {
@@ -1013,7 +1005,7 @@ void compileOpModrNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpModsrNative(Module* module, int index, CompCtx* ctx)
+void compileOpModsrNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	if (op.dst_reg == op.src_reg) {
@@ -1045,7 +1037,7 @@ void compileOpModsrNative(Module* module, int index, CompCtx* ctx)
 	}
 }
 
-void compileOpArgNative(Module* module, int index, CompCtx* ctx)
+void compileOpArgNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	if (!ctx->cur_frame_start) ctx->cur_frame_start = -STACKFRAME_SIZE;
@@ -1160,7 +1152,7 @@ void compileModule(Module* src, FILE* dst)
 	char cur_seg = 0;
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `compileModule`");
 	if (src->seg_data.length) {
-		for (DataBlock* block = src->seg_data.data; block - src->seg_data.data < src->seg_data.length; ++block) {
+		arrayForeach (DataBlock, block, src->seg_data) {
 			if (isForBSSSegment(block) && cur_seg != CUR_SEG_BSS) {
 				fputs(".bss\n", dst);
 				cur_seg = CUR_SEG_BSS;
@@ -1172,7 +1164,7 @@ void compileModule(Module* src, FILE* dst)
 				cur_seg = CUR_SEG_TEXT;
 			}
 			fprintf(dst, "\"%s::%s\":\n", getDataBlockSubmodule(src, block)->name, block->name);
-			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
+			arrayForeach (DataPiece, piece, block->pieces) {
 				switch (piece->type) {
 					case PIECE_BYTES:
 					case PIECE_TEXT:

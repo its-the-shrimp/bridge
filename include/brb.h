@@ -379,7 +379,7 @@ typedef struct {
 	union {
 		uint64_t value;
 		int32_t symbol_id;
-		int64_t new_var_size;
+		uint64_t new_var_size;
 		int64_t op_offset;
 		char* mark_name;
 		uint8_t syscall_id; 
@@ -388,23 +388,26 @@ typedef struct {
 declArray(Op);
 static_assert(sizeof(Op) <= 16, "checking compactness of operations' storage");
 
+// builtins are a platform-independent way to get platform-dependent constants
+#include <unistd.h>
+
 typedef struct {
-	char* name;
-	int64_t value;
+	sbuf name;
+	uint64_t value;
 } BRBuiltin;
 
 #define N_BUILTINS 3
 static const BRBuiltin builtins[N_BUILTINS] = {
 	(BRBuiltin){
-		.name = "STDIN",
+		.name = fromcstr("STDIN"),
 		.value = STDIN_FILENO
 	},
 	(BRBuiltin){
-		.name = "STDOUT",
+		.name = fromcstr("STDOUT"),
 		.value = STDOUT_FILENO
 	},
 	(BRBuiltin){
-		.name = "STDERR",
+		.name = fromcstr("STDERR"),
 		.value = STDERR_FILENO
 	}
 };
@@ -422,18 +425,18 @@ typedef enum {
 } DataPieceType;
 
 static const sbuf dataPieceNames[N_PIECE_TYPES] = {
-	[PIECE_INT16] = CSBUF(".int16"),
-	[PIECE_INT32] = CSBUF(".int32"),
-	[PIECE_INT64] = CSBUF(".int64"),
-	[PIECE_DB_ADDR] = CSBUF(".db_addr"),
-	[PIECE_ZERO] = CSBUF(".zero")
+	[PIECE_INT16] = fromcstr(".int16"),
+	[PIECE_INT32] = fromcstr(".int32"),
+	[PIECE_INT64] = fromcstr(".int64"),
+	[PIECE_DB_ADDR] = fromcstr(".db_addr"),
+	[PIECE_ZERO] = fromcstr(".zero")
 };
 
 typedef struct {
 	DataPieceType type;
 	union {
 		sbuf data; // for PIECE_BYTES or PIECE_TEXT
-		int64_t integer; // for PIECE_INT*
+		uint64_t integer; // for PIECE_INT*
 		struct { // for PIECE_*_ADDR
 			uint32_t module_id;
 			union {
@@ -441,7 +444,7 @@ typedef struct {
 				int64_t symbol_id; // after it's resolved
 			};
 		};
-		int64_t n_bytes; // for PIECE_ZERO
+		uint64_t n_bytes; // for PIECE_ZERO
 	};
 } DataPiece;
 declArray(DataPiece);
@@ -458,14 +461,14 @@ declArray(str);
 
 typedef struct {
 	char* name;
-	int64_t size;
+	uint64_t size;
 } Var;
 
 typedef struct {
-	int es_offset;
-	int es_length;
-	int ds_offset;
-	int ds_length;
+	uint64_t es_offset;
+	uint64_t es_length;
+	uint64_t ds_offset;
+	uint64_t ds_length;
 	const char* name;
 	bool direct;
 } Submodule;
@@ -474,7 +477,7 @@ declArray(Submodule);
 typedef struct {
 	OpArray seg_exec;
 	DataBlockArray seg_data;
-	int64_t stack_size;
+	uint64_t stack_size;
 	SubmoduleArray submodules;
 } Module;
 
@@ -519,14 +522,14 @@ typedef struct vbrb_error {
 	Token loc;
 	union {
 		struct { // for VBRB_ERR_INVALID_ARG or VBRB_ERR_INVALID_DATA_BLOCK_FMT
-			int8_t arg_id;
-			uint8_t op_type;
+			uint8_t arg_id;
+			int8_t op_type;
 #			define data_piece_type op_type
 			uint8_t expected_token_type;
 		};
-		int64_t item_size;
+		uint64_t item_size;
 		char* mark_name;
-		int var_count;
+		uint32_t var_count;
 		BRBLoadError load_error;
 		Var var;
 	};
@@ -570,17 +573,17 @@ void cleanupVBRBCompiler(VBRBError status);
 #define STACKFRAME_SIZE 16
 
 typedef struct execEnv {
-	void* stack_brk;
-	void* stack_head;
-	void* prev_stack_head;
+	char* stack_brk;
+	char* stack_head;
+	char* prev_stack_head;
 	sbufArray seg_data;
 	uint8_t exitcode;
-	int op_id;
+	uint32_t op_id;
 	uint64_t* registers;
-	int exec_argc;
+	uint32_t exec_argc;
 	sbuf* exec_argv;
 	char* src_path;
-	int src_line;
+	uint32_t src_line;
 	bool calling_proc;
 	bool (**exec_callbacks) (struct execEnv*, Module*, const Op*);
 } ExecEnv;

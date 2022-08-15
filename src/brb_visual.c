@@ -268,7 +268,7 @@ void printVBRBError(FILE* dst, VBRBError err) {
 int64_t getBRBuiltinValue(char* name)
 {
 	for (int64_t i = 0; i < N_BUILTINS; i++) {
-		if (sbufeq(builtins[i].name, name)) return i;
+		if (sbufeq(builtins[i].name, fromstr(name))) return i;
 	}
 	return -1;
 }
@@ -343,15 +343,9 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 
 	VBRBError err;
 	Token spec = fetchToken(ctx->prep);
-	if (spec.type == TOKEN_STRING) {
+	if (spec.type == TOKEN_STRING) { // TODO: implement the syntax to explicitly create a nul-terminated string
 		piece->data = spec.string;
-		int nul_index = sbufindex(spec.string, CSTRTERM);
-		if (nul_index < 0) {
-			piece->type = PIECE_TEXT;
-			++piece->data.length;
-		} else {
-			piece->type = PIECE_BYTES;
-		}
+		piece->type = PIECE_BYTES;
 		return (VBRBError){ .prep = ctx->prep };
 	} else if (spec.type == TOKEN_INT) {
 		piece->type = PIECE_ZERO;
@@ -365,7 +359,7 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 		case KW_INT32:
 		case KW_INT64:
 			piece->type = spec.keyword_id - KW_INT16 + PIECE_INT16;
-			err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&piece->integer, piece->type, 0, true);
+			err = getIntArg(ctx, fetchToken(ctx->prep), &piece->integer, piece->type, 0, true);
 			if (err.code) return err;
 			break;
 		case KW_DB_ADDR:
@@ -379,16 +373,12 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 				.arg_id = 0,
 				.expected_token_type = TOKEN_WORD
 			};
-			const sbuf module_name = SBUF(getTokenWord(ctx->prep, arg));
-			if (sbufeq(module_name, ".")) {
+			const sbuf module_name = fromstr(getTokenWord(ctx->prep, arg));
+			if (sbufeq(module_name, fromcstr("."))) {
 				piece->module_id = module->submodules.length;
 			} else {
-				for (
-					Submodule* submodule = module->submodules.data;
-					submodule - module->submodules.data < module->submodules.length;
-					++submodule
-				) {
-					if (sbufeq(module_name, submodule->name)) {
+				arrayForeach (Submodule, submodule, module->submodules) {
+					if (sbufeq(module_name, fromstr((char*)submodule->name))) {
 						piece->module_id = submodule - module->submodules.data;
 						arg.type = TOKEN_NONE;
 						break;
@@ -406,7 +396,7 @@ VBRBError getDataPiece(CompilerCtx* ctx, Module* module, DataPiece* piece, bool 
 			break;
 		case KW_ZERO:
 			piece->type = PIECE_ZERO;
-			err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&piece->n_bytes, piece->type, 0, true);
+			err = getIntArg(ctx, fetchToken(ctx->prep), &piece->n_bytes, piece->type, 0, true);
 			if (err.code) return err;
 			break;
 		default:
@@ -475,14 +465,13 @@ VBRBError getVarArg(CompilerCtx* ctx, Token src, int32_t* offset_p, uint8_t* var
 	if (err.code) return err;
 	
 	*offset_p = ctx->frame_start;
-	VarArray* vars = ctx->in_proc ? &ctx->vars : &ctx->global_vars;
-	for (int i = 0; i < vars->length; ++i) {
-		if (sbufeq(vars->data[i].name, src.string)) { 
+	arrayForeach(Var, var, ctx->in_proc ? ctx->vars : ctx->global_vars) {
+		if (sbufeq(fromstr(var->name), src.string)) { 
 			src.string.data = NULL;
-			*var_size_p = vars->data[i].size;
+			*var_size_p = var->size;
 			break;
 		}
-		*offset_p += vars->data[i].size;
+		*offset_p += var->size;
 	}
 	if (src.string.data) return (VBRBError){
 		.prep = ctx->prep,
@@ -536,8 +525,6 @@ VBRBError compileNoArgOp(CompilerCtx* ctx, Module* dst)
 
 VBRBError compileOpMark(CompilerCtx* ctx, Module* dst)
 {
-	Op* op = arrayhead(dst->seg_exec);
-
 	Token name_spec = fetchToken(ctx->prep);
 	VBRBError err = getIdent_s(ctx, name_spec, &name_spec.string, OP_MARK, 0, false);
 	if (err.code) return err;
@@ -599,12 +586,12 @@ VBRBError compileOpSetd(CompilerCtx* ctx, Module* dst)
 		.arg_id = 1,
 		.expected_token_type = TOKEN_WORD
 	};
-	const sbuf module_name = SBUF(getTokenWord(ctx->prep, module_name_spec));
-	if (sbufeq(module_name, CSBUF("."))) {
+	const sbuf module_name = fromstr(getTokenWord(ctx->prep, module_name_spec));
+	if (sbufeq(module_name, fromcstr("."))) {
 		op->module_id = dst->submodules.length;
 	} else {
-		for (Submodule* submodule = dst->submodules.data; submodule - dst->submodules.data < dst->submodules.length; ++submodule) {
-			if (sbufeq(submodule->name, module_name)) {
+		arrayForeach (Submodule, submodule, dst->submodules) {
+			if (sbufeq(fromstr((char*)submodule->name), module_name)) {
 				op->module_id = submodule - dst->submodules.data;
 				module_name_spec.type = TOKEN_NONE;
 				break;
@@ -613,7 +600,7 @@ VBRBError compileOpSetd(CompilerCtx* ctx, Module* dst)
 		if (module_name_spec.type) return (VBRBError){
 			.prep = ctx->prep,
 			.code = VBRB_ERR_MODULE_NOT_FOUND,
-			.loc = module_name_spec
+			.loc  = module_name_spec
 		};
 	}
 
@@ -641,7 +628,7 @@ VBRBError compileOpSetb(CompilerCtx* ctx, Module* dst)
 		};
 	}
 	op->symbol_id = getBRBuiltinValue(getTokenWord(ctx->prep, arg));
-	if (op->symbol_id == -1) {
+	if ((int)op->symbol_id == -1) {
 		return (VBRBError){
 			.prep = ctx->prep,
 			.code = VBRB_ERR_UNKNOWN_BUILTIN,
@@ -673,8 +660,6 @@ VBRBError compileOpSyscall(CompilerCtx* ctx, Module* dst)
 
 VBRBError compileOpGoto(CompilerCtx* ctx, Module* dst)
 {
-	Op* op = arrayhead(dst->seg_exec);
-
 	Token name_spec = fetchToken(ctx->prep);
 	VBRBError err = getIdent_s(ctx, name_spec, &name_spec.string, OP_GOTO, 0, false);
 	if (err.code) return err;
@@ -1147,7 +1132,7 @@ VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* 
 	initBRP(obj, NULL, BRP_ESC_STR_LITERALS);
 	setSymbols(obj, vbrb_symbols);
 	setKeywords(obj, vbrb_keywords);
-	setInput(obj, src_name, src);
+	setInput(obj, (char*)src_name, src);
 	
 	dst->seg_exec = OpArray_new(0);
 	dst->seg_data = DataBlockArray_new(0);
@@ -1198,7 +1183,7 @@ VBRBError compileVBRB(FILE* src, const char* src_name, Module* dst, const char* 
 				new_op->cond_id = cond_spec.keyword_id - KW_COND_NON;
 			}
 
-			err = op_compilers[kw_id](&compctx, dst);
+			err = op_compilers[(unsigned)kw_id](&compctx, dst);
 			if (err.code) {
 				delCompilerCtx(&compctx);
 				return err;

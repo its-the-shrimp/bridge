@@ -8,8 +8,7 @@ sbuf allocateDataBlock(DataBlock block)
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `allocateDataBlock`");
 
 	sbuf_size_t res = 0;
-	for (int i = 0; i < block.pieces.length; ++i) {
-		DataPiece* piece = block.pieces.data + i;
+	arrayForeach (DataPiece, piece, block.pieces) {
 		switch (piece->type) {
 			case PIECE_BYTES:
 			case PIECE_TEXT:
@@ -43,7 +42,7 @@ void assembleDataBlock(ExecEnv* env, DataBlock block, sbuf dst)
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `assembleDataBlock`");
 
 	int64_t offset = 0;
-	for (DataPiece* piece = block.pieces.data; piece - block.pieces.data < block.pieces.length; ++piece) {
+	arrayForeach (DataPiece, piece, block.pieces) {
 		assert(offset < dst.length, "`dst` is of insuffiecent size");
 		switch (piece->type) {
 			case PIECE_BYTES:
@@ -87,23 +86,23 @@ void initExecEnv(ExecEnv* env, Module* module, const char** args)
 	env->op_id = 0;
 	env->calling_proc = false;
 	env->registers = calloc(N_REGS, sizeof(uint64_t));
-	env->prev_stack_head = env->stack_head = env->stack_brk + module->stack_size;
+	env->prev_stack_head = env->stack_head = (char*)env->stack_brk + module->stack_size;
 
 	env->seg_data = sbufArray_new(-module->seg_data.length);
 	env->seg_data.length = module->seg_data.length;
-	for (int i = 0; i < module->seg_data.length; ++i) {
-		env->seg_data.data[i] = allocateDataBlock(module->seg_data.data[i]);
+	arrayForeach (DataBlock, block, module->seg_data) {
+		env->seg_data.data[block - module->seg_data.data] = allocateDataBlock(*block);
 	}
-	for (int i = 0; i < module->seg_data.length; ++i) {
-		assembleDataBlock(env, module->seg_data.data[i], env->seg_data.data[i]);
+	arrayForeach (DataBlock, block, module->seg_data) {
+		assembleDataBlock(env, *block, env->seg_data.data[block - module->seg_data.data]);
 	}
 
 	env->exec_argc = 0;
 	if (*args) while (args[++env->exec_argc]);
 	env->exec_argv = malloc(env->exec_argc * sizeof(sbuf));
-	for (int i = 0; i < env->exec_argc; i++) {
+	for (uint32_t i = 0; i < env->exec_argc; i += 1) {
 		env->exec_argv[i] = fromstr((char*)args[i]);
-		env->exec_argv[i].length++;
+		env->exec_argv[i].length += 1;
 	}
 }
 

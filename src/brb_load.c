@@ -13,7 +13,7 @@ defArray(field);
 typedef struct {
 	Module* dst;
 	FILE* src;
-	long* n_fetched;
+	long n_fetched;
 } ModuleLoader;
 
 
@@ -69,7 +69,7 @@ uint8_t loadHalfByte(FILE* fd, long* n_fetched)
 {
 	register uint8_t res = loadInt8(fd, n_fetched);
 	if (*n_fetched < 0) return 0;
-	if (ungetc(res & 0b1111, fd) == EOF) {
+	if (ungetc(res & 0xF, fd) == EOF) {
 		*n_fetched = -1;
 		return 0;
 	}
@@ -82,7 +82,7 @@ void load2HalfBytes(FILE* fd, uint8_t* hb1, uint8_t* hb2, long* n_fetched)
 	if (*n_fetched < 0) return;
 
 	*hb1 = res >> 4;
-	*hb2 = res & 0b1111;
+	*hb2 = res & 0xF;
 }
 
 void load2Ints(FILE* fd, int64_t* x, int64_t* y, long* n_fetched)
@@ -101,7 +101,7 @@ void load2Ints(FILE* fd, int64_t* x, int64_t* y, long* n_fetched)
 		default: *x = sizes >> 4; break;
 	}
 
-	switch (sizes & 0b1111) {
+	switch (sizes & 0xF) {
 		case 8: *y = loadInt8(fd, n_fetched); break;
 		case 9: *y = loadInt16(fd, n_fetched); break;
 		case 10: *y = loadInt32(fd, n_fetched); break;
@@ -110,7 +110,7 @@ void load2Ints(FILE* fd, int64_t* x, int64_t* y, long* n_fetched)
 		case 13: *y = ~(int64_t)loadInt16(fd, n_fetched); break;
 		case 14: *y = ~(int64_t)loadInt32(fd, n_fetched); break;
 		case 15: *y = ~(int64_t)loadInt64(fd, n_fetched); break;
-		default: *y = sizes & 0b1111; break;
+		default: *y = sizes & 0xF; break;
 	}
 }
 
@@ -118,31 +118,32 @@ BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
 {
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `loadDataBlock`");
 
-	block->is_mutable = loadHalfByte(loader->src, loader->n_fetched);
-	block->name = (char*)loadInt(loader->src, loader->n_fetched);
+	block->is_mutable = loadHalfByte(loader->src, &loader->n_fetched);
+	block->name = (char*)loadInt(loader->src, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 
-	int n_pieces = loadInt(loader->src, loader->n_fetched);
+	int n_pieces = loadInt(loader->src, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 	block->pieces = DataPieceArray_new(-n_pieces);
 	block->pieces.length = n_pieces;
 
 	for (int i = 0; i < n_pieces; ++i) {
 		DataPiece* piece = block->pieces.data + i;
-		piece->type = loadInt8(loader->src, loader->n_fetched);
+		piece->type = loadInt8(loader->src, &loader->n_fetched);
 		if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 
 		switch (piece->type) {
-			case PIECE_BYTES:
-				piece->data.length = loadInt(loader->src, loader->n_fetched);
+			case PIECE_BYTES: {
+				sbuf bytes = { .length = loadInt(loader->src, &loader->n_fetched) };
 				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
-				piece->data = smalloc(piece->data.length);
+				bytes = smalloc(bytes.length);
 
-				if (!fread(piece->data.data, piece->data.length, 1, loader->src))
+				if (!fread(bytes.data, bytes.length, 1, loader->src))
 					return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
-				*loader->n_fetched += piece->data.length;
+				loader->n_fetched += bytes.length;
+				piece->data = bytes;
 				break;
-			case PIECE_TEXT:
+			} case PIECE_TEXT:
 				piece->data = (sbuf){0};
 				if (getdelim(&piece->data.data, (size_t*)&piece->data.length, '\0', loader->src) < 0)
 					return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
@@ -150,15 +151,15 @@ BRBLoadError loadDataBlock(ModuleLoader* loader, DataBlock* block)
 			case PIECE_INT16:
 			case PIECE_INT32:
 			case PIECE_INT64:
-				piece->integer = loadInt(loader->src, loader->n_fetched);
+				piece->integer = loadInt(loader->src, &loader->n_fetched);
 				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 				break;
 			case PIECE_DB_ADDR:
-				load2Ints(loader->src, (int64_t*)&piece->module_id, (int64_t*)&piece->mark_name, loader->n_fetched);
+				load2Ints(loader->src, (int64_t*)&piece->module_id, (int64_t*)&piece->mark_name, &loader->n_fetched);
 				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 				break;
 			case PIECE_ZERO:
-				piece->n_bytes = loadInt(loader->src, loader->n_fetched);
+				piece->n_bytes = loadInt(loader->src, &loader->n_fetched);
 				if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_INVALID_BLOCK};
 				break;
 			default:
@@ -258,15 +259,15 @@ BRBLoadError loadNoArgOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadMarkOp(ModuleLoader* loader, Op* dst)
 {
-	dst->mark_name = (char*)loadInt(loader->src, loader->n_fetched);
+	dst->mark_name = (char*)loadInt(loader->src, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_OP_ARG};
 	return (BRBLoadError){0};
 }
 
 BRBLoadError loadRegImmOp(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadHalfByte(loader->src, loader->n_fetched);
-	dst->value = loadInt(loader->src, loader->n_fetched);
+	dst->dst_reg = loadHalfByte(loader->src, &loader->n_fetched);
+	dst->value = loadInt(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -275,7 +276,7 @@ BRBLoadError loadRegImmOp(ModuleLoader* loader, Op* dst)
 BRBLoadError load2RegOp(ModuleLoader* loader, Op* dst)
 {
 	uint8_t dst_reg, src_reg;
-	load2HalfBytes(loader->src, &dst_reg, &src_reg, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst_reg, &src_reg, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
@@ -286,8 +287,8 @@ BRBLoadError load2RegOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadRegSymbolIdOp(ModuleLoader* loader, Op* dst)
 {
-	dst->dst_reg = loadHalfByte(loader->src, loader->n_fetched);
-	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
+	dst->dst_reg = loadHalfByte(loader->src, &loader->n_fetched);
+	dst->symbol_id = loadInt(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -295,9 +296,9 @@ BRBLoadError loadRegSymbolIdOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadRegModuleIdNameOp(ModuleLoader* loader, Op* dst)
 {
-	dst->module_id = loadInt(loader->src, loader->n_fetched);
-	dst->dst_reg = loadHalfByte(loader->src, loader->n_fetched);
-	dst->mark_name = (char*)loadInt(loader->src, loader->n_fetched);
+	dst->module_id = loadInt(loader->src, &loader->n_fetched);
+	dst->dst_reg = loadHalfByte(loader->src, &loader->n_fetched);
+	dst->mark_name = (char*)loadInt(loader->src, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
 	return (BRBLoadError){0};
@@ -305,7 +306,7 @@ BRBLoadError loadRegModuleIdNameOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpSyscall(ModuleLoader* loader, Op* dst)
 {
-	dst->syscall_id = loadInt8(loader->src, loader->n_fetched);
+	dst->syscall_id = loadInt8(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -313,7 +314,7 @@ BRBLoadError loadOpSyscall(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpGoto(ModuleLoader* loader, Op* dst)
 {
-	dst->op_offset = loadInt(loader->src, loader->n_fetched);
+	dst->op_offset = loadInt(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){.code = BRB_ERR_NO_OP_ARG};
 	return (BRBLoadError){0};
@@ -321,8 +322,8 @@ BRBLoadError loadOpGoto(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpCmp(ModuleLoader* loader, Op* dst)
 {
-	dst->src_reg = loadHalfByte(loader->src, loader->n_fetched);
-	dst->value = loadInt(loader->src, loader->n_fetched);
+	dst->src_reg = loadHalfByte(loader->src, &loader->n_fetched);
+	dst->value = loadInt(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -331,7 +332,7 @@ BRBLoadError loadOpCmp(ModuleLoader* loader, Op* dst)
 BRBLoadError loadOpCmpr(ModuleLoader* loader, Op* dst)
 {
 	uint8_t src_reg, src2_reg;
-	load2HalfBytes(loader->src, &src_reg, &src2_reg, loader->n_fetched);
+	load2HalfBytes(loader->src, &src_reg, &src2_reg, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
@@ -342,7 +343,7 @@ BRBLoadError loadOpCmpr(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpCall(ModuleLoader* loader, Op* dst)
 {
-	load2Ints(loader->src, (int64_t*)&dst->module_id, (int64_t*)&dst->mark_name, loader->n_fetched);
+	load2Ints(loader->src, (int64_t*)&dst->module_id, (int64_t*)&dst->mark_name, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -351,8 +352,8 @@ BRBLoadError loadOpCall(ModuleLoader* loader, Op* dst)
 BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 {
 	uint8_t dst_reg, src_reg;
-	load2HalfBytes(loader->src, &dst_reg, &src_reg, loader->n_fetched);
-	dst->value = loadInt(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst_reg, &src_reg, &loader->n_fetched);
+	dst->value = loadInt(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
@@ -364,8 +365,8 @@ BRBLoadError load2RegImmOp(ModuleLoader* loader, Op* dst)
 BRBLoadError load3RegOp(ModuleLoader* loader, Op* dst)
 {
 	uint8_t src_reg, src2_reg;
-	dst->dst_reg = loadInt8(loader->src, loader->n_fetched);
-	load2HalfBytes(loader->src, &src_reg, &src2_reg, loader->n_fetched);
+	dst->dst_reg = loadInt8(loader->src, &loader->n_fetched);
+	load2HalfBytes(loader->src, &src_reg, &src2_reg, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
@@ -376,7 +377,7 @@ BRBLoadError load3RegOp(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadOpVar(ModuleLoader* loader, Op* dst)
 {
-	dst->new_var_size = loadInt(loader->src, loader->n_fetched);
+	dst->new_var_size = loadInt(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -385,8 +386,8 @@ BRBLoadError loadOpVar(ModuleLoader* loader, Op* dst)
 BRBLoadError loadOpLdv(ModuleLoader* loader, Op* dst)
 {
 	uint8_t dst_reg, var_size;
-	load2HalfBytes(loader->src, &dst_reg, &var_size, loader->n_fetched);
-	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst_reg, &var_size, &loader->n_fetched);
+	dst->symbol_id = loadInt(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 
@@ -398,8 +399,8 @@ BRBLoadError loadOpLdv(ModuleLoader* loader, Op* dst)
 BRBLoadError loadOpStrv(ModuleLoader* loader, Op* dst)
 {
 	uint8_t var_size, src_reg;
-	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
-	load2HalfBytes(loader->src, &var_size, &src_reg, loader->n_fetched);
+	dst->symbol_id = loadInt(loader->src, &loader->n_fetched);
+	load2HalfBytes(loader->src, &var_size, &src_reg, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 
@@ -411,7 +412,7 @@ BRBLoadError loadOpStrv(ModuleLoader* loader, Op* dst)
 BRBLoadError loadOpPopv(ModuleLoader* loader, Op* dst)
 {
 	uint8_t dst_reg, var_size;
-	load2HalfBytes(loader->src, &dst_reg, &var_size, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst_reg, &var_size, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 
@@ -423,7 +424,7 @@ BRBLoadError loadOpPopv(ModuleLoader* loader, Op* dst)
 BRBLoadError loadOpPushv(ModuleLoader* loader, Op* dst)
 {
 	uint8_t var_size, src_reg;
-	load2HalfBytes(loader->src, &var_size, &src_reg, loader->n_fetched);
+	load2HalfBytes(loader->src, &var_size, &src_reg, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 
@@ -434,7 +435,7 @@ BRBLoadError loadOpPushv(ModuleLoader* loader, Op* dst)
 
 BRBLoadError loadSymbolIdOp(ModuleLoader* loader, Op* dst)
 {
-	dst->symbol_id = loadInt(loader->src, loader->n_fetched);
+	dst->symbol_id = loadInt(loader->src, &loader->n_fetched);
 	
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code  = BRB_ERR_NO_OP_ARG };
 	return (BRBLoadError){0};
@@ -443,7 +444,7 @@ BRBLoadError loadSymbolIdOp(ModuleLoader* loader, Op* dst)
 BRBLoadError loadOpSetc(ModuleLoader* loader, Op* dst)
 {
 	uint8_t dst_reg, cond_arg;
-	load2HalfBytes(loader->src, &dst_reg, &cond_arg, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst_reg, &cond_arg, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
@@ -455,8 +456,8 @@ BRBLoadError loadOpSetc(ModuleLoader* loader, Op* dst)
 BRBLoadError loadBitShiftOp(ModuleLoader* loader, Op* dst)
 {
 	uint8_t dst_reg, src_reg;
-	load2HalfBytes(loader->src, &dst_reg, &src_reg, loader->n_fetched);
-	dst->value = loadInt8(loader->src, loader->n_fetched);
+	load2HalfBytes(loader->src, &dst_reg, &src_reg, &loader->n_fetched);
+	dst->value = loadInt8(loader->src, &loader->n_fetched);
 
 	if (loader->n_fetched < 0) return (BRBLoadError){ .code = BRB_ERR_NO_OP_ARG };
 
@@ -543,27 +544,15 @@ fieldArray getUnresolvedNames(Module* module)
 {
 	fieldArray res = {0};
 	Submodule root = getRootSubmodule(module, ".");
-	for (
-		DataBlock* block = module->seg_data.data + root.ds_offset;
-		block - module->seg_data.data < root.ds_offset + root.ds_length;
-		++block
-	) {
+	arrayForeach (DataBlock, block, DataBlockArray_slice(module->seg_data, root.ds_offset, root.ds_length)) {
 		fieldArray_append(&res, &block->name);
-		for (
-			DataPiece* piece = block->pieces.data;
-			piece - block->pieces.data < block->pieces.length;
-			++piece
-		) {
+		arrayForeach (DataPiece, piece, block->pieces) {
 			if (piece->type == PIECE_DB_ADDR)
 				fieldArray_append(&res, &piece->mark_name);
 		}
 	}
 
-	for (
-		Op* op = module->seg_exec.data + root.es_offset;
-		op - module->seg_exec.data < root.es_offset + root.es_length;
-		++op
-	) {
+	arrayForeach (Op, op, OpArray_slice(module->seg_exec, root.es_offset, root.es_length)) {
 		if (op_flags[op->type] & OPF_REQ_NAME_RESOLUTION)
 			fieldArray_append(&res, &op->mark_name);
 	}
@@ -573,26 +562,25 @@ fieldArray getUnresolvedNames(Module* module)
 
 BRBLoadError preloadModule(FILE* src, Module* dst, const char* module_paths[])
 {
-	long status = 0;
 	ModuleLoader loader = {
 		.dst = dst,
 		.src = src,
-		.n_fetched = &status
+		.n_fetched = 0
 	};
 	*dst = (Module){0};
 
 // loading stack size
-	dst->stack_size = loadInt(src, &status);
+	dst->stack_size = loadInt(src, &loader.n_fetched);
 	if (!dst->stack_size) {
-		if (status < 0) return (BRBLoadError){
+		if (loader.n_fetched < 0) return (BRBLoadError){
 			.code = BRB_ERR_NO_STACK_SIZE
 		};
 		dst->stack_size = DEFAULT_STACK_SIZE;
 	}
 	dst->stack_size *= 1024;
 // loading dependencies
-	int64_t n = loadInt(src, &status);
-	if (status < 0) return (BRBLoadError){
+	int64_t n = loadInt(src, &loader.n_fetched);
+	if (loader.n_fetched < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_LOAD_SEGMENT
 	};
 	for (int64_t i = 0; i < n; i++) {
@@ -617,32 +605,30 @@ BRBLoadError preloadModule(FILE* src, Module* dst, const char* module_paths[])
 		dst = mergeModule(&submodule, dst, name);
 	}
 // loading data blocks
-	n = loadInt(src, &status);
-	if (status < 0) return (BRBLoadError){
+	n = loadInt(src, &loader.n_fetched);
+	if (loader.n_fetched < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_DATA_SEGMENT
 	};
 	DataBlockArray_resize(&dst->seg_data, n);
-	for (int64_t i = dst->seg_data.length - n; i < dst->seg_data.length; ++i) {
-		BRBLoadError err = loadDataBlock(&loader, dst->seg_data.data + i);
+	arrayForeach (DataBlock, block, dst->seg_data) {
+		BRBLoadError err = loadDataBlock(&loader, block);
 		if (err.code) return err;
 	}
 //  loading operations
-	n = loadInt(src, &status);
-	if (status < 0) return (BRBLoadError){
+	n = loadInt(src, &loader.n_fetched);
+	if (loader.n_fetched < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_EXEC_SEGMENT
 	};
 	OpArray_resize(&dst->seg_exec, n);
-	for (int64_t i = dst->seg_exec.length - n; i < dst->seg_exec.length; ++i) {
-		Op* op = dst->seg_exec.data + i;
-
-		op->type = loadInt8(src, &status);
-		if (status < 0) return (BRBLoadError){
+	arrayForeach (Op, op, dst->seg_exec) {
+		op->type = loadInt8(src, &loader.n_fetched);
+		if (loader.n_fetched < 0) return (BRBLoadError){
 			.code = BRB_ERR_NO_OPCODE
 		};
 		if (op->type < 0) {
 			op->type = ~op->type;
-			op->cond_id = loadInt8(src, &status);
-			if (status < 0) return (BRBLoadError){
+			op->cond_id = loadInt8(src, &loader.n_fetched);
+			if (loader.n_fetched < 0) return (BRBLoadError){
 				.code = BRB_ERR_NO_COND_ID
 			};
 			if (!inRange(op->cond_id, 0, N_CONDS)) return (BRBLoadError){
@@ -659,8 +645,8 @@ BRBLoadError preloadModule(FILE* src, Module* dst, const char* module_paths[])
 		if (err.code) return err;
 	}
 //  resolving symbol names
-	n = loadInt(src, &status);
-	if (status < 0) return (BRBLoadError){
+	n = loadInt(src, &loader.n_fetched);
+	if (loader.n_fetched < 0) return (BRBLoadError){
 		.code = BRB_ERR_NO_NAME_SEGMENT
 	};
 
@@ -676,7 +662,7 @@ BRBLoadError preloadModule(FILE* src, Module* dst, const char* module_paths[])
 		};
 		name[--name_length] = '\0';
 
-		for (unsigned int i1 = 0; i1 < unresolved.length; ++i1) {
+		for (uint32_t i1 = 0; i1 < unresolved.length; ++i1) {
 			if (*unresolved.data[i1] == (char*)i) {
 				*unresolved.data[i1] = name;
 				fieldArray_pop(&unresolved, i1);
@@ -709,27 +695,16 @@ char* getProcNameByOp(OpArray ops, int index)
 
 BRBLoadError resolveModule(Module* dst)
 {
-	Submodule *submodule, *root = SubmoduleArray_append(&dst->submodules, getRootSubmodule(dst, "."));
+	SubmoduleArray_append(&dst->submodules, getRootSubmodule(dst, "."));
+	Submodule *submodule;
 
 // resolving references to data blocks in `data` segment
-	for (
-		DataBlock* block = dst->seg_data.data;
-		block - dst->seg_data.data < dst->seg_data.length;
-		++block
-	) {
-		for (
-			DataPiece* piece = block->pieces.data;
-			piece - block->pieces.data < block->pieces.length;
-			++piece
-		) {
+	arrayForeach (DataBlock, block, dst->seg_data) {
+		arrayForeach (DataPiece, piece, block->pieces) {
 			if (piece->type == PIECE_DB_ADDR) {
 				submodule = dst->submodules.data + piece->module_id;
-				for (
-					DataBlock* block_iter = dst->seg_data.data + submodule->ds_offset;
-					block_iter - dst->seg_data.data < submodule->ds_offset + submodule->ds_length;
-					++block_iter
-				) {
-					if (sbufeq(block_iter->name, piece->mark_name)) {
+				arrayForeach (DataBlock, block_iter, DataBlockArray_slice(dst->seg_data, submodule->ds_offset, submodule->ds_length)) {
+					if (streq(block_iter->name, piece->mark_name)) {
 						piece->symbol_id = block_iter - dst->seg_data.data;
 						submodule = NULL;
 						break;
@@ -747,15 +722,13 @@ BRBLoadError resolveModule(Module* dst)
 		}
 	}
 // resolving references to data blocks and procedures in `exec` segment
-	for (int i = 0; i < dst->seg_exec.length; i++) {
-		Op* op = dst->seg_exec.data + i;
-		
+	arrayForeach (Op, op, dst->seg_exec) {
 		switch (op->type) {
 			case OP_SETD:
 				submodule = dst->submodules.data + op->module_id;
-				for (int64_t db_i = submodule->ds_offset; db_i < submodule->ds_offset + submodule->ds_length; db_i++) {
-					if (sbufeq(op->mark_name, dst->seg_data.data[db_i].name)) {
-						op->symbol_id = db_i;
+				arrayForeach (DataBlock, block_iter, DataBlockArray_slice(dst->seg_data, submodule->ds_offset, submodule->ds_length)) {
+					if (streq(op->mark_name, block_iter->name)) {
+						op->symbol_id = block_iter - dst->seg_data.data;
 						submodule = NULL;
 						break;
 					}
@@ -771,12 +744,10 @@ BRBLoadError resolveModule(Module* dst)
 				break;
 			case OP_CALL:
 				submodule = dst->submodules.data + op->module_id;
-				for (int64_t proc_index = submodule->es_offset; proc_index < submodule->es_offset + submodule->es_length; ++proc_index) {
-					Op* proc = dst->seg_exec.data + proc_index;
-
+				arrayForeach (Op, proc, OpArray_slice(dst->seg_exec, submodule->es_offset, submodule->es_length)) {
 					if (proc->type == OP_PROC || proc->type == OP_EXTPROC) {
-						if (sbufeq(proc->mark_name, op->mark_name)) {
-							op->symbol_id = proc_index;
+						if (streq(proc->mark_name, op->mark_name)) {
+							op->symbol_id = proc - dst->seg_exec.data;
 							submodule = NULL;
 							break;
 						}

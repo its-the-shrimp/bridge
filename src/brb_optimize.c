@@ -34,7 +34,8 @@ static const char* BRBRegNames[N_REGS] = {
 typedef void (*Optimizer) (Module*, OptimizerCtx*, Op*);
 
 void optimizeNop(Module* module, OptimizerCtx* ctx, Op* op)
-{}
+{
+}
 
 void optimizeOpEnd(Module* module, OptimizerCtx* ctx, Op* op)
 {
@@ -65,10 +66,10 @@ void optimizeOpSetr(Module* module, OptimizerCtx* ctx, Op* op)
 void optimizeOpSetd(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-	if (op->symbol_id >= arrayhead(module->submodules)->ds_offset) {
-		int db_iter = 0;
+	if ((uint32_t)op->symbol_id >= arrayhead(module->submodules)->ds_offset) {
+		uint32_t db_iter = 0;
 		for (; db_iter < ctx->used_db.length; ++db_iter) {
-			if (ctx->used_db.data[db_iter] == op->symbol_id) break;
+			if (ctx->used_db.data[db_iter] == (int)op->symbol_id) break;
 		}
 
 		if (db_iter >= ctx->used_db.length)
@@ -88,12 +89,12 @@ void optimizeOpSetd(Module* module, OptimizerCtx* ctx, Op* op)
 void optimizeOpSetb(Module* module, OptimizerCtx* ctx, Op* op)
 {
 	if (op->dst_reg == ZEROREG_ID) return;
-	fprintf(ctx->temp_out, "\tsetb:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], builtins[op->symbol_id].name);
+	fprintf(ctx->temp_out, "\tsetb:%s %s %.*s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], unpack(builtins[op->symbol_id].name));
 }
 
 void optimizeOpAdd(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->value == 0 && op->dst_reg == op->src_reg || op->dst_reg == ZEROREG_ID) return; 
+	if ((op->value == 0 && op->dst_reg == op->src_reg) || op->dst_reg == ZEROREG_ID) return; 
 	if (op->value == 0) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -117,7 +118,7 @@ void optimizeOpAddr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpSub(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->value == 0 && op->dst_reg == op->src_reg || op->dst_reg == ZEROREG_ID) return; 
+	if ((op->value == 0 && op->dst_reg == op->src_reg) || op->dst_reg == ZEROREG_ID) return; 
 
 	if (op->value == 0) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
@@ -197,7 +198,7 @@ void optimizeOpOr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpOrr(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->src_reg == op->src2_reg && op->src_reg == op->dst_reg) return;
+	if (op->dst_reg == ZEROREG_ID || (op->src_reg == op->src2_reg && op->src_reg == op->dst_reg)) return;
 	if (op->src_reg == op->src2_reg) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else {
@@ -213,7 +214,7 @@ void optimizeOpNot(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpXor(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->value == 0) return;
+	if (op->dst_reg == ZEROREG_ID || (op->dst_reg == op->src_reg && op->value == 0)) return;
 	if (op->value == 0) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -225,7 +226,7 @@ void optimizeOpXor(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpXorr(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->src_reg == op->src2_reg) return;
+	if (op->dst_reg == ZEROREG_ID || (op->dst_reg == op->src_reg && op->src_reg == op->src2_reg)) return;
 	if (op->src2_reg == ZEROREG_ID) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -237,7 +238,7 @@ void optimizeOpXorr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpShl(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->value == 0) return;
+	if (op->dst_reg == ZEROREG_ID || (op->dst_reg == op->src_reg && op->value == 0)) return;
 	if (op->value == 0) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -249,7 +250,7 @@ void optimizeOpShl(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpShlr(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID) return;
+	if (op->dst_reg == ZEROREG_ID || (op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID)) return;
 	if (op->src2_reg == ZEROREG_ID) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -261,7 +262,7 @@ void optimizeOpShlr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpShr(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->value == 0) return;
+	if (op->dst_reg == ZEROREG_ID || (op->dst_reg == op->src_reg && op->value == 0)) return;
 	if (op->value == 0) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -273,7 +274,7 @@ void optimizeOpShr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpShrr(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID) return;
+	if (op->dst_reg == ZEROREG_ID || (op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID)) return;
 	if (op->src2_reg == ZEROREG_ID) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -285,7 +286,7 @@ void optimizeOpShrr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpShrs(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->value == 0) return;
+	if (op->dst_reg == ZEROREG_ID || (op->dst_reg == op->src_reg && op->value == 0)) return;
 	if (op->value == 0) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -297,7 +298,7 @@ void optimizeOpShrs(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpShrsr(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID) return;
+	if (op->dst_reg == ZEROREG_ID || (op->dst_reg == op->src_reg && op->src2_reg == ZEROREG_ID)) return;
 	if (op->src2_reg == ZEROREG_ID) {
 		fprintf(ctx->temp_out, "\tsetr:%s %s %s\n", conditionNames[op->cond_id].data, BRBRegNames[op->dst_reg], BRBRegNames[op->src_reg]);
 	} else if (op->src_reg == ZEROREG_ID) {
@@ -389,12 +390,12 @@ void printVar(OptimizerCtx* ctx, int32_t offset, int32_t var_size)
 
 	int32_t acc = ctx->frame_start;
 	arrayForeach (Symbol, cur_var_size, ctx->vars) {
-		if (inRange(offset, acc, acc + *cur_var_size)) break;
 		acc += *cur_var_size;
+		if (inRange(offset, acc - *cur_var_size, acc)) break;
 	}
 	offset -= acc;
 
-	fprintf(ctx->temp_out, " \".v%d\":%d :%d", acc, var_size, offset);
+	fprintf(ctx->temp_out, " \".v%d\":%d :%d", acc, var_size, -offset);
 }
 
 void optimizeOpSetv(Module* module, OptimizerCtx* ctx, Op* op)
@@ -412,7 +413,7 @@ void optimizeOpSetv(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpMul(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->src_reg == op->dst_reg && op->value == 1) return;
+	if (op->dst_reg == ZEROREG_ID || (op->src_reg == op->dst_reg && op->value == 1)) return;
 	if (op->value == 0 || op->src_reg == ZEROREG_ID) {
 		fprintf(
 			ctx->temp_out, 
@@ -473,7 +474,7 @@ void optimizeOpMulr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpDiv(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->src_reg == op->dst_reg && op->value == 1) return;
+	if (op->dst_reg == ZEROREG_ID || (op->src_reg == op->dst_reg && op->value == 1)) return;
 	if (op->src_reg == ZEROREG_ID) {
 		fprintf(
 			ctx->temp_out,
@@ -534,7 +535,7 @@ void optimizeOpDivr(Module* module, OptimizerCtx* ctx, Op* op)
 
 void optimizeOpDivs(Module* module, OptimizerCtx* ctx, Op* op)
 {
-	if (op->dst_reg == ZEROREG_ID || op->src_reg == op->dst_reg && op->value == 1) return;
+	if (op->dst_reg == ZEROREG_ID || (op->src_reg == op->dst_reg && op->value == 1)) return;
 	if (op->src_reg == ZEROREG_ID) {
 		fprintf(
 			ctx->temp_out,
@@ -818,13 +819,9 @@ void optimizeModule(Module* module, const char* search_paths[], FILE* output, un
 	};
 
 	if (module->submodules.length) {
-		for (
-			Submodule* submodule = module->submodules.data;
-			submodule - module->submodules.data < module->submodules.length;
-			++submodule
-		) {
-			if (submodule->direct && submodule - module->submodules.data < module->submodules.length - 1)
-				fprintf(ctx.temp_out, ".load %s\n", submodule->name);
+		arrayForeach (Submodule, submodule, module->submodules) {
+			if (submodule->direct && (uint64_t)(submodule - module->submodules.data) < module->submodules.length - 1)
+			fprintf(ctx.temp_out, ".load %s\n", submodule->name);
 		}
 	}
 
@@ -837,10 +834,10 @@ void optimizeModule(Module* module, const char* search_paths[], FILE* output, un
 	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `optimizeModule`");
 
 	if (ctx.used_db.length) {
-		for (int i = 0; i < ctx.used_db.length; ++i) {
-			DataBlock* block = module->seg_data.data + ctx.used_db.data[i];
+		arrayForeach (Symbol, used_db, ctx.used_db) {
+			DataBlock* block = module->seg_data.data + *used_db;
 			fprintf(ctx.temp_out, ".data %s\"%s\" { ", block->is_mutable ? "mut " : "", block->name);
-			for (DataPiece* piece = block->pieces.data; piece - block->pieces.data < block->pieces.length; ++piece) {
+			arrayForeach (DataPiece, piece, block->pieces) {
 				switch (piece->type) {
 					case PIECE_BYTES:
 					case PIECE_TEXT:
