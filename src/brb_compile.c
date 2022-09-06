@@ -1,6 +1,8 @@
+// implementation for AOT compilation of BRB modules
 #include <brb.h>
 #include <errno.h>
 #include <math.h>
+#if 0
 
 defArray(Op);
 
@@ -613,7 +615,7 @@ void compileOpVarNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	uint64_t offset = alignby(ctx->cur_frame_size, STACK_ALIGNMENT);
-	ctx->cur_frame_size += op.new_var_size;
+	ctx->cur_frame_size += op.var_size;
 	offset = alignby(ctx->cur_frame_size, STACK_ALIGNMENT) - offset;
 
 	if (offset) fprintf(ctx->dst, "\tsub sp, sp, %s\n", intLiteral(ctx->dst, 8, offset, 0));
@@ -728,7 +730,7 @@ void compileOpLdvNative(Module* module, uint32_t index, CompCtx* ctx)
 			fprintf(ctx->dst, "\tldr %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
 			break;
 		default:
-			eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hhd\n", op.var_size);
+			eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hu\n", op.var_size);
 			abort();
 	}
 	endConditionalOp(ctx->dst, cond_ctx);
@@ -754,7 +756,7 @@ void compileOpStrvNative(Module* module, uint32_t index, CompCtx* ctx)
 			fprintf(ctx->dst, "\tstr %s, [fp, %s]\n", regNames64[op.src_reg], literal);
 			break;
 		default:
-			eprintf("internal compiler bug in compileOpStrvNative: unexpected variable size %hhd\n", op.var_size);
+			eprintf("internal compiler bug in compileOpStrvNative: unexpected variable size %hu\n", op.var_size);
 			abort();
 	}
 	endConditionalOp(ctx->dst, cond_ctx);
@@ -779,7 +781,7 @@ void compileOpPopvNative(Module* module, uint32_t index, CompCtx* ctx)
 			fprintf(ctx->dst, "\tldr %s, [sp, %llu]\n", regNames64[op.dst_reg], offset);
 			break;
 		default:
-			eprintf("internal compiler bug in compileOpPopvNative: unexpected variable size %hhd\n", op.var_size);
+			eprintf("internal compiler bug in compileOpPopvNative: unexpected variable size %hu\n", op.var_size);
 	}
 
 	if (offset + op.var_size >= STACK_ALIGNMENT) {
@@ -812,7 +814,7 @@ void compileOpPushvNative(Module* module, uint32_t index, CompCtx* ctx)
 			fprintf(ctx->dst, "\tstr %s, [sp, %llu]\n", regNames64[op.src_reg], offset);
 			break;
 		default:
-			eprintf("internal compiler bug in compileOpPushvNative: unexpected variable size %hhd\n", op.var_size);
+			eprintf("internal compiler bug in compileOpPushvNative: unexpected variable size %hu\n", op.var_size);
 			abort();
 	}
 }
@@ -900,7 +902,7 @@ void compileOpLdvsNative(Module* module, uint32_t index, CompCtx* ctx)
 			fprintf(ctx->dst, "\tldr %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
 			break;
 		default:
-			eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hhd\n", op.var_size);
+			eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hu\n", op.var_size);
 			abort();
 	}
 	endConditionalOp(ctx->dst, cond_ctx);
@@ -1041,8 +1043,8 @@ void compileOpArgNative(Module* module, uint32_t index, CompCtx* ctx)
 {
 	Op op = module->seg_exec.data[index];
 	if (!ctx->cur_frame_start) ctx->cur_frame_start = -STACKFRAME_SIZE;
-	ctx->cur_frame_start -= op.new_var_size;
-	ctx->cur_frame_size += op.new_var_size;
+	ctx->cur_frame_start -= op.var_size;
+	ctx->cur_frame_size += op.var_size;
 }
 
 OpNativeCompiler native_op_compilers[] = {
@@ -1247,3 +1249,4 @@ void compileModule(Module* src, FILE* dst)
 		}
 	}
 }
+#endif

@@ -5,7 +5,6 @@
 defArray(sbuf);
 declArray(int);
 defArray(int);
-defArray(str);
 
 #define STR_PREFIX "._s"
 
@@ -87,70 +86,73 @@ typedef enum {
 
 typedef enum {
 	EXPR_INVALID,
-	EXPR_SYSCALL, // main, variadic, evaluatable
-	EXPR_NAME, // auxillary
-	EXPR_BUILTIN, // main, unary, evaluatable
-	EXPR_STRING, // main, unary, evaluatable
-	EXPR_INT, // main, unary, evaluatable
-	EXPR_NEW_VAR, // main, composite, non-evaluatable
-	EXPR_ASSIGN, // main, binary, evaluatable
-	EXPR_ADD_ASSIGN, // main, binary, evaluatable
-	EXPR_SUB_ASSIGN, // main, binary, evaluatable
-	EXPR_MUL_ASSIGN, // main, binary, evaluatable
-	EXPR_DIV_ASSIGN, // main, binary, evaluatable
-	EXPR_AND_ASSIGN, // main, binary, evaluatable
-	EXPR_XOR_ASSIGN, // main, binary, evaluatable
-	EXPR_OR_ASSIGN, // main, binary, evaluatable
-	EXPR_SHL_ASSIGN, // main, binary, evaluatable
-	EXPR_SHR_ASSIGN, // main, binary, evaluatable
-	EXPR_GET, // main, unary, evaluatable
-	EXPR_BLOCK, // main, composite, non-evaluatable
-	EXPR_DECL_INFO, // auxillary
-	EXPR_REF, // auxillary
-	EXPR_PROC_CALL, // main, composite, evaluatable
-	EXPR_RETURN, // main, unary, non-evaluatable
-	EXPR_ADD, // main, binary, evaluatable
-	EXPR_SUB, // main, binary, evaluatable
-	EXPR_MUL, // main, binary, evaluatable
-	EXPR_DIV, // main, binary, evaluatable
-	EXPR_MOD, // main, binary, evaluatable
-	EXPR_AND, // main, binary, evaluatable
-	EXPR_OR, // main, binary, evaluatable
-	EXPR_XOR, // main, binary, evaluatable
-	EXPR_SHL, // main, binary, evaluatable
-	EXPR_SHR, // main, binary, evaluatable
-	EXPR_NOT, // main, unary, evaluatable
-	EXPR_CAST, // main, binary, evaluatable
-	EXPR_LOGICAL_EQ, // main, binary, evaluatable
-	EXPR_LOGICAL_NEQ, // main, binary, evaluatable
-	EXPR_LOGICAL_LE, // main, binary, evaluatable
-	EXPR_LOGICAL_GE, // main, binary, evaluatable
-	EXPR_LOGICAL_LT, // main, binary, evaluatable
-	EXPR_LOGICAL_GT, // main, binary, evaluatable
-	EXPR_LOGICAL_AND, // main, binary, evaluatable
-	EXPR_LOGICAL_OR, // main, binary, evaluatable
-	EXPR_LOGICAL_NOT, // main, unary, evaluatable
-	EXPR_WRAPPER, // main, unary, evaluatable
-	EXPR_IF, // main, ternary, non-evaluatable
-	EXPR_VOID, // main, nullary, evaluatable
-	EXPR_WHILE, // main, binary, non-evaluatable
-	EXPR_DOWHILE, // main, binary, non-evaluatable
-	EXPR_GET_REF, // main, unary, evaluatable
-	EXPR_DEREF, // main, unary, evaluatable
-	EXPR_GET_ITEM, // main, binary, evaluatable
-	EXPR_ARRAY, // main, variadic, evaluatable
-	EXPR_NEW_PROC, // main, variadic, non-evaluatable
-	EXPR_NEW_TYPE, // main, variadic, non-evaluatable
-	EXPR_GET_ATTR, // main, binary, evaluatable
+	EXPR_SYSCALL, // variadic, evaluatable
+	EXPR_NAME, // nullary, non-evaluatable
+	EXPR_BUILTIN, // nullary, evaluatable
+	EXPR_STRING, // nullary, evaluatable
+	EXPR_INT, // nullary, evaluatable
+	EXPR_NEW_VAR, // variadic, non-evaluatable
+	EXPR_ASSIGN, // binary, evaluatable
+	EXPR_ADD_ASSIGN, // binary, evaluatable
+	EXPR_SUB_ASSIGN, // binary, evaluatable
+	EXPR_MUL_ASSIGN, // binary, evaluatable
+	EXPR_DIV_ASSIGN, // binary, evaluatable
+	EXPR_AND_ASSIGN, // binary, evaluatable
+	EXPR_XOR_ASSIGN, // binary, evaluatable
+	EXPR_OR_ASSIGN, // binary, evaluatable
+	EXPR_SHL_ASSIGN, // binary, evaluatable
+	EXPR_SHR_ASSIGN, // binary, evaluatable
+	EXPR_GET, // unary, evaluatable
+	EXPR_BLOCK, // variadic, non-evaluatable
+	EXPR_DECL_INFO, // nullary, non-evaluatable
+	EXPR_REF, // unary, non-evaluatable
+	EXPR_PROC_CALL, // variadic, evaluatable
+	EXPR_RETURN, // unary, non-evaluatable
+	EXPR_ADD, // binary, evaluatable
+	EXPR_SUB, // binary, evaluatable
+	EXPR_MUL, // binary, evaluatable
+	EXPR_DIV, // binary, evaluatable
+	EXPR_MOD, // binary, evaluatable
+	EXPR_AND, // binary, evaluatable
+	EXPR_OR, // binary, evaluatable
+	EXPR_XOR, // binary, evaluatable
+	EXPR_SHL, // binary, evaluatable
+	EXPR_SHR, // binary, evaluatable
+	EXPR_NOT, // unary, evaluatable
+	EXPR_CAST, // binary, evaluatable
+	EXPR_LOGICAL_EQ, // binary, evaluatable
+	EXPR_LOGICAL_NEQ, // binary, evaluatable
+	EXPR_LOGICAL_LE, // binary, evaluatable
+	EXPR_LOGICAL_GE, // binary, evaluatable
+	EXPR_LOGICAL_LT, // binary, evaluatable
+	EXPR_LOGICAL_GT, // binary, evaluatable
+	EXPR_LOGICAL_AND, // binary, evaluatable
+	EXPR_LOGICAL_OR, // binary, evaluatable
+	EXPR_LOGICAL_NOT, // unary, evaluatable
+	EXPR_WRAPPER, // unary, evaluatable
+	EXPR_IF, // ternary, non-evaluatable
+	EXPR_VOID, // nullary, evaluatable
+	EXPR_WHILE, // binary, non-evaluatable
+	EXPR_DOWHILE, // binary, non-evaluatable
+	EXPR_GET_REF, // unary, evaluatable
+	EXPR_DEREF, // unary, evaluatable
+	EXPR_GET_ITEM, // binary, evaluatable
+	EXPR_ARRAY, // variadic, evaluatable
+	EXPR_NEW_PROC, // variadic, non-evaluatable
+	EXPR_NEW_TYPE, // variadic, non-evaluatable
+	EXPR_GET_ATTR, // binary, evaluatable
 	N_EXPR_TYPES
 } ExprType;
 
-// for `Expr::attrs`
+// expression attributes
 #define ATTR_STATIC   1
+// for variables: it is statically allocated in the program
 #define ATTR_EXTERNAL 2
+// for procedures and variables: the field is supposed to be accessed outside the current compilation unit
 #define ATTR_AUTO_STATIC 4
-// only for procedure declarations
+// for variables: it was declared as `static` implicitly; this attribute is used for error reporting
 #define ATTR_NOT_DEFINED 8
+// for procedures: the implementation is not defined
 
 typedef struct expr { // in variadic expressions, first 16 bytes (i.e. first 2 argument fields) are used as array of sub-expressions
 	union {
@@ -160,7 +162,7 @@ typedef struct expr { // in variadic expressions, first 16 bytes (i.e. first 2 a
 		struct {
 			union {
 				struct expr* arg2; // for binary expressions
-				int64_t int_literal; // for EXPR_INT
+				uint64_t int_literal; // for EXPR_INT
 				struct { // for EXPR_DECL_INFO
 					int attrs;
 					int n_args; // defined if EXPR_DECL_INFO is used as the info about the procedure declaration
@@ -171,15 +173,17 @@ typedef struct expr { // in variadic expressions, first 16 bytes (i.e. first 2 a
 				struct expr* arg3; // for ternary expressions
 				struct typedef_t {
 					TypeKind kind;
-					int32_t n_items;
+					size_t n_items;
 					union {
-						int size;
+						size_t size;
 						struct typedef_t* base;
 						struct expr* decl;
 					};
 				}* var_type;
 				struct typedef_t* element_type; // for EXPR_ARRAY
 				int n_local_vars; // for EXPR_BLOCK
+				BRB_Syscall syscall_id; // for EXPR_SYSCALL
+				BRB_Builtin builtin_id; // for EXPR_BUILTIN
 			};
 		};
 		sbuf string; // for EXPR_STRING
@@ -467,7 +471,7 @@ void fprintType(FILE* dst, TypeDef type)
 	static_assert(N_TYPE_KINDS == 8, "not all type kinds are handled in fprintType");
 	switch (type.kind) {
 		case KIND_INT:
-			fprintf(dst, "int%d", type.size * 8);
+			fprintf(dst, "int%zu", type.size * 8);
 			break;
 		case KIND_PTR:
 			fprintType(dst, *type.base);
@@ -484,11 +488,13 @@ void fprintType(FILE* dst, TypeDef type)
 			break;
 		case KIND_ARRAY:
 			fprintType(dst, *type.base);
-			fprintf(dst, "[%d]", type.n_items);
+			fprintf(dst, "[%zu]", type.n_items);
 			break;
 		case KIND_CUSTOM:
 			fprintf(dst, "%s", getDeclName(type.decl));
 			break;
+		case KIND_NONE:
+		case N_TYPE_KINDS:
 		default:
 			assert(false, "unknown type kind: %d", type.kind);
 	}
@@ -605,12 +611,12 @@ BR_ERROR_DEF(ArgCountMismatchError, (AST* ast, TokenLoc loc, Expr* proc, int n_a
 	exit(1);
 }
 
-BR_ERROR_DEF(VoidCastError, (AST* ast, TokenLoc loc))
+BR_ERROR_DEF(InvalidCastTargetTypeError, (AST* ast, TokenLoc loc, TypeDef target))
 {
 	fprintTokenLoc(stderr, loc);
-	eprintf("error %04hx: cannot cast a value to type `", VoidCastErrorCode);
-	fprintType(stderr, VOID_TYPE);
-	eputs("`\n");
+	eprintf("error %04hx: cannot cast a value to type `", InvalidCastTargetTypeErrorCode);
+	fprintType(stderr, target);
+	eputs("`\nnote: `cast` built-in can only convert from/to numbers/pointers\n");
 	exit(1);
 }
 
@@ -997,8 +1003,9 @@ int getTypeSize(TypeDef type)
 			}
 			return alignby(res, 8);
 		}
+		case KIND_VOID: assert(false, "attempted to get size of type `void`");
 		case KIND_NONE:
-		case KIND_VOID:
+		case N_TYPE_KINDS:
 		default:
 			assert(false, "unknown type kind: %d", type.kind);
 	}
@@ -1050,6 +1057,7 @@ bool _typeMatches(TypeDef field, TypeDef entry)
 		case KIND_CUSTOM:
 			return entry.kind == KIND_CUSTOM ? field.decl == entry.decl : false;
 		case KIND_NONE:
+		case N_TYPE_KINDS:
 		default:
 			assert(false, "unknown type kind: %d", field.kind);
 	}
@@ -1217,8 +1225,60 @@ bool isCBracketEnclosing(Expr* expr)
 				: isCBracketEnclosing(getProcDef(expr));
 		case EXPR_NEW_TYPE:
 			return getSubexprsCount(expr) == 3 ? isCBracketEnclosing(getSubexpr(expr, 2)) : false;
-		default:
+		case EXPR_SYSCALL:
+		case EXPR_NAME:
+		case EXPR_BUILTIN:
+		case EXPR_STRING:
+		case EXPR_INT:
+		case EXPR_NEW_VAR:
+		case EXPR_ASSIGN:
+		case EXPR_ADD_ASSIGN:
+		case EXPR_SUB_ASSIGN:
+		case EXPR_MUL_ASSIGN:
+		case EXPR_DIV_ASSIGN:
+		case EXPR_AND_ASSIGN:
+		case EXPR_XOR_ASSIGN:
+		case EXPR_OR_ASSIGN:
+		case EXPR_SHL_ASSIGN:
+		case EXPR_SHR_ASSIGN:
+		case EXPR_GET:
+		case EXPR_DECL_INFO:
+		case EXPR_REF:
+		case EXPR_PROC_CALL:
+		case EXPR_RETURN:
+		case EXPR_ADD:
+		case EXPR_SUB:
+		case EXPR_MUL:
+		case EXPR_DIV:
+		case EXPR_MOD:
+		case EXPR_AND:
+		case EXPR_OR:
+		case EXPR_XOR:
+		case EXPR_SHL:
+		case EXPR_SHR:
+		case EXPR_NOT:
+		case EXPR_CAST:
+		case EXPR_LOGICAL_EQ:
+		case EXPR_LOGICAL_NEQ:
+		case EXPR_LOGICAL_LE:
+		case EXPR_LOGICAL_GE:
+		case EXPR_LOGICAL_LT:
+		case EXPR_LOGICAL_GT:
+		case EXPR_LOGICAL_AND:
+		case EXPR_LOGICAL_OR:
+		case EXPR_LOGICAL_NOT:
+		case EXPR_WRAPPER:
+		case EXPR_VOID:
+		case EXPR_GET_REF:
+		case EXPR_DEREF:
+		case EXPR_GET_ITEM:
+		case EXPR_ARRAY:
+		case EXPR_GET_ATTR:
 			return false;
+		case EXPR_INVALID:
+		case N_EXPR_TYPES:
+		default:
+			assert(false, "unknown expression type: %u\n", expr->type);
 	}
 }
 
@@ -1470,21 +1530,17 @@ void fprintExpr(AST* ast, FILE* dst, Expr expr, int indent_level)
 }
 #define printExpr(ast, expr, indent_level) fprintExpr(ast, stdout, expr, indent_level)
 
-static bool isExprIntLiteral(Expr* expr)
+bool isExprIntLiteral(Expr* expr)
 {
-	if (expr->type == EXPR_INT) return true;
-	if (expr->type == EXPR_CAST) return isExprIntLiteral(expr->arg1);
-	return false;
+	while (expr->type == EXPR_CAST) expr = expr->arg1;
+	return expr->type == EXPR_INT;
 }
 
-static int64_t getIntLiteral(Expr* expr)
+uint64_t getIntLiteral(Expr* expr)
 {
-	if (expr->type == EXPR_INT) return expr->int_literal;
-	if (expr->type == EXPR_CAST) {
-		if (expr->var_type->kind == KIND_BOOL) return getIntLiteral(expr->arg1) != 0;
-		return getIntLiteral(expr->arg1) & byteMask(getTypeSize(*expr->var_type));
-	}
-	assert(false, "attempted to get an integer literal from an expression which does not produce an integer literal");
+	while (expr->type == EXPR_CAST) expr = expr->arg1;
+	assert(expr->type == EXPR_INT, "attempted to get integer literal of an expression that doesn't produce an integer literal");
+	return expr->int_literal;
 }
 
 static Expr* wrapExpr(Expr* expr, ExprType new_expr_type, ...)
@@ -1516,12 +1572,13 @@ static Expr* wrapExpr(Expr* expr, ExprType new_expr_type, ...)
 
 static void wrapExprInCast(Expr* expr, TypeDef new_type)
 {
-	Expr* arg1 = malloc(sizeof(Expr));
-	*arg1 = *expr;
-	expr->type = EXPR_CAST;
-	expr->arg1 = arg1;
-	expr->var_type = malloc(sizeof(TypeDef));
-	*expr->var_type = new_type;
+	if (expr->type != EXPR_INT) {
+		Expr* arg1 = malloc(sizeof(Expr));
+		*arg1 = *expr;
+		expr->type = EXPR_CAST;
+		expr->arg1 = arg1;
+	}
+	*(expr->var_type = malloc(sizeof(TypeDef))) = new_type;
 }
 
 typedef void (*ExprTypeSetter) (AST*, Expr*, ExprType);
@@ -1712,7 +1769,14 @@ TypeDef getExprValueType(AST* ast, Expr expr)
 		case EXPR_SYSCALL:
 			return BUILTIN_VAL_TYPE;
 		case EXPR_STRING: return TYPE_STR_LITERAL;
-		case EXPR_INT: return INT_TYPE(4);
+		case EXPR_INT:
+			if (FITS_IN_8BITS(expr.int_literal)) {
+				return INT_TYPE(1);
+			} else if (FITS_IN_16BITS(expr.int_literal)) {
+				return INT_TYPE(2);
+			} else if (FITS_IN_32BITS(expr.int_literal)) {
+				return INT_TYPE(4);
+			} else return INT_TYPE(8);
 		case EXPR_PROC_CALL: return *getSubexpr(getSubexpr(&expr, 0)->arg1, 2)->var_type;
 		case EXPR_GET: return *getSubexpr(expr.arg1, 2)->var_type;
 		case EXPR_ASSIGN:
@@ -1867,14 +1931,8 @@ void makeLogicalExpr(Expr* expr)
 		[0 ... N_EXPR_TYPES - 1] = false,
 		[EXPR_LOGICAL_EQ ... EXPR_LOGICAL_NOT] = true,
 	};
-	if (!expr_logicality_table[expr->type]) {
-		Expr* new_subexpr = malloc(sizeof(Expr));
-		*new_subexpr = *expr;
-		expr->type = EXPR_CAST;
-		expr->arg1 = new_subexpr;
-		expr->var_type = malloc(sizeof(TypeDef));
-		*expr->var_type = BOOL_TYPE;
-	}
+	if (!expr_logicality_table[expr->type])
+		wrapExprInCast(expr, BOOL_TYPE);
 }
 
 bool validateReturnStmt(Expr expr)
@@ -1890,8 +1948,65 @@ bool validateReturnStmt(Expr expr)
 			return true;
 		case EXPR_IF:
 			if (expr.arg3) return validateReturnStmt(*expr.arg2) && validateReturnStmt(*expr.arg3);
-		default:
 			return false;
+		case EXPR_DOWHILE:
+			return validateReturnStmt(*expr.arg1);
+		case EXPR_SYSCALL:
+		case EXPR_NAME:
+		case EXPR_BUILTIN:
+		case EXPR_STRING:
+		case EXPR_INT:
+		case EXPR_NEW_VAR:
+		case EXPR_ASSIGN:
+		case EXPR_ADD_ASSIGN:
+		case EXPR_SUB_ASSIGN:
+		case EXPR_MUL_ASSIGN:
+		case EXPR_DIV_ASSIGN:
+		case EXPR_AND_ASSIGN:
+		case EXPR_XOR_ASSIGN:
+		case EXPR_OR_ASSIGN:
+		case EXPR_SHL_ASSIGN:
+		case EXPR_SHR_ASSIGN:
+		case EXPR_GET:
+		case EXPR_DECL_INFO:
+		case EXPR_REF:
+		case EXPR_PROC_CALL:
+		case EXPR_ADD:
+		case EXPR_SUB:
+		case EXPR_MUL:
+		case EXPR_DIV:
+		case EXPR_MOD:
+		case EXPR_AND:
+		case EXPR_OR:
+		case EXPR_XOR:
+		case EXPR_SHL:
+		case EXPR_SHR:
+		case EXPR_NOT:
+		case EXPR_CAST:
+		case EXPR_LOGICAL_EQ:
+		case EXPR_LOGICAL_NEQ:
+		case EXPR_LOGICAL_LE:
+		case EXPR_LOGICAL_GE:
+		case EXPR_LOGICAL_LT:
+		case EXPR_LOGICAL_GT:
+		case EXPR_LOGICAL_AND:
+		case EXPR_LOGICAL_OR:
+		case EXPR_LOGICAL_NOT:
+		case EXPR_WRAPPER:
+		case EXPR_VOID:
+		case EXPR_WHILE:
+		case EXPR_GET_REF:
+		case EXPR_DEREF:
+		case EXPR_GET_ITEM:
+		case EXPR_ARRAY:
+		case EXPR_NEW_PROC:
+		case EXPR_NEW_TYPE:
+		case EXPR_GET_ATTR:
+			return false;
+		case EXPR_INVALID:
+		case N_EXPR_TYPES:
+		default:
+			assert(false, "unknown expression type: %u\n", expr.type);
 	}
 }
 
@@ -2011,7 +2126,10 @@ bool parseDecl(AST* ast, Token token, TypeDef var_type, int decl_attrs, Expr* ds
 			Expr* proc_body = addSubexpr(proc_args, (Expr){0});
 			parseExpr(ast, proc_body, proc_args, proc_args, dst, EXPRTERM_FULL);
 			if (proc_body->type == EXPR_NEW_VAR) raiseVarDeclAsStmtBodyError(ast, token.loc, "a procedure definition");
-			if (proc_body->type == EXPR_BLOCK) proc_body->n_local_vars = 0;
+			if (proc_body->type == EXPR_BLOCK) {
+				proc_body->n_local_vars = 0;
+				getSubexpr(proc_body, 0)->name = proc_name;
+			}
 			if (proc_info->var_type->kind != KIND_VOID)
 				if (!validateReturnStmt(*proc_body)) raiseNoProcReturnError(ast, dst);
 		}
@@ -2088,19 +2206,14 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc,
 	token = fetchToken(ast->preprocessor);
 	if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a syscall name", wordToken(NULL));
 	bool name_vaildated = false;
-	for (int i = 0; i < N_SYS_OPS; i++) {
-		if (sbufeq(syscallNames[i], fromstr(token.word))) {
+	for (unsigned int i = 0; i < BRB_N_SYSCALLS; ++i) {
+		if (sbufeq(BRB_syscallNames[i], fromstr(token.word))) {
 			name_vaildated = true;
+			dst->syscall_id = i;
 			break;
 		}
 	}
 	if (!name_vaildated) raiseUnknownSyscallNameError(ast, token);
-	addSubexpr(dst, (Expr){
-		.type = EXPR_NAME,
-		.name = token.word,
-		.block = dst->block,
-		.loc = token.loc
-	});
 
 	token = fetchToken(ast->preprocessor);
 	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_START) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_START));
@@ -2118,7 +2231,7 @@ bool parseKwSys(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc,
 				raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_COMMA), symbolToken(SYMBOL_ARGSPEC_END));
 		}
 	} else fetchToken(ast->preprocessor);
-	if (getSubexprsCount(dst) > 7) raiseTooManySyscallArgsError(ast, token.loc, getSubexprsCount(dst) - 1);
+	if (getSubexprsCount(dst) > 6) raiseTooManySyscallArgsError(ast, token.loc, getSubexprsCount(dst) - 1);
 
 	return false;
 }
@@ -2134,14 +2247,14 @@ bool parseKwBuiltin(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* p
 	token = fetchToken(ast->preprocessor);
 	if (token.type != TOKEN_WORD) raiseUnexpectedTokenError(ast, token, "a built-in name", wordToken(NULL));
 	bool name_vaildated = false;
-	for (int i = 0; i < N_BUILTINS; i++) {
-		if (sbufeq(builtins[i].name, fromstr(token.word))) {
+	for (unsigned int i = 0; i < BRB_N_BUILTINS; ++i) {
+		if (sbufeq(BRB_builtinNames[i], fromstr(token.word))) {
 			name_vaildated = true;
+			dst->builtin_id = i;
 			break;
 		}
 	}
 	if (!name_vaildated) raiseUnknownBuiltinNameError(ast, token);
-	dst->name = token.word;
 
 	return false;
 }
@@ -2180,9 +2293,11 @@ bool parseKwCast(AST* ast, Token token, Expr* dst, Expr* parent_expr, Expr* proc
 	dst->var_type = malloc(sizeof(TypeDef));
 	int stub;
 	if (!parseType(ast, dst->var_type, &stub, 0, "a type specifier for a type cast", dst->block)) raiseInvalidTypeError(ast, token.loc);
-	if (dst->var_type->kind == KIND_VOID) raiseVoidCastError(ast, token.loc);
+	if (dst->var_type->kind == KIND_VOID || dst->var_type->kind == KIND_CUSTOM)
+		raiseInvalidCastTargetTypeError(ast, token.loc, *dst->var_type);
 	token = fetchToken(ast->preprocessor);
-	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END) raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_END));
+	if (getTokenSymbolId(token) != SYMBOL_ARGSPEC_END)
+		raiseUnexpectedTokenError(ast, token, NULL, symbolToken(SYMBOL_ARGSPEC_END));
 
 	return false;
 }
@@ -2808,10 +2923,10 @@ static inline void optimizeExpr(AST* ast, Expr* expr, Expr* proc)
 
 void optimizeExprSyscall(AST* ast, Expr* expr, Expr* proc)
 {
-	for (ExprNode* iter = getSubexprs(expr)->start->next; iter != NULL; iter = iter->next) {
-		optimizeExpr(ast, &iter->value, proc);
-		if (!matchType(ast, BUILTIN_VAL_TYPE, &iter->value))
-			raiseArgTypeMismatchError(ast, iter->value.loc, NULL, NULL, getExprValueType(ast, iter->value));
+	chainForeach (Expr, iter, *getSubexprs(expr)) {
+		optimizeExpr(ast, iter, proc);
+		if (!matchType(ast, BUILTIN_VAL_TYPE, iter))
+			raiseArgTypeMismatchError(ast, iter->loc, NULL, NULL, getExprValueType(ast, *iter));
 	}
 }
 
@@ -3193,7 +3308,7 @@ void optimizeExprGetItem(AST* ast, Expr* expr, Expr* proc)
 	if (!isIntType(index_type)) raiseInvalidArrayIndexError(ast, expr->arg2->loc, index_type);
 
 	if (isExprIntLiteral(expr->arg2) && array_type.kind == KIND_ARRAY && array_type.n_items > 0) {
-		int64_t index_literal = getIntLiteral(expr->arg2);
+		uint64_t index_literal = getIntLiteral(expr->arg2);
 		if (!inRange(index_literal, 0, array_type.n_items)) raiseOutOfBoundsIndexError(ast, expr->arg2->loc, array_type, index_literal);
 	}
 
@@ -3287,8 +3402,6 @@ void optimizeExprGetAttr(AST* ast, Expr* expr, Expr* proc)
 		free(expr->arg1);
 		*expr = lvalue;
 	} else assert(false, "codegen for getting attributes of r-values is not implmented yet");
-		
-		
 }
 
 static_assert(N_EXPR_TYPES == 56, "not all expressions have any optimizations defined");
@@ -3373,309 +3486,148 @@ void parseSourceCode(BRP* obj, AST* dst) // br -> temporary AST
 	optimizeSourceCode(dst);
 }
 
-// Code Generation
+// Bytecode Generation
 
-typedef uint8_t regstate_t;
 typedef struct {
 	sbufArray data_blocks;
 	sbuf cur_src_path;
-	int cur_src_line;
-	regstate_t arg_cache_state;
+	uint32_t cur_src_line;
 	AST* ast;
-	FILE* dst;
+	BRB_Module dst;
 	ExprChain static_vars;
-	bool has_entry_point;
-} ASTCompilerCtx;
+} CodegenCtx;
 
-typedef void (*ExprCompiler) (ASTCompilerCtx*, Expr, regstate_t, int);
+typedef void (*ExprCompiler) (CodegenCtx*, Expr, BRB_DataBlock*);
 ExprCompiler expr_compilers[N_EXPR_TYPES];
 
-static int reg_cache_counter = 0;
-int compileRegCaching(ASTCompilerCtx* ctx, regstate_t state)
-{
-	for (uint8_t i = 0; i < 8; i++) {
-		if (state & (1 << i)) {
-			fprintf(ctx->dst, "\tpushv \".rc%d_%hhd\" 8 r%hhd\n", reg_cache_counter, i, i);
-		}
-	}
-
-	return reg_cache_counter++;
+#define ASSERT_NO_BRB_ERR(err) { \
+	BRB_LoadStatus _brb_temp_err = err; \
+	if (_brb_temp_err.type != BRB_LS_OK) { \
+		eprintf("unexpected codegen failure:\n"); \
+		BRB_printLoadStatus(stderr, _brb_temp_err); \
+		abort(); \
+	} \
 }
 
-void compileRegUncaching(ASTCompilerCtx* ctx, regstate_t state, int cache_id)
-{
-	for (int8_t i = 7; i >= 0; i--) {
-		if (state & (1 << i)) {
-			fprintf(ctx->dst, "\tpopv r%hhd\n", i);
-		}
-	}
-}
-
-void getRegister(ASTCompilerCtx* ctx, regstate_t* reg_state, int excluded, int* reg_id, int* cache_id)
-{
-	if (~(*reg_state) == 0) {
-		*reg_id = (excluded + 1) % N_USER_REGS;
-		*reg_state &= ~(1 << *reg_id);
-		*cache_id = compileRegCaching(ctx, 1 << *reg_id);
-	} else {
-		*cache_id = -1;
-		for (int i = 0; i < 8; i++) {
-			if ((*reg_state & (1 << i)) == 0 && i != excluded) {
-				*reg_id = i;
-				break;
-			}
-		}
-	}
-}
-
-void freeRegister(ASTCompilerCtx* ctx, regstate_t* reg_state, int reg_id, int cache_id)
-{
-	if (cache_id >= 0) {
-		*reg_state |= 1 << reg_id;
-		compileRegUncaching(ctx, 1 << reg_id, cache_id);
-	}
-}
-
-void compileSrcRef(ASTCompilerCtx* ctx, TokenLoc loc)
+void compileSrcRef(CodegenCtx* ctx, TokenLoc loc)
 {
 	sbuf path_s = fromstr((char*)loc.src_name);
 	if (!sbufeq(ctx->cur_src_path, path_s)) {
-		fprintf(
-			ctx->dst, 
-			"@f \"%.*s\"\n"
-			"@l %d\n",
-			unpack(path_s), loc.lineno
-		);
 		ctx->cur_src_path = path_s;
 		ctx->cur_src_line = loc.lineno;
 	} else if (loc.lineno != ctx->cur_src_line) {
-		fprintf(ctx->dst, "@l %d\n", loc.lineno);
 		ctx->cur_src_line = loc.lineno;
 	}
 }
 
-void compileExprInvalid(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprInvalid(CodegenCtx* ctx, Expr expr, BRB_DataBlock* block)
 {
 	assert(false, "uncompilable expression type %d", expr.type);
 }
 
-void compileExprSyscall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprSyscall(CodegenCtx* ctx, Expr expr, BRB_DataBlock* block)
 {
 	compileSrcRef(ctx, expr.loc);
 
-	regstate_t reg_cache_state = ((1 << (getSubexprsCount(&expr) - 1)) - 1 | 1) & reg_state;
-	int cache_id = compileRegCaching(ctx, reg_cache_state);
-	int i = 0;
 	chainForeach (Expr, subexpr, ExprChain_slice(*getSubexprs(&expr), 1, -1)) {
-		expr_compilers[subexpr->type](ctx, *subexpr, (1 << i) - 1, i);
-		i++;
+		expr_compilers[subexpr->type](ctx, *subexpr);
 	}
-	fprintf(ctx->dst, "\tsys %s\n", getSubexpr(&expr, 0)->name);
-
-	if (dst_reg != 0) fprintf(ctx->dst, "\tsetr r%d r0\n", dst_reg);
-	compileRegUncaching(ctx, reg_cache_state, cache_id);
-
+	ASSERT_NO_BRB_ERR(BRB_addOp_sys(&ctx->dst, expr.syscall_id));
 }
 
-void compileExprBuiltin(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprBuiltin(CodegenCtx* ctx, Expr expr, BRB_DataBlock* block)
 {
 	compileSrcRef(ctx, expr.loc);
-	fprintf(ctx->dst, "\tsetb r%d %s\n", dst_reg, expr.name);
+	if (block) {
+		ASSERT_NO_BRB_ERR(BRB_addDataPiece_builtin(block, expr.builtin_id));
+	} else ASSERT_NO_BRB_ERR(BRB_addOp_builtin(&ctx->dst, expr.builtin_id));
 }
 
-void compileExprString(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprString(CodegenCtx* ctx, Expr expr, BRB_DataBlock* block)
 {
 	compileSrcRef(ctx, expr.loc);
 
 	int str_index = -1;
-	arrayForeach (sbuf, data_block, ctx->data_blocks) {
+	arrayForeach (sbuf, data_block, ctx->data_blocks) { // search for identical string literals in the AST
 		if (sbufeq(*data_block, expr.string)) {
 			str_index = data_block - ctx->data_blocks.data;
 			break;
 		}
 	}
-	if (str_index < 0) {
+	if (str_index < 0) { // add the string literal to the data segment of the resulting module if it's unique
 		str_index = ctx->data_blocks.length;
-		fprintf(ctx->dst, ".data \""STR_PREFIX"%d\" \"", str_index);
-		fputsbufesc(ctx->dst, expr.string, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
-		fputs("\"\n", ctx->dst);
+		BRB_DataBlock* new_db;
+		char str_name[32];
+		snprintf(str_name, sizeof(str_name), STR_PREFIX"%d", str_index);
+		ASSERT_NO_BRB_ERR(BRB_addDataBlock(&ctx->dst, &new_db, str_name, false));
 		sbufArray_append(&ctx->data_blocks, expr.string);
 	}
 
-	if (dst_reg >= 0) fprintf(ctx->dst, "\tsetd r%d . \""STR_PREFIX"%d\"\n", dst_reg, str_index);
+	char str_name[32];
+	snprintf(str_name, sizeof(str_name), STR_PREFIX"%d", str_index);
+	ASSERT_NO_BRB_ERR(BRB_addOp_dbaddr_byName(&ctx->dst, str_name));
 }
 
-void compileExprInt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprInt(CodegenCtx* ctx, Expr expr, BRB_DataBlock* block)
 {
 	compileSrcRef(ctx, expr.loc);
-	fprintf(ctx->dst, "\tset r%d %lld\n", dst_reg, expr.int_literal);
-}
-
-static int array_init_counter;
-
-void compileExprNewVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
-{
-	compileSrcRef(ctx, expr.loc);
-	char* name = getSubexpr(&expr, 0)->name;
-	Expr* decl_info = getSubexpr(&expr, 2);
-	Expr* initializer = getSubexpr(&expr, 3);
-	int size = getTypeSize(*decl_info->var_type);
-
-	if (decl_info->attrs & ATTR_STATIC && dst_reg >= 0) {
-		ExprChain_append(&ctx->static_vars, expr);
+	if (expr.var_type->kind == KIND_PTR) {
+		ASSERT_NO_BRB_ERR(BRB_addOp_intptr(&ctx->dst, expr.int_literal));
 	} else {
-		if (dst_reg < 0) dst_reg = 0;
-		if (initializer) {
-			if (initializer->type == EXPR_ARRAY) {
-				int element_size = getTypeSize(*decl_info->var_type->base),
-					initializer_size = getSubexprsCount(initializer),
-					array_size = element_size * decl_info->var_type->n_items;
-
-				if (initializer_size) {
-					int element_reg, cache_id;
-					getRegister(ctx, &reg_state, dst_reg, &element_reg, &cache_id);
-
-					if (decl_info->attrs & ATTR_STATIC) {
-						fprintf(
-							ctx->dst,
-							".data mut \"%1$s\" zero %2$d\n"
-							"setd r%3$d . \"%1$s\"\n",
-							name, array_size, dst_reg
-						);
-					} else fprintf(
-						ctx->dst, 
-						"\tvar \"%1$s\" %2$d\n"
-						"\tsetv r%3$d \"%1$s\"\n",
-						name, array_size, dst_reg
-					);
-
-					if (initializer_size == 1) {
-						int iter_reg, iter_cache_id;
-						getRegister(ctx, &reg_state, dst_reg, &iter_reg, &iter_cache_id);
-
-						initializer = getSubexpr(initializer, 0);
-						expr_compilers[initializer->type](ctx, *initializer, reg_state | (1 << dst_reg) | (1 << iter_reg), element_reg);
-
-						fprintf(ctx->dst, "\tset r%d %d\n", iter_reg, decl_info->var_type->n_items);
-						fprintf(ctx->dst, "\tmark \".ai%d\"\n", ++array_init_counter);
-						fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size * 8, dst_reg, element_reg);
-						fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
-						fprintf(ctx->dst, "\tsub r%d r%d 1\n", iter_reg, iter_reg);
-						fprintf(ctx->dst, "\tcmp r%d 0\n", iter_reg);
-						fprintf(ctx->dst, "\tgoto:neq \".ai%d\"\n", array_init_counter);
-
-						freeRegister(ctx, &reg_state, iter_reg, iter_cache_id);
-					} else {
-						chainForeach(Expr, element, *getSubexprs(initializer)) {
-							expr_compilers[element->type](ctx, *element, reg_state | (1 << dst_reg), element_reg);
-							fprintf(ctx->dst, "\tstr%d r%d r%d\n", element_size, dst_reg, element_reg);
-							fprintf(ctx->dst, "\tadd r%d r%d %d\n", dst_reg, dst_reg, element_size);
-						}
-					}
-
-					freeRegister(ctx, &reg_state, element_reg, cache_id);
-				} else {
-					if (array_size <= 8) {
-						if (decl_info->attrs & ATTR_STATIC) {
-							fprintf(ctx->dst, ".data mut \"%s\" zero %d\n", name, array_size);
-						} else fprintf(ctx->dst, "\tpushv \"%s\" %d rZ\n", name, array_size);
-					} else {
-						int iter_reg, cache_id, step = 1;
-						getRegister(ctx, &reg_state, dst_reg, &iter_reg, &cache_id);
-
-						if (decl_info->attrs & ATTR_STATIC) {
-							fprintf(
-								ctx->dst,
-								".data mut \"%1$s\" zero %2$d\n"
-								"setd r%3$d . \"%1$s\"\n",
-								name, array_size, dst_reg
-							);
-						} else fprintf(
-							ctx->dst, 
-							"\tvar \"%1$s\" %2$d\n"
-							"\tsetv r%3$d \"%1$s\"\n",
-							name, array_size, dst_reg
-						);
-
-						if (array_size % 8 == 0) {
-							step = 8;
-						} else if (array_size % 4 == 0) {
-							step = 4;
-						} else if (array_size % 2 == 0) {
-							step = 2;
-						}
-
-						fprintf(
-							ctx->dst,
-							"\tset r%1$d %2$d\n"
-							"\tmark \".ai%6$d\"\n"
-							"\tstr%3$d r%4$d rZ\n"
-							"\tadd r%4$d r%4$d %5$d\n"
-							"\tsub r%1$d r%1$d %5$d\n"
-							"\tcmp r%1$d 0\n"
-							"\tgoto:neq \".ai%6$d\"\n",
-							iter_reg, array_size,
-							step * 8, dst_reg, step, ++array_init_counter
-						);
-
-						freeRegister(ctx, &reg_state, iter_reg, cache_id);
-					}
-				}
-			} else {
-				expr_compilers[initializer->type](ctx, *initializer, reg_state, dst_reg);
-				if (decl_info->attrs & ATTR_STATIC) {
-					int cache_id, addr_reg;
-					getRegister(ctx, &reg_state, dst_reg, &addr_reg, &cache_id);
-					fprintf(
-						ctx->dst,
-						".data mut \"%1$s\" zero %2$d\n"
-						"setd r%3$d . \"%1$s\"\n"
-						"str%4$d r%3$d r%5$d\n",
-						name, size, addr_reg, size * 8, dst_reg
-					);
-					freeRegister(ctx, &reg_state, addr_reg, cache_id);
-				} else fprintf(ctx->dst, "\tpushv \"%s\" %d r%d\n", name, size, dst_reg);
-			}
-		} else {
-			fprintf(
-				ctx->dst,
-				decl_info->attrs & ATTR_STATIC ? ".data mut \"%s\" zero %d\n" : "\tvar \"%s\" %d\n",
-				name,
-				decl_info->var_type->kind == KIND_ARRAY ? decl_info->var_type->n_items * getTypeSize(*decl_info->var_type->base) : size
-			);
+		switch (expr.var_type->size) {
+			case 1:
+				ASSERT_NO_BRB_ERR(BRB_addOp_int8(&ctx->dst, expr.int_literal));
+				break;
+			case 2:
+				ASSERT_NO_BRB_ERR(BRB_addOp_int16(&ctx->dst, expr.int_literal));
+				break;
+			case 4:
+				ASSERT_NO_BRB_ERR(BRB_addOp_int32(&ctx->dst, expr.int_literal));
+				break;
+			case 8:
+				ASSERT_NO_BRB_ERR(BRB_addOp_int64(&ctx->dst, expr.int_literal));
+				break;
+			default:
+				assert(false, "invalid integer size: %u\n", expr.var_type->size);
 		}
 	}
 }
 
-void compileExprAssign(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+static int array_init_counter;
+
+void compileExprNewVar(CodegenCtx* ctx, Expr expr, BRB_DataBlock* block)
+{
+	compileSrcRef(ctx, expr.loc);
+	char* name = getFullDeclName(&expr);
+	Expr* decl_info = getSubexpr(&expr, 2);
+	Expr* initializer = getSubexpr(&expr, 3);
+	int size = getTypeMemorySize(*decl_info->var_type);
+
+	if (decl_info->attrs & ATTR_STATIC) {
+		if (initializer) {
+			fprintf(ctx->dst, ".data mut \"%s\" {\n", name);
+			expr_compilers[initializer->type](ctx, *initializer, 0, codegenValueLiteral(size));
+			fprintf(ctx->dst, "}\n");
+		} else fprintf(ctx->dst, ".data mut \"%s\" zero %u\n", size);
+	} else {
+		if (initializer) {
+			expr_compilers[initializer->type](ctx, *initializer, reg_state, codegenValueNewVar(name, size));
+		} else fprintf(ctx->dst, "\tvar \"%s\" %d\n", name, size);
+	}
+
+	free(name);
+}
+
+void compileExprAssign(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
 	int field_size = getTypeSize(getExprValueType(ctx->ast, *expr.arg2));
-	expr_compilers[expr.arg2->type](ctx, *expr.arg2, reg_state, dst_reg);
+
 	if (expr.arg1->type == EXPR_GET) {
-
 		if (getSubexpr(expr.arg1->arg1, 2)->attrs & ATTR_STATIC) {
-			int ptr_reg, cache_id;
-			getRegister(ctx, &reg_state, dst_reg, &ptr_reg, &cache_id);
-			const char *const decl_name = getFullDeclName(expr.arg1->arg1);
-			fprintf(
-				ctx->dst,
-				"\tsetd r%1$d . \"%2$s\"\n"
-				"\tstr%3$d r%1$d r%4$d\n",
-				ptr_reg, decl_name, getTypeSize(*getSubexpr(expr.arg1->arg1, 2)->var_type) * 8, dst_reg
-			);
-			freeRegister(ctx, &reg_state, ptr_reg, cache_id);
-		} else fprintf(ctx->dst, "\tstrv \"%s\" r%d\n", getDeclName(expr.arg1->arg1), dst_reg);
-	} else if (expr.arg1->type == EXPR_DEREF) {
-		int ptr_reg, cache_id;
-		getRegister(ctx, &reg_state, dst_reg, &ptr_reg, &cache_id);
+			
 
-		expr_compilers[expr.arg1->arg1->type](ctx, *expr.arg1->arg1, reg_state | (1 << dst_reg), ptr_reg);
-		fprintf(ctx->dst, "\tstr%d r%d r%d\n", field_size * 8, ptr_reg, dst_reg);
-
-		freeRegister(ctx, &reg_state, ptr_reg, cache_id);
-	}
 	switch (field_size) {
 		case 4:
 			fprintf(ctx->dst, "\tsx32 r%d r%d\n", dst_reg, dst_reg);
@@ -3690,7 +3642,7 @@ void compileExprAssign(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 	}
 }
 
-void compileExprGetVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprGetVar(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 	Expr* decl_info = getSubexpr(expr.arg1, 2);
@@ -3712,7 +3664,7 @@ void compileExprGetVar(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 	}
 }
 
-void compileExprBlock(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprBlock(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 	chainForeach (Expr, subexpr, ExprChain_slice(*getSubexprs(&expr), 1, -1)) {
@@ -3722,23 +3674,38 @@ void compileExprBlock(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int 
 	if (expr.n_local_vars > 0) fprintf(ctx->dst, "\tdelnv %d\n", expr.n_local_vars);
 }
 
-void compileExprProcCall(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprProcCall(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
-
 	int cache_id = compileRegCaching(ctx, reg_state);
+	Expr* proc_decl = getSubexpr(&expr, 0)->arg1;
+
+// evaluating arguments
 	int i = 0;
 	chainForeach (Expr, subexpr, ExprChain_slice(*getSubexprs(&expr), 1, -1)) {
 		expr_compilers[subexpr->type](ctx, *subexpr, (1 << i) - 1, i);
-		i++;
+		i += 1;
 	}
-	fprintf(ctx->dst, "\tcall . \"%s\"\n", getDeclName(getSubexpr(&expr, 0)->arg1));
+// allocating space for the return value if it's more than the size of a register
+	TypeDef* ret_type = getSubexpr(proc_decl, 2)->var_type;
+	int retval_size = 0;
+	if (ret_type->kind != KIND_VOID) {
+		retval_size = getTypeSize(*ret_type);
+		if (retval_size > 8)
+			fprintf(ctx->dst, "\tvar \".retval\" %d\n", retval_size);
+	}
 
-	if (dst_reg != 0) fprintf(ctx->dst, "\tsetr r%d r0\n", dst_reg);
+	fprintf(ctx->dst, "\tcall . \"%s\"\n", getDeclName(proc_decl));
+
+	if (ret_type->kind != KIND_VOID) {
+		if (retval_size > 8) {
+			fprintf(ctx->dst, "\t.renamev \".retval\" \".r%d\"\n", dst_reg);
+		} else if (dst_reg != 0) fprintf(ctx->dst, "\tsetr r%d r0\n", dst_reg);
+	}
 	compileRegUncaching(ctx, reg_state, cache_id);
 }
 
-void compileExprReturn(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprReturn(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3746,7 +3713,7 @@ void compileExprReturn(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int
 	fprintf(ctx->dst, "\tret\n");
 }
 
-void compileExprAdd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprAdd(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3768,7 +3735,7 @@ void compileExprAdd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprSub(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprSub(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3796,7 +3763,7 @@ void compileExprSub(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprMul(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprMul(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3818,7 +3785,7 @@ void compileExprMul(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprDiv(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprDiv(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3837,7 +3804,7 @@ void compileExprDiv(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprMod(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprMod(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3856,7 +3823,7 @@ void compileExprMod(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprAnd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprAnd(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3878,7 +3845,7 @@ void compileExprAnd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprOr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprOr(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3900,7 +3867,7 @@ void compileExprOr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst
 	}
 }
 
-void compileExprXor(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprXor(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3922,7 +3889,7 @@ void compileExprXor(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprShl(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprShl(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3941,7 +3908,7 @@ void compileExprShl(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprShr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprShr(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3960,7 +3927,7 @@ void compileExprShr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	}
 }
 
-void compileExprNot(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprNot(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3968,7 +3935,7 @@ void compileExprNot(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int ds
 	fprintf(ctx->dst, "\tnot r%d r%d\n", dst_reg, dst_reg);
 }
 
-void _compileExprLogicalEq(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalEq(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -3990,7 +3957,7 @@ void _compileExprLogicalEq(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
 	}
 }
 
-void _compileExprLogicalNeq(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalNeq(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4013,7 +3980,7 @@ void _compileExprLogicalNeq(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state
 	}
 }
 
-void _compileExprLogicalLt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalLt(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4035,7 +4002,7 @@ void _compileExprLogicalLt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
 	}
 }
 
-void _compileExprLogicalGt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalGt(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4057,7 +4024,7 @@ void _compileExprLogicalGt(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
 	}
 }
 
-void _compileExprLogicalLe(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalLe(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4079,7 +4046,7 @@ void _compileExprLogicalLe(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
 	}
 }
 
-void _compileExprLogicalGe(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalGe(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4101,7 +4068,7 @@ void _compileExprLogicalGe(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
 	}
 }
 
-void _compileExprLogicalAnd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalAnd(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4115,7 +4082,7 @@ void _compileExprLogicalAnd(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state
 	freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
 }
 
-void _compileExprLogicalOr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalOr(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4129,7 +4096,7 @@ void _compileExprLogicalOr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state,
 	freeRegister(ctx, &reg_state, arg2_dst_reg, cache_id);
 }
 
-void _compileExprLogicalNot(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void _compileExprLogicalNot(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4137,7 +4104,7 @@ void _compileExprLogicalNot(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state
 	fprintf(ctx->dst, "\tcmp r%d 0\n", dst_reg);
 }
 
-void compileLogicalExpr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileLogicalExpr(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	switch (expr.type) {
 		case EXPR_LOGICAL_EQ:
@@ -4183,7 +4150,7 @@ void compileLogicalExpr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 
 static int block_counter = 0;
 
-void compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprIf(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 	int block_id = block_counter++;
@@ -4245,10 +4212,10 @@ void compileExprIf(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst
 	}
 }
 
-void compileExprVoid(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprVoid(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {}
 
-void compileExprWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprWhile(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 	int block_id = block_counter++;
@@ -4305,7 +4272,7 @@ void compileExprWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int 
 	fprintf(ctx->dst, "\tgoto \".start%d\"\n\tmark \".end%d\"\n", block_id, block_id);
 }
 
-void compileExprDoWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprDoWhile(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 	int block_id = block_counter++;
@@ -4361,14 +4328,14 @@ void compileExprDoWhile(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 	}
 }
 
-void compileExprGetRef(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprGetRef(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
 	fprintf(ctx->dst, "\tsetv r%d \"%s\"\n", dst_reg, getSubexpr(expr.arg1->arg1, 0)->name);
 }
 
-void compileExprDeref(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprDeref(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 
@@ -4376,30 +4343,22 @@ void compileExprDeref(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int 
 	fprintf(ctx->dst, "\tld%ds r%d r%d\n", getTypeSize(*getExprValueType(ctx->ast, *expr.arg1).base) * 8, dst_reg, dst_reg);
 }
 
-void compileExprCast(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprCast(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
-
-	int old_type_size = getTypeSize(getExprValueType(ctx->ast, *expr.arg1));
-	int new_type_size = getTypeSize(*expr.var_type);
 
 	if (isExprIntLiteral(expr.arg1)) {
 		if (expr.var_type->kind == KIND_BOOL) {
 			fprintf(ctx->dst, "\tset r%d %d\n", dst_reg, getIntLiteral(expr.arg1) != 0);
-		} else {
-			fprintf(ctx->dst, "\tset r%d %lld\n", dst_reg, getIntLiteral(expr.arg1) & byteMask(new_type_size));
-		}
+		} else fprintf(ctx->dst, "\tset r%d %lld\n", dst_reg, getIntLiteral(expr.arg1));
 	} else {
 		expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg);
-		if (expr.var_type->kind == KIND_BOOL) {
+		if (expr.var_type->kind == KIND_BOOL)
 			fprintf(ctx->dst, "\tcmp r%d 0\n\tsetc r%d neq\n", dst_reg, dst_reg);
-		} else if (new_type_size < old_type_size) {
-			fprintf(ctx->dst, "\tand r%d r%d %lld\n", dst_reg, dst_reg, byteMask(new_type_size));
-		}
 	}
 }
 
-void compileExprNewProc(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprNewProc(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	sbuf proc_name = fromstr(getDeclName(&expr));
 	Expr* proc_info = getSubexpr(&expr, 2);
@@ -4410,24 +4369,32 @@ void compileExprNewProc(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 
 	compileSrcRef(ctx, expr.loc);
 	fprintf(ctx->dst, "%sproc \"%.*s\"\n", proc_info->attrs & ATTR_EXTERNAL ? "ext" : "", unpack(proc_name));
-
-	
-	int i = 0;
-	for (ExprNode* iter = getSubexprs(proc_args)->start->next; i < proc_info->n_args; iter = iter->next) {
-		fprintf(ctx->dst, "\tpushv \"%s\" %d r%d\n", getDeclName(&iter->value), getTypeSize(*getSubexpr(&iter->value, 2)->var_type), i++);
+// initializing arguments
+	int i = proc_info->n_args + 1;
+	chainRevForeach (Expr, iter, ExprChain_slice(*getSubexprs(proc_args), 1, proc_info->n_args)) {
+		const int arg_size = getTypeSize(*getSubexpr(iter, 2)->var_type);
+		if (arg_size > 8) {
+			fprintf(ctx->dst, "\targ \"%s\" %d\n", getDeclName(iter), arg_size);
+		} else fprintf(ctx->dst, "\tpushv \"%s\" %d r%d\n", getDeclName(iter), arg_size, --i);
 	}
-
+// initializing space for the return value
+	if (proc_info->var_type->kind != KIND_VOID) {
+		int retval_size = getTypeSize(*proc_info->var_type);
+		if (retval_size > 8)
+			fprintf(ctx->dst, "\targ \".retval\" %d\n", retval_size);
+	}
+// compiling the body of the procedure
 	expr_compilers[proc_body->type](ctx, *proc_body, 0, 0);
 	if (proc_info->var_type->kind == KIND_VOID) fputs("\tret\n", ctx->dst);
 	fprintf(ctx->dst, "endproc\n");
-
+// compiling deferred declarations found in the procedure
 	chainForeach(Expr, static_var_decl, ctx->static_vars) {
 		expr_compilers[static_var_decl->type](ctx, *static_var_decl, 0, -1);
 	}
 	ExprChain_clear(&ctx->static_vars);
 }
 
-void compileExprNewType(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprNewType(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
 	chainForeach (Expr, field, ExprChain_slice(*getSubexprs(&expr), 1, -1)) {
@@ -4436,10 +4403,10 @@ void compileExprNewType(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 	}
 }
 
-void compileExprGetAttr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, int dst_reg)
+void compileExprGetAttr(CodegenCtx* ctx, Expr expr, regstate_t reg_state, CodegenValueTarget dst)
 {
 	compileSrcRef(ctx, expr.loc);
-	if (expr.arg1->type == EXPR_GET) {
+	/*if (expr.arg1->type == EXPR_GET) {
 		Expr* decl_info = getSubexpr(expr.arg1->arg1, 2);
 		Expr* attr_info = getSubexpr(expr.arg2, 2);
 		int attr_size = getTypeMemorySize(*attr_info->var_type);
@@ -4469,7 +4436,26 @@ void compileExprGetAttr(ASTCompilerCtx* ctx, Expr expr, regstate_t reg_state, in
 			printf("%d\n", attr_size);
 			assert(false, "codegen for EXPR_GET_ATTR for this case is not implemented yet");
 		}
-	} else assert(false, "codegen for EXPR_GET_ATTR for this case is not implemented yet");
+		return;
+	}*/
+
+	int obj_size = getTypeSize(getExprValueType(ctx->ast, *expr.arg1));
+	TypeDef attr_type = *getSubexpr(expr.arg2, 2)->var_type;
+	int attr_size = getTypeSize(attr_type);
+
+	expr_compilers[expr.arg1->type](ctx, *expr.arg1, reg_state, dst_reg);
+	if (obj_size <= 8) {
+		printf("\tand r%d r%d %llu\n", dst_reg, dst_reg, byteMask(attr_size, getAttrOffset(expr.arg2)));
+	} else {
+		if (attr_size <= 8) {
+			fprintf(ctx->dst,
+				"\tldvs r%d \".r%d\":%d :%d\n"
+				"\tdel \".r%d\n",
+				dst_reg, dst_reg, attr_size, getAttrOffset(expr.arg2), dst_reg);
+		} else fprintf(ctx->dst,
+				"\treszv \".r%d\" %d %d\n",
+				dst_reg, attr_size, getAttrOffset(expr.arg2));
+	}
 }
 
 ExprCompiler expr_compilers[] = {
@@ -4532,25 +4518,23 @@ ExprCompiler expr_compilers[] = {
 };
 static_assert(N_EXPR_TYPES == 56, "not all expression types have corresponding compilers defined");
 
-bool compileAST(AST* src, FILE* dst)
+BRB_Module compileAST(AST src)
 {
-	ASTCompilerCtx ctx = {.dst = dst};
+	CodegenCtx ctx = {.ast = &src};
 
 	chainForeach (Expr, stmt, ExprChain_slice(*getSubexprs(&src->root), 1, -1)) {
 		expr_compilers[stmt->type](&ctx, *stmt, 0, -1);
 	}
-	if (ctx.has_entry_point) fprintf(dst, "call . \"main\"\n");
 
 	sbufArray_clear(&ctx.data_blocks);
 	ExprChain_clear(&ctx.static_vars);
-	return true;
 }
 
 void printUsageMsg(FILE* dst, char* program_name)
 {
 	fprintf(
 		dst,
-		"brc - Compiler for BRidge Source Code `.br` files\n"
+		"bridge - Multi-tool for the Bridge language and VM\n"
 		"usage: %s [options...] <source path>\n"
 		"options:\n"
 		"\t-h		Display this message and quit\n"
@@ -4558,7 +4542,6 @@ void printUsageMsg(FILE* dst, char* program_name)
 		"\t-dM		Output all macros defined in the source code\n"
 		"\t--no-opt	Disable bytecode-level optimizations\n"
 		"\t-Ap		Preprocess the input and output it back to the terminal\n"
-		"\t-Av		Generate BRidge Assembly from the input and save it to a `.vbrb` file\n"
 		"\t-Ab		Generate BRidge Bytecode from the input and save it to a `.brb` file. Default option for `br` and `vbrb` input\n"
 		"\t-As		Generate native assembly from the input and save it to a `.S` file\n"
 		"\t-Ao		Generate native object file from the input and save it to a `.o` file\n"
@@ -5080,4 +5063,9 @@ int main(int argc, char* argv[])
 			callNativeLinker(output_path, output_path);
 			return 0;
 	}
+
+	eprintf("error: unknown input type: %s\n"
+		"note: supported input types: br, vbrb, brb\n",
+		input_type);
+	return 1;
 }

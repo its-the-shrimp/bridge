@@ -1,5 +1,6 @@
 #include <brb.h>
 #include <errno.h>
+#if 0
 
 typedef void (*OpPrinter) (Module*, Op*, FILE*);
 
@@ -72,9 +73,10 @@ void printOpCall(Module* module, Op* op, FILE* dst)
 	fprintf(dst, "%s \"%s\"", module->submodules.data[op->module_id].name, module->seg_exec.data[op->symbol_id].mark_name);
 }
 
+// TODO: add separate libbrb interface for disassembly, cause that's ugly as hell
 void printOpVar(Module* module, Op* op, FILE* dst)
 {
-	fprintf(dst, "0%%%lld %lld", op->new_var_size, op->new_var_size);
+	fprintf(dst, "0%%%lld %lld", op->var_size, op->var_size);
 }
 
 void printRegSymbolIdOp(Module* module, Op* op, FILE* dst)
@@ -181,7 +183,8 @@ const OpPrinter op_printers[] = {
 	[OP_MOD] = &print2RegImmOp,
 	[OP_MODS] = &print2RegImmOp,
 	[OP_MODR] = &print3RegOp,
-	[OP_MODSR] = &print3RegOp
+	[OP_MODSR] = &print3RegOp,
+	[OP_ARG] = &printOpVar
 };
 
 void printOp(ExecEnv* env, Module* module, Op* op, FILE* dst)
@@ -315,169 +318,170 @@ int main(int argc, char* argv[])
 
 		if (sbufeq(cmd, fromcstr("q"))) return 0;
 
-			if (sbufeq(cmd, fromcstr("r"))) {
-				execModule(&env, &module, &interrupt);
-				if (last_breakpoint >= 0) {
-					printf("interrupt: breakpoint on index 0x%08x\n", env.op_id);
-				} else if (program_ended) {
-					printf("interrupt: program finished\n");
-				} else {
-					printf("interrupt: program exited\n");
-				}
-				printExecCtx(&env, &module);
+		if (sbufeq(cmd, fromcstr("r"))) {
+			execModule(&env, &module, &interrupt);
+			if (last_breakpoint >= 0) {
+				printf("interrupt: breakpoint on index 0x%08x\n", env.op_id);
+			} else if (program_ended) {
+				printf("interrupt: program finished\n");
+			} else {
+				printf("interrupt: program exited\n");
+			}
+			printExecCtx(&env, &module);
+			continue;
+		}
+
+		if (sbufcut(&cmd, fromcstr("b")).data) {
+			sbufstripl(&cmd, fromcstr(" "), fromcstr("\t"));
+			if (cmd.length == 0) {
+				printf("error: breakpoint is not provided\n");
 				continue;
 			}
 
-			if (sbufcut(&cmd, fromcstr("b")).data) {
-				sbufstripl(&cmd, fromcstr(" "), fromcstr("\t"));
-				if (cmd.length == 0) {
-					printf("error: breakpoint is not provided\n");
+			if (sbufint(cmd)) {
+				uint32_t breakp = sbuftoint(cmd);
+				if (breakp >= module.seg_exec.length) {
+					printf("index 0x%08x is out of range for a breakpoint\n", breakp);
 					continue;
 				}
 
-				if (sbufint(cmd)) {
-					uint32_t breakp = sbuftoint(cmd);
-					if (breakp >= module.seg_exec.length) {
-						printf("index 0x%08x is out of range for a breakpoint\n", breakp);
-						continue;
-					}
+				breakpoints[n_breakpoints++] = sbuftoint(cmd);
+				printf("breakpoint set at index 0x%08x\n", breakpoints[n_breakpoints - 1]);
+			} else if (cmd.data[0] == '[') {
+				sbufshift(cmd, 1);
 
-					breakpoints[n_breakpoints++] = sbuftoint(cmd);
-					printf("breakpoint set at index 0x%08x\n", breakpoints[n_breakpoints - 1]);
-				} else if (cmd.data[0] == '[') {
-					sbufshift(cmd, 1);
+				sbuf filename, lineno_spec;
+				if (!sbufsplit(&cmd, &filename, fromcstr(":")).data) {
+					printf("error: line number not provided\n");
+					continue;
+				}
+				if (!sbufsplit(&cmd, &lineno_spec, fromcstr("]")).data) {
+					printf("error: symbol `]` expected after a source code breakpoint specifier\n");
+					continue;
+				}
+				if (!sbuftoint(lineno_spec)) {
+					printf("error: invalid line number specifier `%.*s`\n", unpack(lineno_spec));
+					continue;
+				}
+				int lineno = sbuftoint(lineno_spec);
 
-					sbuf filename, lineno_spec;
-					if (!sbufsplit(&cmd, &filename, fromcstr(":")).data) {
-						printf("error: line number not provided\n");
-						continue;
-					}
-					if (!sbufsplit(&cmd, &lineno_spec, fromcstr("]")).data) {
-						printf("error: symbol `]` expected after a source code breakpoint specifier\n");
-						continue;
-					}
-					if (!sbuftoint(lineno_spec)) {
-						printf("error: invalid line number specifier `%.*s`\n", unpack(lineno_spec));
-						continue;
-					}
-					int lineno = sbuftoint(lineno_spec);
+				sbuf cur_src_path = (sbuf){0};
+				int cur_lineno = -1;
+				arrayForeach (Op, op, module.seg_exec) {
+					if (op->type == OP_ATF) cur_src_path = fromstr(op->mark_name);
+					else if (op->type == OP_ATL) cur_lineno = op->symbol_id; 
 
-					sbuf cur_src_path = (sbuf){0};
-					int cur_lineno = -1;
-					arrayForeach (Op, op, module.seg_exec) {
-						if (op->type == OP_ATF) cur_src_path = fromstr(op->mark_name);
-						else if (op->type == OP_ATL) cur_lineno = op->symbol_id; 
+					if (sbufeq(filename, cur_src_path) && cur_lineno == lineno) {
+						breakpoints[n_breakpoints++] = op - module.seg_exec.data;
+						printf(
+							"breakpoint set at file `%.*s`, line %d, index 0x%08lx\n",
+							unpack(cur_src_path),
+							cur_lineno,
+							op - module.seg_exec.data
+						);
+						filename.data = NULL;
+						break;
+					}
+				}
 
-						if (sbufeq(filename, cur_src_path) && cur_lineno == lineno) {
+				if (filename.data)
+					printf("error: reference to source code location [%.*s:%d] could not be found\n", unpack(filename), lineno);
+			} else {
+				sbuf proc_name;
+				sbufsplit(&cmd, &proc_name, fromcstr(" "), fromcstr("\t"));
+
+				arrayForeach (Op, op, module.seg_exec) {
+					if (op->type == OP_PROC || op->type == OP_EXTPROC) {
+						if (sbufeq(proc_name, fromstr(op->mark_name))) {
 							breakpoints[n_breakpoints++] = op - module.seg_exec.data;
 							printf(
-								"breakpoint set at file `%.*s`, line %d, index 0x%08lx\n",
-								unpack(cur_src_path),
-								cur_lineno,
+								"breakpoint set at procedure `%s`, index 0x%08lx\n",
+								op->mark_name,
 								op - module.seg_exec.data
 							);
-							filename.data = NULL;
+							proc_name.data = NULL;
 							break;
 						}
 					}
-
-					if (filename.data)
-						printf("error: reference to source code location [%.*s:%d] could not be found\n", unpack(filename), lineno);
-				} else {
-					sbuf proc_name;
-					sbufsplit(&cmd, &proc_name, fromcstr(" "), fromcstr("\t"));
-
-					arrayForeach (Op, op, module.seg_exec) {
-						if (op->type == OP_PROC || op->type == OP_EXTPROC) {
-							if (sbufeq(proc_name, fromstr(op->mark_name))) {
-								breakpoints[n_breakpoints++] = op - module.seg_exec.data;
-								printf(
-									"breakpoint set at procedure `%s`, index 0x%08lx\n",
-									op->mark_name,
-									op - module.seg_exec.data
-								);
-								proc_name.data = NULL;
-								break;
-							}
-						}
-					}
-
-					if (proc_name.data)
-						printf("error: procedure `%.*s` could not be found\n", unpack(proc_name));
 				}
-				continue;
-			}
 
-			if (sbufeq(cmd, fromcstr("ei"))) {
-				printf("0x%08x\n", env.op_id);
-				continue;
+				if (proc_name.data)
+					printf("error: procedure `%.*s` could not be found\n", unpack(proc_name));
 			}
+			continue;
+		}
 
-			if (sbufeq(cmd, fromcstr("n"))) {
-				execOp(&env, &module);
-				printf("interrupt: single operation executed\n");
-				printExecCtx(&env, &module);
-				continue;
-			}
+		if (sbufeq(cmd, fromcstr("ei"))) {
+			printf("0x%08x\n", env.op_id);
+			continue;
+		}
 
-			if (sbufeq(cmd, fromcstr("ctx"))) {
-				printExecCtx(&env, &module);
-				continue;
-			}
+		if (sbufeq(cmd, fromcstr("n"))) {
+			execOp(&env, &module);
+			printf("interrupt: single operation executed\n");
+			printExecCtx(&env, &module);
+			continue;
+		}
 
-			if (sbufcut(&cmd, fromcstr("rr")).data) {
-				sbufstripl(&cmd, fromcstr(" "), fromcstr("\t"));
-				if (cmd.length > 0) {
-					if (cmd.length == 2) {
-						if (cmd.data[0] == 'r' && cmd.data[1] >= '0' && cmd.data[1] <= '7') {
-							uint8_t reg_id = cmd.data[1] - '0';
-							printf("  r%hhd:\t0x%016llx\n", reg_id, env.registers[reg_id]);
-						} else printf("invalid register specifier `%.*s`\n", unpack(cmd));
+		if (sbufeq(cmd, fromcstr("ctx"))) {
+			printExecCtx(&env, &module);
+			continue;
+		}
+
+		if (sbufcut(&cmd, fromcstr("rr")).data) {
+			sbufstripl(&cmd, fromcstr(" "), fromcstr("\t"));
+			if (cmd.length > 0) {
+				if (cmd.length == 2) {
+					if (cmd.data[0] == 'r' && cmd.data[1] >= '0' && cmd.data[1] <= '7') {
+						uint8_t reg_id = cmd.data[1] - '0';
+						printf("  r%hhd:\t0x%016llx\n", reg_id, env.registers[reg_id]);
 					} else printf("invalid register specifier `%.*s`\n", unpack(cmd));
-				} else {
-					for (uint8_t i = 0; i < N_USER_REGS; i++) {
-						printf("  r%hhd:\t0x%016llx\n", i, env.registers[i]);
-					}
-					printf("  .sp:\t0x%p\n", (void*)env.stack_head);
-					printf("  .ei:\t0x%08x\n", env.op_id);
+				} else printf("invalid register specifier `%.*s`\n", unpack(cmd));
+			} else {
+				for (uint8_t i = 0; i < N_USER_REGS; i++) {
+					printf("  r%hhd:\t0x%016llx\n", i, env.registers[i]);
 				}
+				printf("  .sp:\t0x%p\n", (void*)env.stack_head);
+				printf("  .ei:\t0x%08x\n", env.op_id);
+			}
+			continue;
+		}
+
+		if (sbufcut(&cmd, fromcstr("rm")).data) {
+			sbufstripl(&cmd, fromcstr(" "), fromcstr("\t"));
+			if (cmd.length == 0) {
+				printf("memory address to read not provided\n");
 				continue;
 			}
 
-			if (sbufcut(&cmd, fromcstr("rm")).data) {
-				sbufstripl(&cmd, fromcstr(" "), fromcstr("\t"));
-				if (cmd.length == 0) {
-					printf("memory address to read not provided\n");
-					continue;
-				}
-
-				sbuf address, n_bytes;
-				sbufsplit(&cmd, &address, fromcstr(" "), fromcstr("\t"));
-				sbufstripl(&cmd, fromcstr(" "), fromcstr("\t"));
-				if (cmd.length == 0) {
-					printf("amount of bytes to be read not provided\n");
-					continue;
-				}
-				sbufsplit(&cmd, &n_bytes, fromcstr(" "), fromcstr("\t"));
-
-				if (!sbufint(address)) {
-					printf("invalid memory address specifier `%.*s`\n", unpack(address));
-					continue;
-				}
-				if (!sbufint(n_bytes)) {
-					printf("invalid memory span specifier `%.*s`\n", unpack(n_bytes));
-					continue;
-				}
-			
-				sbuf span = (sbuf){ .data = (char*)sbuftoint(address), .length = sbuftoint(n_bytes) };
-				printf("  %p: ", (void*)span.data);
-				putsbuflnesc(span, BYTEFMT_HEX);
+			sbuf address, n_bytes;
+			sbufsplit(&cmd, &address, fromcstr(" "), fromcstr("\t"));
+			sbufstripl(&cmd, fromcstr(" "), fromcstr("\t"));
+			if (cmd.length == 0) {
+				printf("amount of bytes to be read not provided\n");
 				continue;
 			}
+			sbufsplit(&cmd, &n_bytes, fromcstr(" "), fromcstr("\t"));
 
-			if (cmd.length > 0)
-				printf("invalid command `%.*s`\n", unpack(cmd));
+			if (!sbufint(address)) {
+				printf("invalid memory address specifier `%.*s`\n", unpack(address));
+				continue;
+			}
+			if (!sbufint(n_bytes)) {
+				printf("invalid memory span specifier `%.*s`\n", unpack(n_bytes));
+				continue;
+			}
+		
+			sbuf span = (sbuf){ .data = (char*)sbuftoint(address), .length = sbuftoint(n_bytes) };
+			printf("  %p: ", (void*)span.data);
+			putsbuflnesc(span, BYTEFMT_HEX);
+			continue;
+		}
+
+		if (cmd.length > 0)
+			printf("invalid command `%.*s`\n", unpack(cmd));
 	}
 
 	return env.exitcode;
 }
+#endif

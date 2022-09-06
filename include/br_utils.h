@@ -3,6 +3,7 @@
 #define _BR_UTILS_H
 
 #include <stdint.h>
+#include <string.h>
 
 #if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && defined(__ORDER_LITTLE_ENDIAN__)
 #define IS_BIG_ENDIAN (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
@@ -40,6 +41,23 @@ void* reverseByteOrder(void* src, uint64_t length);
 #define CONCAT(x, y) _CONCAT(x, y)
 #define TEMPVAR CONCAT(_lc, __LINE__)
 
+// bit manipulation functions
+#define BIT(n) (1ULL << (n))
+#define BIT_MASK(start, length) ((BIT(length) - 1) << (start))
+int LOWEST_SET_BIT(uint64_t bitset);
+#define LOWEST_CLEAR_BIT(bitset) LOWEST_SET_BIT(~(bitset))
+
+#define CLEAR_BIT(bitset, n) ((bitset) & ~BIT(n))
+#define SET_BIT(bitset, n) ((bitset) | BIT(n))
+
+#define BIT_CLEAR(bitset, n) (((bitset) & BIT(n)) == 0)
+#define BIT_SET(bitset, n) (!BIT_CLEAR(bitset, n))
+#define SIGN_BIT_SET(x) ((int64_t)(x) < 0)
+
+#define FITS_IN_8BITS(x)  ((uint64_t)x <= UINT8_MAX)
+#define FITS_IN_16BITS(x) ((uint64_t)x <= UINT16_MAX)
+#define FITS_IN_32BITS(x) ((uint64_t)x <= UINT32_MAX)
+
 // custom replacement for <assert.h>
 #define _assert(expr, file, line, f_name, ...) { \
 	if (!(expr)) { \
@@ -52,12 +70,22 @@ void* reverseByteOrder(void* src, uint64_t length);
 #define assert(expr, ...) _assert(expr, __FILE__, __LINE__, __func__, __VA_ARGS__)
 #define static_assert _Static_assert
 
+void* memdup(const void* ptr, size_t size);
+
 #endif // _BR_UTILS_H
 
 #if defined(BR_UTILS_IMPLEMENTATION) && !defined(_BR_UTILS_IMPL_LOCK)
 #define _BR_UTILS_IMPL_LOCK
 
-void* reverseByteOrder(void *const src, uint64_t length) {
+#include <math.h>
+#include <stdlib.h>
+
+void* memdup(const void* ptr, size_t size) {
+	return memcpy(malloc(size), ptr, size);
+}
+
+void* reverseByteOrder(void *const src, uint64_t length)
+{
 	uint8_t *const _src = src;
 	for (uint64_t i = 0; i < length / 2; i += 1) {
 		uint8_t tmp = _src[i];
@@ -65,6 +93,11 @@ void* reverseByteOrder(void *const src, uint64_t length) {
 		_src[length - i - 1] = tmp;
 	}
 	return src;
+}
+
+int LOWEST_SET_BIT(uint64_t bitset)
+{
+	return lroundf(log2f(bitset & -bitset));
 }
 
 #endif // BR_UTILS_IMPLEMENTATION

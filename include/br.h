@@ -76,6 +76,6 @@ sbuf fileBaseName_s(sbuf path);
 #define absInt(x) (x<0?-x:x)
 #define absNegInt(x) (x<0?x:-x)
 #define swap(v1, v2, tmp_t) { tmp_t TEMPVAR = v1; v1 = v2; v2 = TEMPVAR; }
-#define byteMask(n_bytes) ((1LL << ((n_bytes) * 8 - 1)) * 2 - 1)
+#define byteMask(n_bytes, offset) ((1ULL << ((n_bytes) * 8)) - 1) << ((offset) * 8)
 
 #endif // _BRIDGE_

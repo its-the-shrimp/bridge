@@ -1,5 +1,7 @@
+// implementation of the BRB Assembler
 #define _BRB_INTERNAL
 #include <brb.h>
+#if 0
 
 declArray(Var);
 defArray(Var);
@@ -833,7 +835,7 @@ VBRBError compileOpVar(CompilerCtx* ctx, Module* dst)
 	if (err.code) return err;
 
 	err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&new_var->size, op->type, 1, false);
-	if (!err.code) op->new_var_size = new_var->size;
+	if (!err.code) op->var_size = new_var->size;
 
 	return err;
 }
@@ -867,8 +869,8 @@ VBRBError compileOpLdv(CompilerCtx* ctx, Module* dst)
 		.prep = ctx->prep,
 		.code = VBRB_ERR_VAR_TOO_LARGE,
 		.var = (Var){
-			.name = var_name.word,
-			.size = var_size
+			.name = tostr(var_name.string),
+			.size = op->var_size
 		},
 		.loc = ctx->op_token
 	};
@@ -882,7 +884,7 @@ VBRBError compileOpStrv(CompilerCtx* ctx, Module* dst)
 	Op* op = arrayhead(dst->seg_exec);
 
 	Token var_name = fetchToken(ctx->prep);
-	uint8_t var_size, src_reg;
+	uint8_t src_reg, var_size;
 	VBRBError err = getVarArg(ctx, var_name, &op->symbol_id, &var_size, op->type, 1);
 	if (err.code) return err;
 
@@ -890,8 +892,8 @@ VBRBError compileOpStrv(CompilerCtx* ctx, Module* dst)
 		.prep = ctx->prep,
 		.code = VBRB_ERR_VAR_TOO_LARGE,
 		.var = (Var){
-			.name = var_name.word,
-			.size = var_size
+			.name = tostr(var_name.string),
+			.size = op->var_size
 		},
 		.loc = ctx->op_token
 	};
@@ -1047,7 +1049,7 @@ VBRBError compileOpArg(CompilerCtx* ctx, Module* dst)
 	if (err.code) return err;
 
 	err = getIntArg(ctx, fetchToken(ctx->prep), (uint64_t*)&new_var->size, op->type, 1, false);
-	if (!err.code) ctx->frame_start -= op->new_var_size = new_var->size;
+	if (!err.code) ctx->frame_start -= op->var_size = new_var->size;
 
 	return err;
 }
@@ -1303,3 +1305,4 @@ void cleanupVBRBCompiler(VBRBError status)
 {
 	delBRP(status.prep);
 }
+#endif

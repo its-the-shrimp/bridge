@@ -7,7 +7,6 @@
 #include <datasets.h>
 #include <errno.h>
 #include <sys/cdefs.h>
-#include <sys/mman.h>
 
 
 #define DQUOTE fromcstr("\"")
@@ -38,8 +37,8 @@ typedef enum token_type {
 } TokenType;
 
 typedef struct token_loc {
-	int32_t lineno;
-	int32_t colno;
+	uint32_t lineno;
+	uint32_t colno;
 	char* src_name;
 	struct token_loc* included_from;
 } TokenLoc;
@@ -747,6 +746,7 @@ static void preprocessInput(BRP* obj, InputCtx* const input)
 					}
 				}
 				break;
+			case N_BRP_CMDS:
 			default:
 				obj->error_code = BRP_ERR_UNKNOWN_CMD;
 				obj->error_loc = input->cur_loc;
@@ -1102,7 +1102,9 @@ void printBRPErrorStr(FILE* fd, BRP* obj) {
 				fprintf(fd, "%d ", obj->error_n_args);
 			}
 			break;
-		default: fprintf(fd, "unreachable");
+		case N_BRP_ERRORS:
+		default:
+			fprintf(fd, "unreachable");
 	}
 }
 

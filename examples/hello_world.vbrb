@@ -1,7 +1,7 @@
 .data "helloworld" "Hello, World\n"
-extproc "main"
-    setb r0 STDOUT
-    setd r1 . "helloworld"
-    set r2 13
+extproc "main" in
+    builtin STDOUT
+    addrof . "helloworld"
+    int64 13
     sys write
 endproc

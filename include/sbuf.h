@@ -40,7 +40,7 @@ static char _CHARSET[UINT8_MAX + 1] = {
 #define sbufslice(obj, start, end) ((sbuf){ .data = (obj).data + start, .length = (end < 0 || end > (obj).length ? (obj).length : end) - start })
 
 #define sbufForeachChar(name, obj) \
-const sbuf TEMPVAR=(obj);for(char* name=TEMPVAR.data;name-TEMPVAR.data<TEMPVAR.length;name+=1)
+const sbuf TEMPVAR=(obj);for(char* name=TEMPVAR.data;(sbuf_size_t)(name-TEMPVAR.data)<TEMPVAR.length;name+=1)
 
 #define _s(x) #x
 
@@ -53,7 +53,7 @@ const sbuf TEMPVAR=(obj);for(char* name=TEMPVAR.data;name-TEMPVAR.data<TEMPVAR.l
 #define BYTEFMT_ESC_DQUOTE  0x40
 #define BYTEFMT_ESC_QUOTE   0x80
 
-typedef long sbuf_size_t;
+typedef size_t sbuf_size_t;
 
 typedef struct sbuf {
 	sbuf_size_t length;
@@ -804,13 +804,13 @@ sbuf _sbufcutr(sbuf* src, ...)
 	return sbufcutrva(src, args);
 }
 
-sbuf smalloc(long length)
+sbuf smalloc(sbuf_size_t length)
 {
 	char* temp = malloc(length);
 	return (sbuf){ .data = temp, .length = temp ? length : 0 };
 }
 
-sbuf scalloc(long length)
+sbuf scalloc(sbuf_size_t length)
 {
 	char* temp = calloc(1, length);
 	return (sbuf){ .data = temp, .length = temp ? length : 0 };
@@ -830,6 +830,7 @@ bool srealloc(sbuf* obj, sbuf_size_t new_length)
 void sfree(sbuf* obj)
 {
 	free(obj->data);
+	*obj = (sbuf){0};
 }
 
 #endif // SBUF_IMPLEMENTATION

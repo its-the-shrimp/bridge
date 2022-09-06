@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <br_utils.h>
+#include <math.h>
 
 #define DS_DEF static __attribute__((unused))
 
@@ -15,100 +16,108 @@ const T##Array TEMPVAR=(array);for(T*item=TEMPVAR.data;(uint64_t)(item-TEMPVAR.d
 const T##Array TEMPVAR=(array);for(T*item=TEMPVAR.data+TEMPVAR.length-1;item!=TEMPVAR.data;--item)
 #define chainForeach(T, item, chain) \
 const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.start->value;item!=&TEMPVAR.end->next->value;item=&((T##Node*)((void**)item-1))->next->value)
+#define chainRevForeach(T, item, chain) \
+const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;item!=&TEMPVAR.start->prev->value;item=&((T##Node*)((void**)item-1))->prev->value)
 
 #define repeat(n) for(uint64_t TEMPVAR = (n); TEMPVAR > 0; --TEMPVAR)
 
 #define _str(T) #T
+#define ARRAY_GROWTH(x) (unsigned)ceilf((float)x / 2.0)
 
 #define arrayhead(array) ((array).data + (array).length - 1)
 #define declArray(T) \
-	typedef struct { uint64_t length; T* data; } T##Array; \
+	typedef struct { uint32_t length; uint32_t cap; T* data; } T##Array; \
 	DS_DEF T##Array T##Array_new(int64_t n, ...); \
 	DS_DEF T* T##Array_append(T##Array* array, T object); \
 	DS_DEF T* T##Array_prepend(T##Array* array, T object); \
 	DS_DEF T* T##Array_extend(T##Array* array, T##Array sub); \
-	DS_DEF T T##Array_get(T##Array array, int64_t index); \
-	DS_DEF T* T##Array_getref(T##Array array, int64_t index); \
-	DS_DEF void T##Array_set(T##Array* array, int64_t index, T object); \
-	DS_DEF inline T##Array T##Array_slice(T##Array array, int64_t start, uint64_t length); \
-	DS_DEF bool T##Array_del(T##Array* array, int64_t index, uint64_t n); \
+	DS_DEF T* T##Array_get(T##Array array, int64_t index); \
+	DS_DEF T* T##Array_set(T##Array* array, int64_t index, T object); \
+	DS_DEF inline T##Array T##Array_slice(T##Array array, int64_t start, uint32_t length); \
+	DS_DEF T* T##Array_move(T##Array* array, int64_t index, uint32_t n, T dst[]); \
+	DS_DEF bool T##Array_del(T##Array* array, int64_t index, uint32_t n); \
 	DS_DEF T T##Array_pop(T##Array* array, int64_t index); \
 	DS_DEF bool T##Array_insert(T##Array* array, T##Array sub, int64_t index); \
 	DS_DEF bool T##Array_clear(T##Array* array); \
-	DS_DEF int64_t T##Array_length(T##Array array); \
-	DS_DEF T* T##Array_resize(T##Array* array, int64_t n); \
+	DS_DEF T* T##Array_incrlen(T##Array* array, uint32_t n); \
 	DS_DEF T##Array T##Array_copy(T##Array array); \
+	DS_DEF bool T##Array_incrcap(T##Array* array, uint32_t new_cap); \
 
 #define defArray(T) \
 	DS_DEF T##Array T##Array_new(int64_t n, ...) { \
 		va_list args; \
 		va_start(args, n); \
-		T##Array res = (T##Array){  \
-			.length = (n < 0 ? 0 : n), \
-			.data = malloc(sizeof(T) * (n < 0 ? -n : n)), \
-		}; \
-		for (int64_t i = 0; i < n; i++) { \
+		T##Array res; \
+		res.length = n < 0 ? 0 : n; \
+		if (n < 0) n = -n; \
+		res.cap = n + ARRAY_GROWTH(n); \
+		res.data = malloc(res.cap * sizeof(T)); \
+		for (uint32_t i = 0; i < res.length; ++i) { \
 			res.data[i] = va_arg(args, T); \
 		} \
 		va_end(args); \
 		return res; \
 	} \
 	DS_DEF T* T##Array_append(T##Array* array, T object) { \
-		void* res = realloc(array->data, (array->length + 1) * sizeof(T)); \
-		if (!res) return NULL; \
-		array->data = res; \
-		array->data[array->length++] = object; \
-		return arrayhead(*array); \
+		if (array->cap < ++array->length) \
+			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) { \
+				--array->length; \
+				return NULL; \
+			} \
+		return memcpy(&array->data[array->length - 1], &object, sizeof(T)); \
 	} \
 	DS_DEF T* T##Array_prepend(T##Array* array, T object) { \
-		void* res = realloc(array->data, array->length * sizeof(T) + sizeof(T)); \
-		if (!res) return NULL; \
-		memmove((T*)res + 1, res, array->length++ * sizeof(T)); \
-		array->data = res; \
-		array->data[0] = object; \
-		return &array->data[0]; \
+		if (array->cap < ++array->length) \
+			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) { \
+				--array->length; \
+				return NULL; \
+			} \
+		return memcpy( \
+			(T*)memmove(array->data + 1, array->data, array->length++ * sizeof(T)) - 1, \
+			&object, \
+			sizeof(T) \
+		); \
 	} \
 	DS_DEF T* T##Array_extend(T##Array* array, T##Array sub) { \
-		void* res = realloc(array->data, (array->length + sub.length) * sizeof(T)); \
-		if (!res) return NULL; \
-		array->data = res; \
-		memcpy(array->data + array->length, sub.data, sub.length * sizeof(T)); \
-		array->length += sub.length; \
-		return arrayhead(*array); \
+		if (array->cap < (array->length += sub.length)) \
+			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) { \
+				array->length -= sub.length; \
+				return NULL; \
+			} \
+		return memcpy(array->data + array->length, sub.data, sub.length * sizeof(T)); \
 	} \
-	DS_DEF T T##Array_get(T##Array array, int64_t index) { \
+	DS_DEF T* T##Array_get(T##Array array, int64_t index) { \
 		index = index >= 0 ? index : array.length + index; \
-		if ((uint64_t)index > array.length - 1) return (T){0}; \
-		return array.data[index]; \
-	}; \
-	DS_DEF T* T##Array_getref(T##Array array, int64_t index) { \
-		index = index >= 0 ? index : array.length + index; \
-		if ((uint64_t)index > array.length - 1) return NULL; \
+		if ((uint64_t)index >= array.length) return NULL; \
 		return array.data + index; \
 	} \
-	DS_DEF void T##Array_set(T##Array* array, int64_t index, T object) { \
-		*(array->data + (index >= 0 ? index : array->length + index)) = object; \
-	} \
-	DS_DEF bool T##Array_move(T##Array* array, int64_t index, uint64_t n, T dst[]) { \
+	DS_DEF T* T##Array_set(T##Array* array, int64_t index, T object) { \
 		index = index >= 0 ? index : array->length + index; \
-		if (index + n > array->length) return false; \
-		if (dst != NULL) for (uint64_t i = index; i < index + n; ++i) dst[i - index] = array->data[i]; \
-		for (uint64_t i = index; i + n < array->length; i++) { \
-			array->data[i] = array->data[i + n]; \
-		} \
-		void* res = realloc(array->data, (array->length - n) * sizeof(T)); \
-		if (res || array->length == n) { \
-			array->data = res; \
-			array->length -= n; \
-			return true; \
-		} \
-		return false; \
+		if ((uint64_t)index >= array->length) return NULL; \
+		array->data[index] = object; \
+		return &array->data[index]; \
 	} \
-	DS_DEF bool T##Array_del(T##Array* array, int64_t index, uint64_t n) { \
+	DS_DEF T* T##Array_move(T##Array* array, int64_t index, uint32_t n, T dst[]) { \
+		index = index >= 0 ? index : array->length + index; \
+		if (index + n > array->length) return NULL; \
+		memmove(dst, array->data + index, n * sizeof(T)); \
+		memmove(array->data + index, array->data + index + n, ((array->length -= n) - index) * sizeof(T)); \
+		if (array->cap > array->length + ARRAY_GROWTH(array->length)) { \
+			void* res = realloc(array->data, (array->cap -= n) * sizeof(T)); \
+			if (res || array->length == n) { \
+				array->data = res; \
+				return dst; \
+			} \
+			return NULL; \
+		} \
+		return dst; \
+	} \
+	DS_DEF bool T##Array_del(T##Array* array, int64_t index, uint32_t n) { \
 		T deleted[n]; \
 		index = index >= 0 ? index : array->length + index; \
+		if (index + n > array->length) return false; \
 		if (!T##Array_move(array, index, n, deleted)) { \
-			for (uint64_t i = index; i < index + n; i++) { \
+			for (uint64_t i = index; i < (uint32_t)(index + n); ++i) { \
 				array->data[i + n] = array->data[i]; \
 				array->data[i] = deleted[i - index]; \
 			} \
@@ -123,50 +132,50 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.start->value
 	} \
 	DS_DEF bool T##Array_insert(T##Array* array, T##Array sub, int64_t index) { \
 		index = index >= 0 ? index : array->length + index; \
-		if ((uint64_t)index > array->length) { \
-			return false; \
-		} \
-		void* res = realloc(array->data, (array->length + sub.length - 1) * sizeof(T)); \
-		if (!res) { return false; } \
-		array->data = res; \
-		array->length += sub.length; \
+		if ((uint64_t)index >= array->length) return false; \
+		if (array->cap < (array->length += sub.length - 1)) \
+			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) { \
+				array->length -= sub.length - 1; \
+				return false; \
+			} \
 		for (uint64_t i = array->length - sub.length - 1; i >= (uint64_t)index; --i) { \
 			array->data[i + sub.length] = array->data[i]; \
 		} \
-		for (uint64_t i = index; i < index + sub.length; ++i) { \
+		for (uint64_t i = index; i < (uint32_t)(index + sub.length); ++i) { \
 			array->data[i] = sub.data[i - index]; \
 		} \
 		return true; \
 	} \
-	DS_DEF T* T##Array_resize(T##Array* array, int64_t n) { \
-		T* res = realloc(array->data, (array->length + n) * sizeof(T)); \
-		if (!res) return NULL; \
-		memset(res + array->length, 0, n * sizeof(T)); \
-		array->length += n; \
-		array->data = res; \
-		return array->data + array->length - n; \
-	} \
-	DS_DEF int64_t T##Array_length(T##Array array) { \
-		return array.length; \
+	DS_DEF T* T##Array_incrlen(T##Array* array, uint32_t n) { \
+		if ((array->length += n) > array->cap) \
+			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) return NULL; \
+		return &array->data[array->length - n]; \
 	} \
 	DS_DEF bool T##Array_clear(T##Array* array) { \
 		if (!array->length) return true; \
 		free(array->data); \
-		array->data = malloc(0); \
-		array->length = 0; \
+		*array = (T##Array){0}; \
 		return true; \
 	} \
-	DS_DEF inline T##Array T##Array_slice(T##Array array, int64_t start, uint64_t length) { \
+	DS_DEF inline T##Array T##Array_slice(T##Array array, int64_t start, uint32_t length) { \
 		if (start < 0) start = array.length - start;\
 		array.data += start; \
 		array.length = length; \
+		array.cap = 0; \
 		return array; \
 	} \
 	DS_DEF T##Array T##Array_copy(T##Array array) { \
-		return (T##Array){ \
-			.data = memcpy(malloc(array.length * sizeof(T)), array.data, array.length * sizeof(T)), \
-			.length = array.length \
-		}; \
+		array.data = memcpy(malloc(array.cap * sizeof(T)), array.data, array.cap * sizeof(T)); \
+		return array; \
+	} \
+	DS_DEF bool T##Array_incrcap(T##Array* array, uint32_t n) { \
+		register T* new_ptr = realloc(array->data, (array->cap += n) * sizeof(T)); \
+		if (!new_ptr) { \
+			array->cap -= n; \
+			return false; \
+		} \
+		array->data = new_ptr; \
+		return true; \
 	} \
 
 #define declChain(T) \

@@ -42,7 +42,7 @@ CFLAGS: list[str] = [
 	"-std=c11",
 	"-I", "include",
 	"-Wall", "-Wextra", "-pedantic",
-	"-Wno-initializer-overrides", "-Wno-nullability-completeness", "-Wno-extra-semi", "-Wno-unused-parameter",
+	"-Wno-initializer-overrides", "-Wno-nullability-completeness", "-Wno-extra-semi", "-Wno-unused-parameter", "-Wswitch-enum",
 	"-Wno-gnu-designator", # TODO: remove this option
 	"-Werror", "-Wfatal-errors",
 	"-O3"
@@ -61,8 +61,8 @@ if is_outdated(LIB/"libbrb.dylib", *SRC.glob("brb_*"), *INCLUDE.glob("*")):
 	exec_cmd("cc", *CFLAGS, "-shared", "-o", LIB/"libbrb.dylib", *PWD.glob("brb_*.o"))
 	for path in PWD.glob("brb_*.o"): path.unlink()
 
-if is_outdated(BIN/"bridge", SRC/"brc.c", *INCLUDE.glob("*")):
-	exec_cmd("cc", *CFLAGS, *LFLAGS, "-o", BIN/"bridge", SRC/"brc.c")
+# if is_outdated(BIN/"bridge", SRC/"brc.c", *INCLUDE.glob("*")):
+#	exec_cmd("cc", *CFLAGS, *LFLAGS, "-o", BIN/"bridge", SRC/"brc.c")
 
-if is_outdated(BIN/"brbd", SRC/"brbd.c", *INCLUDE.glob("*")):
-	exec_cmd("cc", *CFLAGS, *LFLAGS, "-o", BIN/"brbd", SRC/"brbd.c")
+#if is_outdated(BIN/"brbd", SRC/"brbd.c", *INCLUDE.glob("*")):
+#	exec_cmd("cc", *CFLAGS, *LFLAGS, "-o", BIN/"brbd", SRC/"brbd.c")
