@@ -3493,7 +3493,7 @@ typedef struct {
 	sbuf cur_src_path;
 	uint32_t cur_src_line;
 	AST* ast;
-	BRB_Module dst;
+	BRB_ModuleBuilder dst;
 	ExprChain static_vars;
 } CodegenCtx;
 
@@ -4523,11 +4523,13 @@ BRB_Module compileAST(AST src)
 	CodegenCtx ctx = {.ast = &src};
 
 	chainForeach (Expr, stmt, ExprChain_slice(*getSubexprs(&src->root), 1, -1)) {
-		expr_compilers[stmt->type](&ctx, *stmt, 0, -1);
+		expr_compilers[stmt->type](&ctx, *stmt);
 	}
 
 	sbufArray_clear(&ctx.data_blocks);
 	ExprChain_clear(&ctx.static_vars);
+
+	return 
 }
 
 void printUsageMsg(FILE* dst, char* program_name)
@@ -4542,7 +4544,7 @@ void printUsageMsg(FILE* dst, char* program_name)
 		"\t-dM		Output all macros defined in the source code\n"
 		"\t--no-opt	Disable bytecode-level optimizations\n"
 		"\t-Ap		Preprocess the input and output it back to the terminal\n"
-		"\t-Ab		Generate BRidge Bytecode from the input and save it to a `.brb` file. Default option for `br` and `vbrb` input\n"
+		"\t-Ab		Generate BRidge Bytecode from the input and save it to a `.brb` file. Default option for `br` input\n"
 		"\t-As		Generate native assembly from the input and save it to a `.S` file\n"
 		"\t-Ao		Generate native object file from the input and save it to a `.o` file\n"
 		"\t-Ax		Generate native executable program from the input and save it to a file with no extension\n"
@@ -4556,7 +4558,6 @@ void printUsageMsg(FILE* dst, char* program_name)
 
 sbuf EXTS[] = {
 	['p'] = fromcstr("br"),
-	['v'] = fromcstr("vbrb"),
 	['b'] = fromcstr("brb"),
 	['s'] = fromcstr("S"),
 	['o'] = fromcstr("o"),
@@ -4677,7 +4678,7 @@ void preprocessSourceCode(const char* input_path, bool output_macros, sbuf symbo
 	symbols[n_symbols - 1] = BRP_HIDDEN_SYMBOL(" ");
 }
 
-void sourceCode2VBRB(const char* input_path, const char* output_path, bool output_ast, bool output_macros)
+static BRB_Module sourceCode2ByteCode(const char* input_path, bool output_ast, bool output_macros)
 {
 	BRP prep;
 	if (!initBRP(&prep, NULL, BRP_ESC_STR_LITERALS)) {
@@ -4710,56 +4711,18 @@ void sourceCode2VBRB(const char* input_path, const char* output_path, bool outpu
 	delBRP(&prep);
 }
 
-Module optimizeVBRB(const char* input_path, const char* output_path)
+static BRB_Module loadByteCodeFromFile(const char* input_path)
 {
-	Module res;
-	FILE* fd = fopen(input_path, "r");
-	VBRBError vbrb_err = compileVBRB(fd, input_path, &res, search_paths);
-	if (vbrb_err.code) {
-		eputs("BRidge assembler failure; assembler output:\n");
-		printVBRBError(stderr, vbrb_err);
-		exit(1);
-	}
-	fclose(fd);
-	fd = NULL;
-	if (output_path ? !(fd = fopen(output_path, "w")) : false) {
-		eprintf("error: could not open file `%s` (reason: %s)\n", output_path, strerror(errno));
-		exit(1);
-	}
-	optimizeModule(&res, search_paths, fd, 1);
-	fclose(fd);
-	return res;
-}
-
-Module loadVBRB(const char* input_path, const char* optimization_output, bool optimize)
-{
-	Module res;
-	if (optimize) {
-		res = optimizeVBRB(input_path, optimization_output);
-	} else {
-		VBRBError err = compileVBRB(fopen(input_path, "r"), input_path, &res, search_paths);
-		if (err.code) {
-			eputs("error while compiling BRidge Assembly to bytecode:\n");
-			printVBRBError(stderr, err);
-			exit(1);
-		}
-	}
-	return res;
-}
-
-Module loadBRB(const char* input_path, bool optimize)
-{
-	Module res;
-	BRBLoadError err = loadModule(fopen(input_path, "rb"), &res, search_paths);
+	BRB_Module res;
+	BRB_Error err = loadModule(fopen(input_path, "rb"), &res);
 	if (err.code) {
 		eprintf("error while loading bytecode from `%s`:\n", input_path);
-		printLoadError(stderr, err);
+		BRB_printErrorMsg(stderr, err);
 	}
-	if (optimize) optimizeModule(&res, search_paths, NULL, 1);
 	return res;
 }
 
-void callNativeAssembler(const char* input_path, const char* output_path)
+static void callNativeAssembler(const char* input_path, const char* output_path)
 {
 	char cmd[1024] = {0};
 	snprintf(cmd, sizeof(cmd), "as -arch arm64 -o \"%s\" \"%s\"", input_path, output_path);
@@ -4770,7 +4733,7 @@ void callNativeAssembler(const char* input_path, const char* output_path)
 	}
 }
 
-void callNativeLinker(const char* input_path, const char* output_path)
+static void callNativeLinker(const char* input_path, const char* output_path)
 {
 	char cmd[1024] = {0};
 	snprintf(
@@ -4825,7 +4788,7 @@ int main(int argc, char* argv[])
 						break;
 					case 'A': 
 						argv[i] += 1;
-						if (!strchr("pvbsoxi", argv[i][0])) {
+						if (!strchr("pbsoxi", argv[i][0])) {
 							eprintf("error: unknown option `-S%c`\n", argv[i][0]);
 							return 1;
 						}
@@ -4889,20 +4852,15 @@ int main(int argc, char* argv[])
 			);
 	} else output_path = setFileExt(input_path, EXTS[(unsigned)compiler_action].data);
 
-	Module res;
+	BRB_Module res;
 	FILE* fd;
 
 	if (strcmp(input_type, "br") == 0) switch (compiler_action) {
 		case 'p':
 			preprocessSourceCode(input_path, output_macros, br_symbols, br_keywords);
 			return 0;
-		case 'v':
-			sourceCode2VBRB(input_path, output_path, output_ast, output_macros);
-			if (optimize) optimizeVBRB(output_path, output_path);
-			return 0;
 		case 'b':
-			sourceCode2VBRB(input_path, output_path, output_ast, output_macros);
-			res = loadVBRB(output_path, NULL, optimize);
+			res = sourceCode2ByteCode(input_path);
 			
 			if (!(fd = fopen(output_path, "wb"))) {
 				eprintf("error: could not open file `%s` for writing BRB output (reason: %s)\n", output_path, strerror(errno));
@@ -4913,7 +4871,6 @@ int main(int argc, char* argv[])
 			return 0;
 		case 'i':
 			sourceCode2VBRB(input_path, output_path, output_ast, output_macros);
-			res = loadVBRB(output_path, NULL, optimize);
 			
 			signal(SIGINT, handleExecInt);
 			ExecEnv env;
@@ -5024,7 +4981,7 @@ int main(int argc, char* argv[])
 			eprintf("error: due to the combination of options and the input, program is forced to do literally nothing\n");
 			return 1;
 		case 'i':
-			res = loadBRB(input_path, optimize);
+			res = loadByteCodeFromFile(input_path, optimize);
 			signal(SIGINT, handleExecInt);
 			ExecEnv env;
 			const char* module_argv[] = { input_path, NULL };

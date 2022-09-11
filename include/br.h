@@ -3,14 +3,12 @@
 
 #ifdef BRIDGE_IMPLEMENTATION
 #define SBUF_IMPLEMENTATION
-#define BRP_IMPLEMENTATION
 #define BR_UTILS_IMPLEMENTATION
 #endif
 
 #include <br_utils.h>
 #include <datasets.h>
 #include <sbuf.h>
-#include <brp.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>

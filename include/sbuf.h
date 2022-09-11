@@ -61,6 +61,22 @@ typedef struct sbuf {
 } sbuf;
 
 #define CSTRTERM ((sbuf){ .data = "\0", .length = 1 })
+#define DQUOTE fromcstr("\"")
+#define QUOTE fromcstr("'")
+#define NT_PATHSEP fromcstr("\\")
+#define POSIX_PATHSEP fromcstr("/")
+#define NT_NEWLINE fromcstr("\r\n")
+#define POSIX_NEWLINE fromcstr("\n")
+#define SPACE fromcstr(" ")
+#define TAB fromcstr("\t")
+
+#ifdef _WIN32_
+#define PATHSEP NT_PATHSEP
+#define NEWLINE NT_NEWLINE
+#else
+#define PATHSEP POSIX_PATHSEP
+#define NEWLINE POSIX_NEWLINE
+#endif
 
 sbuf filecontent(FILE* fd);
 sbuf sbufunesc(sbuf src, sbuf* dst);
@@ -157,6 +173,7 @@ void sfree(sbuf* obj);
 
 #if defined(SBUF_IMPLEMENTATION) && !defined(_SBUF_IMPL_LOCK)
 #define _SBUF_IMPL_LOCK
+#undef SBUF_IMPLEMENTATION
 #include <errno.h>
 
 // concatenates the buffers provided as variadic arguments in a newly allocated buffer, returns the resulting buffer
@@ -443,6 +460,25 @@ bool sbufint(sbuf src)
 	return true;
 }
 
+static char char_to_digit[] = {
+	['0'] = 0,
+	['1'] = 1,
+	['2'] = 2,
+	['3'] = 3,
+	['4'] = 4,
+	['5'] = 5,
+	['6'] = 6,
+	['7'] = 7,
+	['8'] = 8,
+	['9'] = 9,
+	['a'] = 10, ['A'] = 10,
+	['b'] = 11, ['B'] = 11,
+	['c'] = 12, ['C'] = 12,
+	['d'] = 13, ['D'] = 13,
+	['e'] = 14, ['E'] = 14,
+	['f'] = 15, ['F'] = 15
+};
+
 // interprets the sized string `obj` as an integer literal and returns the corresponding 64 bit integer.
 // supports binary, octal, decimal and hexadecimal integer literals.
 // if `obj` is an invalid integer literal, 0 is returned; to check if a sized string is a valid integer literal,
@@ -462,11 +498,9 @@ long sbuftoint(sbuf obj)
 		}
 	}
 
-	char cur_char;
 	sbuf_size_t coef = 1;
-	for (sbuf_size_t i = obj.length - 1; i >= 0 ; i--) {
-		cur_char = obj.data[i] >= 'A' ? obj.data[i] | 32 : obj.data[i];
-		res += ((cur_char > '9' ? cur_char - ('a' - '9' - 1) : cur_char) - '0') * coef;
+	for (char* iter = &obj.data[obj.length - 1]; iter >= obj.data; --iter) {
+		res += char_to_digit[*(uint8_t*)iter] * coef;
 		coef *= base;
 	}
 

@@ -1,7 +1,8 @@
-.data "helloworld" "Hello, World\n"
-extproc "main" in
-    builtin STDOUT
-    addrof . "helloworld"
-    int64 13
-    sys write
-endproc
+data "hello" { text "Hello, World\n" }
+
+void "main"() entry {
+	ptr 13
+	dbaddr "hello"
+	builtin STDOUT
+	sys write
+}

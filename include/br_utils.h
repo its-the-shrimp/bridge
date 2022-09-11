@@ -71,6 +71,7 @@ int LOWEST_SET_BIT(uint64_t bitset);
 #define static_assert _Static_assert
 
 void* memdup(const void* ptr, size_t size);
+#define objdup(T, obj) ((T*)memdup(&obj, sizeof(T)))
 
 #endif // _BR_UTILS_H
 

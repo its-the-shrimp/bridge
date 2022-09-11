@@ -73,7 +73,7 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 				return NULL; \
 			} \
 		return memcpy( \
-			(T*)memmove(array->data + 1, array->data, array->length++ * sizeof(T)) - 1, \
+			((T*)memmove(array->data + 1, array->data, (array->length - 1) * sizeof(T))) - 1, \
 			&object, \
 			sizeof(T) \
 		); \
@@ -104,10 +104,12 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		memmove(array->data + index, array->data + index + n, ((array->length -= n) - index) * sizeof(T)); \
 		if (array->cap > array->length + ARRAY_GROWTH(array->length)) { \
 			void* res = realloc(array->data, (array->cap -= n) * sizeof(T)); \
-			if (res || array->length == n) { \
+			if (res || !array->length) { \
 				array->data = res; \
 				return dst; \
 			} \
+			array->cap += n; \
+			array->length += n; \
 			return NULL; \
 		} \
 		return dst; \
@@ -165,7 +167,8 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		return array; \
 	} \
 	DS_DEF T##Array T##Array_copy(T##Array array) { \
-		array.data = memcpy(malloc(array.cap * sizeof(T)), array.data, array.cap * sizeof(T)); \
+		array.data = memcpy(malloc(array.length * sizeof(T)), array.data, array.length * sizeof(T)); \
+		array.cap = array.length; \
 		return array; \
 	} \
 	DS_DEF bool T##Array_incrcap(T##Array* array, uint32_t n) { \
