@@ -117,9 +117,9 @@ static BRB_Error getType(BRP* obj, BRB_Type* res_p)
 		token = BRP_fetchToken(obj);
 		if (token.type != TOKEN_INT)
 			return addLoc((BRB_Error){.type = BRB_ERR_INVALID_ARRAY_SIZE_SPEC}, token);
+		res_p->n_items = token.value;
 		if (BRP_getTokenSymbolId(token = BRP_fetchToken(obj)) != BRB_SYM_SQBRACKET_R)
 			return addLoc((BRB_Error){.type = BRB_ERR_INVALID_ARRAY_SIZE_SPEC}, token);
-		res_p->n_items = token.value;
 	} else res_p->n_items = 1;
 	return (BRB_Error){0};
 }

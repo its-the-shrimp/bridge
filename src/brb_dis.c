@@ -112,6 +112,7 @@ long BRB_disassembleModule(const BRB_Module* module, FILE* dst)
 		}
 		acc += fputstr(dst, "}\n");
 	}
+	acc += fputstr(dst, "\n");
 // printing procedure definitions
 	arrayForeach (BRB_Proc, proc, module->seg_exec) {
 		acc += printProcDecl(*proc, dst)
