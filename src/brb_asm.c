@@ -5,7 +5,7 @@
 #define _BR_UTILS_IMPL_LOCK
 #include <brp.h>
 
-defArray(BRB_Size);
+defArray(BRB_Type);
 
 typedef enum {
 	BRB_KW_NOP,
@@ -31,25 +31,25 @@ typedef enum {
 } BRB_AsmKw;
 
 static sbuf asm_kws[] = {
-	[BRB_KW_NOP] = fromcstr("nop"),
-	[BRB_KW_END] = fromcstr("end"),
-	[BRB_KW_I8] = fromcstr("i8"),
-	[BRB_KW_I16] = fromcstr("i16"),
-	[BRB_KW_I32] = fromcstr("i32"),
-	[BRB_KW_I64] = fromcstr("i64"),
-	[BRB_KW_PTR] = fromcstr("ptr"),
-	[BRB_KW_ADDR] = fromcstr("addr"),
-	[BRB_KW_DBADDR] = fromcstr("dbaddr"),
-	[BRB_KW_LD] = fromcstr("ld"),
-	[BRB_KW_STR] = fromcstr("str"),
-	[BRB_KW_SYS] = fromcstr("sys"),
+	[BRB_KW_NOP    ] = fromcstr("nop"),
+	[BRB_KW_END    ] = fromcstr("end"),
+	[BRB_KW_I8     ] = fromcstr("i8"),
+	[BRB_KW_I16    ] = fromcstr("i16"),
+	[BRB_KW_I32    ] = fromcstr("i32"),
+	[BRB_KW_I64    ] = fromcstr("i64"),
+	[BRB_KW_PTR    ] = fromcstr("ptr"),
+	[BRB_KW_ADDR   ] = fromcstr("addr"),
+	[BRB_KW_DBADDR ] = fromcstr("dbaddr"),
+	[BRB_KW_LD     ] = fromcstr("ld"),
+	[BRB_KW_STR    ] = fromcstr("str"),
+	[BRB_KW_SYS    ] = fromcstr("sys"),
 	[BRB_KW_BUILTIN] = fromcstr("builtin"),
-	[BRB_KW_DATA] = fromcstr("data"),
-	[BRB_KW_BYTES] = fromcstr("bytes"),
-	[BRB_KW_TEXT] = fromcstr("text"),
-	[BRB_KW_ZERO] = fromcstr("zero"),
-	[BRB_KW_VOID] = fromcstr("void"),
-	[BRB_KW_ENTRY] = fromcstr("entry"),
+	[BRB_KW_DATA   ] = fromcstr("data"),
+	[BRB_KW_BYTES  ] = fromcstr("bytes"),
+	[BRB_KW_TEXT   ] = fromcstr("text"),
+	[BRB_KW_ZERO   ] = fromcstr("zero"),
+	[BRB_KW_VOID   ] = fromcstr("void"),
+	[BRB_KW_ENTRY  ] = fromcstr("entry"),
 	(sbuf){0}
 };
 
@@ -80,7 +80,7 @@ static sbuf asm_symbols[] = {
 	(sbuf){0}
 };
 
-static BRB_Size kw_to_type[] = {
+static BRB_TypeKind kw_to_typekind[] = {
 	[BRB_KW_I8] = BRB_TYPE_I8,
 	[BRB_KW_I16] = BRB_TYPE_I16,
 	[BRB_KW_I32] = BRB_TYPE_I32,
@@ -106,12 +106,21 @@ static BRB_Error getName(BRP* obj, char** name_p)
 	return (BRB_Error){0};
 }
 
-static BRB_Error getType(BRP* obj, BRB_Size* res_p)
+static BRB_Error getType(BRP* obj, BRB_Type* res_p)
 {
-	BRP_Token res = BRP_fetchToken(obj);
-	if (res.type != TOKEN_KEYWORD)
-		return addLoc((BRB_Error){.type = BRB_ERR_TYPE_EXPECTED}, res);
-	*res_p = kw_to_type[res.keyword_id];
+	BRP_Token token = BRP_fetchToken(obj);
+	if (token.type != TOKEN_KEYWORD)
+		return addLoc((BRB_Error){.type = BRB_ERR_TYPE_EXPECTED}, token);
+	res_p->kind = kw_to_typekind[token.keyword_id];
+	if (BRP_getTokenSymbolId(BRP_peekToken(obj)) == BRB_SYM_SQBRACKET_L) {
+		BRP_fetchToken(obj);
+		token = BRP_fetchToken(obj);
+		if (token.type != TOKEN_INT)
+			return addLoc((BRB_Error){.type = BRB_ERR_INVALID_ARRAY_SIZE_SPEC}, token);
+		if (BRP_getTokenSymbolId(token = BRP_fetchToken(obj)) != BRB_SYM_SQBRACKET_R)
+			return addLoc((BRB_Error){.type = BRB_ERR_INVALID_ARRAY_SIZE_SPEC}, token);
+		res_p->n_items = token.value;
+	} else res_p->n_items = 1;
 	return (BRB_Error){0};
 }
 
@@ -135,16 +144,14 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 {
 	BRB_Error err;
 	BRP_Token token = BRP_fetchToken(obj);
-	if (token.type != TOKEN_KEYWORD)
+	if (token.type != TOKEN_KEYWORD || token.keyword_id >= BRB_N_OPS)
 		return addLoc((BRB_Error){.type = BRB_ERR_OP_NAME_EXPECTED}, token);
-
-	switch (token.keyword_id) {
-		case BRB_KW_NOP:
-		case BRB_KW_END:
-		case BRB_KW_STR:
-			op->type = kw_to_op[token.keyword_id];
+		
+	op->type = kw_to_op[token.keyword_id];
+	switch (BRB_opFlags[op->type]) {
+		case 0:
 			break;
-		case BRB_KW_SYS: {
+		case BRB_OPF_OPERAND_SYSCALL_NAME: {
 			op->type = BRB_OP_SYS;
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_WORD)
 				return addLoc((BRB_Error){.type = BRB_ERR_SYSCALL_NAME_EXPECTED}, token);
@@ -159,19 +166,16 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 			}
 			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_SYSCALL_NAME_EXPECTED}, token);
 		} break;
-		case BRB_KW_I8:
-		case BRB_KW_I16:
-		case BRB_KW_I32:
-		case BRB_KW_I64:
-		case BRB_KW_PTR:
-		case BRB_KW_ADDR: // TODO!: implement named stack items
-			op->type = kw_to_op[token.keyword_id];
+		case BRB_OPF_OPERAND_INT8:
+		case BRB_OPF_OPERAND_INT:
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_INT)
 				return addLoc((BRB_Error){.type = BRB_ERR_INT_OPERAND_EXPECTED}, token);
 			op->operand_u = token.value;
 			break;
-		case BRB_KW_DBADDR:
-			op->type = BRB_OP_DBADDR;
+		case BRB_OPF_OPERAND_VAR_NAME:
+			assert(false, "named stack items are not implemented yet");
+			break;
+		case BRB_OPF_OPERAND_DB_NAME:
 			token = BRP_fetchToken(obj);
 			switch (token.type) {
 				case TOKEN_INT:
@@ -182,8 +186,9 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 					BRP_unfetchToken(obj, token);
 					if ((err = getName(obj, &name)).type) return err;
 					op->operand_u = BRB_getDataBlockIdByName(&builder->module, name);
-					break;
-				} 
+					if (op->operand_u == SIZE_MAX)
+						return addLoc((BRB_Error){.type = BRB_ERR_INT_OR_NAME_OPERAND_EXPECTED}, token);
+				} break;
 				case TOKEN_SYMBOL:
 				case TOKEN_KEYWORD:
 				case TOKEN_NONE:
@@ -191,15 +196,10 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 					return addLoc((BRB_Error){.type = BRB_ERR_INT_OR_NAME_OPERAND_EXPECTED}, token);
 			}
 			break;
-		case BRB_KW_LD: {
-			op->type = BRB_OP_LD;
-			BRB_Size res_type;
-			if ((err = getType(obj, &res_type)).type) return err;
-			op->operand_u = res_type;
+		case BRB_OPF_OPERAND_TYPE:
+			if ((err = getType(obj, &op->operand_type)).type) return err;
 			break;
-		}
-		case BRB_KW_BUILTIN: {
-			op->type = BRB_OP_BUILTIN;
+		case BRB_OPF_OPERAND_BUILTIN: {
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_WORD)
 				return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_OPERAND_EXPECTED}, token);
 			op->operand_u = 0;
@@ -213,11 +213,6 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 			}
 			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_OPERAND_EXPECTED}, token);
 		} break;
-		case BRB_KW_DATA:
-		case BRB_KW_BYTES:
-		case BRB_KW_TEXT:
-		case BRB_KW_ZERO:
-		case BRB_KW_VOID:
 		case BRB_N_KWS:
 		default:
 			return addLoc((BRB_Error){.type = BRB_ERR_OP_NAME_EXPECTED}, token);
@@ -250,26 +245,30 @@ static BRB_Error getDataPiece(BRP* obj, BRB_ModuleBuilder* builder, uint32_t db_
 		case BRB_KW_I32:
 		case BRB_KW_I64:
 		case BRB_KW_PTR:
-		case BRB_KW_ZERO:
 			piece->type = kw_to_dp[token.keyword_id];
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_INT)
 				return addLoc((BRB_Error){.type = BRB_ERR_INT_OPERAND_EXPECTED}, token);
-			piece->operand_u = token.value;
+			piece->content_u = token.value;
 			break;
+		case BRB_KW_ZERO: {
+			piece->type = BRB_DP_ZERO;
+			if ((err = getType(obj, &piece->content_type)).type) return err;
+		} break;
 		case BRB_KW_DBADDR:
 			piece->type = BRB_DP_DBADDR;
 			token = BRP_fetchToken(obj);
 			switch (token.type) {
 				case TOKEN_INT:
-					piece->operand_u = token.value;
+					piece->content_u = token.value;
 					break;
 				case TOKEN_STRING: {
 					char* name;
 					BRP_unfetchToken(obj, token);
 					if ((err = getName(obj, &name)).type) return err;
-					piece->operand_u = BRB_getDataBlockIdByName(&builder->module, name);
-					break;
-				} 
+					piece->content_u = BRB_getDataBlockIdByName(&builder->module, name);
+					if (piece->content_u == SIZE_MAX)
+						return addLoc((BRB_Error){.type = BRB_ERR_INT_OR_NAME_OPERAND_EXPECTED}, token);
+				} break;
 				case TOKEN_SYMBOL:
 				case TOKEN_KEYWORD:
 				case TOKEN_NONE:
@@ -280,14 +279,14 @@ static BRB_Error getDataPiece(BRP* obj, BRB_ModuleBuilder* builder, uint32_t db_
 			piece->type = BRB_DP_BUILTIN;
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_WORD)
 				return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_OPERAND_EXPECTED}, token);
-			piece->operand_u = 0;
+			piece->content_u = 0;
 			sbuf name = fromstr(token.word);
 			repeat (BRB_N_BUILTINS) {
-				if (sbufeq(name, BRB_builtinNames[piece->operand_u])) {
+				if (sbufeq(name, BRB_builtinNames[piece->content_u])) {
 					name.data = NULL;
 					break;
 				}
-				++piece->operand_u;
+				++piece->content_u;
 			}
 			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_OPERAND_EXPECTED}, token);
 		} break;
@@ -343,7 +342,7 @@ BRB_Error BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* ds
 			case BRB_KW_VOID: {
 				BRP_unfetchToken(&prep, token);
 // getting return type of the procdure
-				BRB_Size ret_type;
+				BRB_Type ret_type;
 				if ((err = getType(&prep, &ret_type)).type) return err;
 // getting procedure name
 				char* proc_name;
@@ -352,10 +351,10 @@ BRB_Error BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* ds
 				token = BRP_fetchToken(&prep);
 				if (token.type != TOKEN_SYMBOL || token.symbol_id != BRB_SYM_BRACKET_L)
 					return addLoc((BRB_Error){.type = BRB_ERR_ARGS_EXPECTED}, token);
-				BRB_SizeArray args = {0};
+				BRB_TypeArray args = {0};
 				if (BRP_getTokenSymbolId(BRP_peekToken(&prep)) != BRB_SYM_BRACKET_R) {
 					do {
-						if (!BRB_SizeArray_incrlen(&args, 1)) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
+						if (!BRB_TypeArray_incrlen(&args, 1)) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
 						if ((err = getType(&prep, arrayhead(args))).type) return err;
 					} while (BRP_getTokenSymbolId(BRP_fetchToken(&prep)) != BRB_SYM_BRACKET_R);
 				} else BRP_fetchToken(&prep);
@@ -365,14 +364,14 @@ BRB_Error BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* ds
 				if (_proc_id == SIZE_MAX) {
 					if ((err = BRB_addProc(&builder, &proc_id, proc_name, args.length, args.data, ret_type, 0)).type) return addLoc(err, token);
 				} else {
-					if (ret_type != builder.module.seg_exec.data[_proc_id].ret_type)
+					if (memcmp(&ret_type, &builder.module.seg_exec.data[_proc_id].ret_type, sizeof(BRB_Type)))
 						return addLoc((BRB_Error){.type = BRB_ERR_PROTOTYPE_MISMATCH, .name = proc_name}, token);
 					if (args.length == builder.module.seg_exec.data[_proc_id].args.length
 						? memcmp(args.data, builder.module.seg_exec.data[_proc_id].args.data, args.length) : true)
 						return addLoc((BRB_Error){.type = BRB_ERR_PROTOTYPE_MISMATCH, .name = proc_name}, token);
 					proc_id = _proc_id;
 				}
-				BRB_SizeArray_clear(&args);
+				BRB_TypeArray_clear(&args);
 // checking if the procedure is declared as an entry point
 				if (BRP_getTokenKeywordId(BRP_peekToken(&prep)) == BRB_KW_ENTRY) {
 					builder.module.exec_entry_point = proc_id;

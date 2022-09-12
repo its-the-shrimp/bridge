@@ -158,6 +158,11 @@ static long write2Ints(FILE* fd, uint64_t x, uint64_t y)
 			+ writeInt64(fd, absInt(y));
 }
 
+static long writeType(FILE* dst, BRB_Type type)
+{
+	return writeInt(dst, type.n_items, type.kind);
+}
+
 static uint32_t getNameId(BRB_ModuleWriter* writer, const char* name)
 {
 	arrayForeach (str, iter, writer->names) {
@@ -185,10 +190,11 @@ static long writeDataPiece(BRB_ModuleWriter* writer, BRB_DataPiece piece)
 		case BRB_DP_I32:
 		case BRB_DP_PTR:
 		case BRB_DP_I64:
-		case BRB_DP_ZERO:
 		case BRB_DP_BUILTIN:
 		case BRB_DP_DBADDR:
-			return acc + writeIntOnly(writer->dst, piece.operand_u);
+			return acc + writeIntOnly(writer->dst, piece.content_u);
+		case BRB_DP_ZERO:
+			return acc + writeType(writer->dst, piece.content_type);
 		case BRB_DP_NONE:
 		case BRB_N_DP_TYPES:
 		default:
@@ -207,22 +213,31 @@ static long writeDataBlockDecl(BRB_ModuleWriter* writer, BRB_DataBlock block)
 static long writeOp(BRB_ModuleWriter* writer, BRB_Op op)
 {
 // writing the type
-	return writeInt8(writer->dst, op.type)
+	long acc = writeInt8(writer->dst, op.type);
 // writing the operand, if needed
-		+ (BRB_opFlags[op.type] & BRB_OPF_HAS_OPERAND
-			? writeIntOnly(writer->dst, op.operand_u)
-			: 0);
+	switch (BRB_opFlags[op.type] & BRB_OPF_HAS_OPERAND) {
+		case BRB_OPF_OPERAND_INT8:
+			return acc + writeInt8(writer->dst, op.operand_u);
+		case BRB_OPF_OPERAND_INT:
+			return acc + writeIntOnly(writer->dst, op.operand_u);
+		case BRB_OPF_OPERAND_TYPE:
+			return acc + writeType(writer->dst, op.operand_type);
+		case 0:
+			return acc;
+		default:
+			assert(false, "invlalid operation type info");
+	}
 }
 
 static long writeProcDecl(BRB_ModuleWriter* writer, BRB_Proc proc)
 {
 // writing the return type
-	long acc = writeIntOnly(writer->dst, proc.ret_type)
+	long acc = writeType(writer->dst, proc.ret_type)
 // writing the name ID and amount of arguments
 		+ write2Ints(writer->dst, getNameId(writer, proc.name), proc.args.length);
 // writing the arguments
-	arrayForeach (BRB_Size, arg, proc.args) {
-		acc += writeIntOnly(writer->dst, *arg);
+	arrayForeach (BRB_Type, arg, proc.args) {
+		acc += writeType(writer->dst, *arg);
 	}
 // writing the body size
 	return acc + writeIntOnly(writer->dst, proc.body.length);

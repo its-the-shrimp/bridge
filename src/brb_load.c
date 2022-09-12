@@ -111,6 +111,14 @@ static void load2Ints(FILE* fd, uint64_t* x, uint64_t* y, long* n_fetched)
 	}
 }
 
+static BRB_Type loadType(FILE* src, long* n_fetched)
+{
+	return (BRB_Type){
+		.kind = loadHalfByte(src, n_fetched),
+		.n_items = loadInt(src, n_fetched)
+	};
+}
+
 static BRB_Error loadDataPiece(BRB_ModuleLoader* loader, uint32_t db_id)
 {
 	BRB_DataPiece piece;
@@ -138,9 +146,12 @@ static BRB_Error loadDataPiece(BRB_ModuleLoader* loader, uint32_t db_id)
 		case BRB_DP_PTR:
 		case BRB_DP_I64:
 		case BRB_DP_DBADDR:
-		case BRB_DP_ZERO:
 		case BRB_DP_BUILTIN:
-			piece.operand_u = loadInt(loader->src, &loader->n_fetched);
+			piece.content_u = loadInt(loader->src, &loader->n_fetched);
+			if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DP_CONTENT};
+			break;
+		case BRB_DP_ZERO:
+			piece.content_type = loadType(loader->src, &loader->n_fetched);
 			if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DP_CONTENT};
 			break;
 		case BRB_DP_NONE:
@@ -173,26 +184,37 @@ static BRB_Error loadOp(BRB_ModuleLoader* loader, uint32_t proc_id)
 	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_OPCODE};
 	if (op.type >= BRB_N_OPS) return (BRB_Error){.type = BRB_ERR_INVALID_OPCODE, .opcode = op.type};
 // loading the operand, if needed
-	if (BRB_opFlags[op.type] & BRB_OPF_HAS_OPERAND) {
-		op.operand_u = loadInt(loader->src, &loader->n_fetched);
-		if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_OPERAND, .opcode = op.type};
-	} 
+	switch (BRB_opFlags[op.type] & BRB_OPF_HAS_OPERAND) {
+		case BRB_OPF_OPERAND_INT8:
+			op.operand_u = loadInt8(loader->src, &loader->n_fetched);
+			break;
+		case BRB_OPF_OPERAND_INT:
+			op.operand_u = loadInt(loader->src, &loader->n_fetched);
+			break;
+		case BRB_OPF_OPERAND_TYPE:
+			op.operand_type = loadType(loader->src, &loader->n_fetched);
+		case 0:
+			break;
+		default:
+			assert(false, "invalid operation type info");
+	}
+	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_OPERAND, .opcode = op.type};
 	return BRB_addOp(&loader->builder, proc_id, op);
 }
 
 static BRB_Error loadProcDecl(BRB_ModuleLoader* loader, uint32_t* n_ops_p)
 {
 // loading the return type
-	BRB_Size ret_type = loadInt(loader->src, &loader->n_fetched);
+	BRB_Type ret_type = loadType(loader->src, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_RET_TYPE};
 // loading the name ID and amount of arguments
 	uint64_t n_args, proc_name;
 	load2Ints(loader->src, &proc_name, &n_args, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_NAME};
 // loading the arguments
-	BRB_Size args[n_args];
+	BRB_Type args[n_args];
 	for (size_t i = 0; i < n_args; ++i) {
-		args[i] = loadInt(loader->src, &loader->n_fetched);
+		args[i] = loadType(loader->src, &loader->n_fetched);
 		if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_ARG};
 	}
 // loading the body size

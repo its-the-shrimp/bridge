@@ -28,7 +28,7 @@ static sbuf allocDataBlock(BRB_DataBlock block)
 				res += 8;
 				break;
 			case BRB_DP_ZERO:
-				res += piece->operand_u;
+				res += BRB_getTypeRTSize(piece->content_type);
 				break;
 			case BRB_DP_NONE:
 			case BRB_N_DP_TYPES:
@@ -50,31 +50,32 @@ static void assembleDataBlock(BRB_ExecEnv* env, BRB_DataBlock block, sbuf dst)
 				offset += piece->data.length;
 				break;
 			case BRB_DP_I16:
-				*(uint16_t*)(dst.data + offset) = piece->operand_u;
+				*(uint16_t*)(dst.data + offset) = piece->content_u;
 				offset += 2;
 				break;
 			case BRB_DP_I32:
-				*(uint32_t*)(dst.data + offset) = piece->operand_u;
+				*(uint32_t*)(dst.data + offset) = piece->content_u;
 				offset += 4;
 				break;
 			case BRB_DP_PTR:
-				*(uintptr_t*)(dst.data + offset) = piece->operand_u;
+				*(uintptr_t*)(dst.data + offset) = piece->content_u;
 				offset += sizeof(void*);	
 				break;
 			case BRB_DP_I64:
-				*(uint64_t*)(dst.data + offset) = piece->operand_u;
+				*(uint64_t*)(dst.data + offset) = piece->content_u;
 				offset += 8;
 				break;
 			case BRB_DP_DBADDR:
-				*(char**)(dst.data + offset) = env->seg_data.data[piece->operand_u].data;
+				*(char**)(dst.data + offset) = env->seg_data.data[piece->content_u].data;
 				offset += sizeof(void*);
 				break;
-			case BRB_DP_ZERO:
-				memset(dst.data + offset, 0, piece->operand_u);
-				offset += piece->operand_u;
-				break;
+			case BRB_DP_ZERO: {
+				size_t n_zeroes = BRB_getTypeRTSize(piece->content_type);
+				memset(dst.data + offset, 0, n_zeroes);
+				offset += n_zeroes;
+			} break;
 			case BRB_DP_BUILTIN:
-				*(uintptr_t*)(dst.data + offset) = BRB_builtinValues[piece->operand_u];
+				*(uintptr_t*)(dst.data + offset) = BRB_builtinValues[piece->content_u];
 				offset += sizeof(void*);
 				break;
 			case BRB_DP_NONE:
@@ -124,7 +125,7 @@ BRB_Error BRB_initExecEnv(BRB_ExecEnv* env, BRB_Module module, size_t stack_size
 	*env = (BRB_ExecEnv){0};
 	if (module.exec_entry_point >= module.seg_exec.length) return (BRB_Error){.type = BRB_ERR_INVALID_ENTRY};
 	const BRB_Proc* const proc = &module.seg_exec.data[module.exec_entry_point];
-	if (proc->ret_type != BRB_TYPE_VOID || proc->args.length) return (BRB_Error){.type = BRB_ERR_INVALID_ENTRY_PROTOTYPE};
+	if (proc->ret_type.kind != BRB_TYPE_VOID || proc->args.length) return (BRB_Error){.type = BRB_ERR_INVALID_ENTRY_PROTOTYPE};
 	if (!(env->stack = smalloc(stack_size)).data) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
 	env->stack_head = env->stack.data + env->stack.length;
 

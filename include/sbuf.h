@@ -132,13 +132,22 @@ char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 #define putcharesc(obj, format) fputcesc(stdout, obj, format)
 
 sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format);
-#define fputsbuflnesc(fd, obj, format) fputsbufesc(fd, obj, format); fputc('\n', fd)
+#define fputsbuflnesc(fd, obj, format) (fputsbufesc(fd, obj, format) + (fputc("\n", fd) != EOF))
 #define fputsbuf(fd, obj) fputsbufesc(fd, obj, BYTEFMT_RAW)
-#define fputsbufln(fd, obj) fputsbuf(fd, obj); fputc('\n', fd)
+#define fputsbufln(fd, obj) (fputsbuf(fd, obj) + (fputc('\n', fd) != EOF))
 #define putsbufesc(obj, format) fputsbufesc(stdout, obj, format)
-#define putsbuflnesc(obj, format) putsbufesc(obj, format); putchar('\n')
+#define putsbuflnesc(obj, format) (putsbufesc(obj, format) + (putchar('\n') != EOF))
 #define putsbuf(obj) fputsbuf(stdout, obj)
 #define putsbufln(obj) fputsbufln(stdout, obj)
+
+sbuf_size_t fputstresc(FILE* fd, const char* obj, unsigned char format);
+#define fputstrlnesc(fd, obj, format) fputstresc(fd, obj, format); fputc('\n', fd)
+#define fputstr(fd, obj) fputstresc(fd, obj, BYTEFMT_RAW)
+#define fputstrln(fd, obj) fputstr(fd, obj); fputc('\n', fd)
+#define putstresc(obj, format) fputstresc(stdout, obj, format)
+#define putstrlnesc(obj, format) putstresc(obj, format); putchar('\n')
+#define putstr(obj) fputstr(stdout, obj)
+#define putstrln(obj) fputstrln(stdout, obj)
 
 sbuf_size_t sbufindex(sbuf obj, sbuf sub);
 sbuf sbufcopy(sbuf obj);
@@ -641,35 +650,34 @@ sbuf_size_t sbufstripva(sbuf* src, sbuf* ldst, sbuf* rdst, va_list args)
 //	BYTEFMT_ESC_DQUOTE = escape double quote character ( "\"" instead of """)
 char fputcesc(FILE* fd, unsigned char obj, unsigned char format)
 {
-	char n = 0;
-	if (format == BYTEFMT_HEX_LITERAL) { 
-		n += fwrite("\\x", 2, 1, fd);
-		char temp = (obj & 0xf0) >> 4; 
-		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);
-		temp = obj & 0xf;
-		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);
+	if (format == BYTEFMT_HEX_LITERAL)
+		return fprintf(fd, "\\x%hhX", obj);
+	switch (obj) {
+		case '\0':
+			return fwrite("\\0", 1, 2, fd);
+		case '\t':
+			return fwrite("\\t", 1, 2, fd);
+		case '\n':
+			return fwrite("\\n", 1, 2, fd);
+		case '\r':
+			return fwrite("\\r", 1, 2, fd);
+		case '\\':
+			return fwrite("\\\\", 1, 2, fd);
+		case '\'':
+			return fwrite("\\'", 1, 2, fd);
+		case '"':
+			return fwrite("\\\"", 1, 2, fd);
+		default:
+			if (obj > 0x1F && obj < 0x7F) {
+				return fputc(obj, fd) != EOF;
+			} else if (format & BYTEFMT_OCT) {
+				return (fputc('\\', fd) != EOF)
+					+ (fputc( obj & 7  /*0b00000111*/ + '0', fd) != EOF)
+					+ (fputc((obj & 56 /*0b00111000*/ >> 3) + '0', fd) != EOF)
+					+ (fputc((obj & 192/*0b11000000*/ >> 6) + '0', fd) != EOF);
+			} else if (format & BYTEFMT_HEX) return fprintf(fd, "\\x%hhX", obj);
+			assert(false, "invalid escape format specified");
 	}
-	else if (obj == '\0')				    { n += fwrite("\\0",  1, 2, fd); }
-	else if (obj == '\t')				    { n += fwrite("\\t",  1, 2, fd); }
-	else if (obj == '\n')				    { n += fwrite("\\n",  1, 2, fd); }
-	else if (obj == '\r')				    { n += fwrite("\\r",  1, 2, fd); }
-	else if (obj == '\\')				    { n += fwrite("\\\\", 1, 2, fd); }
-	else if (obj == '\'' && format & BYTEFMT_ESC_QUOTE) { n += fwrite("\\'",  1, 2, fd); }
-	else if (obj == '"' && format & BYTEFMT_ESC_DQUOTE) { n += fwrite("\\\"", 1, 2, fd); }
-	else if (obj > 0x1F && obj < 0x7F)                  { n += fputc(obj,		fd); }
-	else if (format & BYTEFMT_OCT) {
-		n += fputc('\\', fd);
-		n += fputc( obj & 7  /*0b00000111*/ + '0', fd);
-		n += fputc((obj & 56 /*0b00111000*/ >> 3) + '0', fd);
-		n += fputc((obj & 192/*0b11000000*/ >> 6) + '0', fd);
-	} else if (format & BYTEFMT_HEX) {
-		n += fwrite("\\x", 2, 1, fd);
-		char temp = obj >> 4;
-		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);
-		temp = obj & 0xf;
-		n += fputc(temp + (temp > 9 ? 'A' - 10 : '0'), fd);
-	}
-	return n;
 }
 
 // performs the `fputcesc` function on all the characters in the sized string `obj`.
@@ -681,6 +689,11 @@ sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format)
 		n += fputcesc(fd, *iter, format);
 	}
 	return n;
+}
+
+sbuf_size_t fputstresc(FILE* fd, const char* obj, unsigned char format)
+{
+	return fputsbufesc(fd, fromstr((char*)obj), format);
 }
 
 // returns the index in the sized string `obj` where one of the characters in the sized string `sub` first occured.

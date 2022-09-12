@@ -339,66 +339,79 @@ Notes:
 	BRB_N_OPS
 } BRB_OpType;
 
-#define _BRB_opNames \
-	fromcstr("nop"), \
-	fromcstr("end"), \
-	fromcstr("int8"), \
-	fromcstr("int16"), \
-	fromcstr("int32"), \
-	fromcstr("intptr"), \
-	fromcstr("int64"), \
-	fromcstr("addr"), \
-	fromcstr("dbaddr"), \
-	fromcstr("load"), \
-	fromcstr("str"), \
-	fromcstr("sys"), \
-	fromcstr("builtin")
+extern const sbuf BRB_opNames[];
 
-static const sbuf BRB_opNames[] = { _BRB_opNames };
-static_assert(sizeof(BRB_opNames) / sizeof(BRB_opNames[0]) == BRB_N_OPS, "not all BRB operations have their names defined in `BRB_opNames`");
+#define BRB_OPF_OPERAND_INT8 1
+#define BRB_OPF_OPERAND_INT  2
+#define BRB_OPF_OPERAND_TYPE 4
+#define BRB_OPF_OPERAND_VAR_NAME     (BRB_OPF_OPERAND_INT  |  8)
+#define BRB_OPF_OPERAND_DB_NAME      (BRB_OPF_OPERAND_INT  | 16)
+#define BRB_OPF_OPERAND_SYSCALL_NAME (BRB_OPF_OPERAND_INT8 | 32)
+#define BRB_OPF_OPERAND_BUILTIN      (BRB_OPF_OPERAND_INT8 | 64)
+#define BRB_OPF_HAS_OPERAND   \
+	( BRB_OPF_OPERAND_INT8 \
+	| BRB_OPF_OPERAND_INT   \
+	| BRB_OPF_OPERAND_TYPE   )
 
-#define BRB_OPF_HAS_OPERAND 1
 static const uint8_t BRB_opFlags[] = {
 	[BRB_OP_NOP] = 0,
 	[BRB_OP_END] = 0,
-	[BRB_OP_I8] = BRB_OPF_HAS_OPERAND,
-	[BRB_OP_I16] = BRB_OPF_HAS_OPERAND,
-	[BRB_OP_I32] = BRB_OPF_HAS_OPERAND,
-	[BRB_OP_I64] = BRB_OPF_HAS_OPERAND,
-	[BRB_OP_PTR] = BRB_OPF_HAS_OPERAND,
-	[BRB_OP_ADDR] = BRB_OPF_HAS_OPERAND,
-	[BRB_OP_DBADDR] = BRB_OPF_HAS_OPERAND,
-	[BRB_OP_LD] = BRB_OPF_HAS_OPERAND,
+	[BRB_OP_I8] = BRB_OPF_OPERAND_INT8,
+	[BRB_OP_I16] = BRB_OPF_OPERAND_INT,
+	[BRB_OP_I32] = BRB_OPF_OPERAND_INT,
+	[BRB_OP_I64] = BRB_OPF_OPERAND_INT,
+	[BRB_OP_PTR] = BRB_OPF_OPERAND_INT,
+	[BRB_OP_ADDR] = BRB_OPF_OPERAND_VAR_NAME,
+	[BRB_OP_DBADDR] = BRB_OPF_OPERAND_DB_NAME,
+	[BRB_OP_LD] = BRB_OPF_OPERAND_TYPE,
 	[BRB_OP_STR] = 0,
-	[BRB_OP_SYS] = BRB_OPF_HAS_OPERAND,
-	[BRB_OP_BUILTIN] = BRB_OPF_HAS_OPERAND
+	[BRB_OP_SYS] = BRB_OPF_OPERAND_SYSCALL_NAME,
+	[BRB_OP_BUILTIN] = BRB_OPF_OPERAND_BUILTIN
 };
 static_assert(sizeof(BRB_opFlags) / sizeof(BRB_opFlags[0]) == BRB_N_OPS, "not all BRB operations have their flags set defined in `BRB_opFlags`"); 
+
+typedef enum {
+	BRB_TYPE_I8,
+	BRB_TYPE_I16,	
+	BRB_TYPE_I32,
+	BRB_TYPE_PTR,
+	BRB_TYPE_I64,	
+	BRB_TYPE_VOID,
+	BRB_N_TYPE_KINDS
+} BRB_TypeKind;
+
+extern const sbuf BRB_typeNames[];
+
+#define BRB_I8_TYPE(n)  ((BRB_Type){.kind = BRB_TYPE_I8,  .n_items = n})
+#define BRB_I16_TYPE(n) ((BRB_Type){.kind = BRB_TYPE_I16, .n_items = n})
+#define BRB_I32_TYPE(n) ((BRB_Type){.kind = BRB_TYPE_I32, .n_items = n})
+#define BRB_PTR_TYPE(n) ((BRB_Type){.kind = BRB_TYPE_PTR, .n_items = n})
+#define BRB_I64_TYPE(n) ((BRB_Type){.kind = BRB_TYPE_I64, .n_items = n})
+#define BRB_VOID_TYPE   ((BRB_Type){.kind = BRB_TYPE_VOID             })
+
+typedef struct {
+	BRB_TypeKind kind;
+	uint32_t n_items;
+} BRB_Type;
+static_assert(sizeof(BRB_Type) <= sizeof(uint64_t), "just for compactness");
+declArray(BRB_Type);
 
 typedef struct {
 	BRB_OpType type:8;
 	union {
 		uint64_t operand_u;	
 		int64_t operand_s;
+		BRB_Type operand_type;
 	};
 } BRB_Op;
 static_assert(sizeof(BRB_Op) <= 16, "`sizeof(BRB_Op) > 16`, that's no good, gotta save up on that precious memory");
 declArray(BRB_Op);
 
-typedef size_t BRB_Size;
-declArray(BRB_Size);
-#define BRB_TYPE_I8 1
-#define BRB_TYPE_I16 2
-#define BRB_TYPE_I32 4
-#define BRB_TYPE_PTR SIZE_MAX
-#define BRB_TYPE_I64 8
-#define BRB_TYPE_VOID 0
-
 typedef struct {
 	const char* name;
 	BRB_OpArray body;
-	BRB_Size ret_type;
-	BRB_SizeArray args;
+	BRB_Type ret_type;
+	BRB_TypeArray args;
 } BRB_Proc;
 declArray(BRB_Proc);
 
@@ -409,11 +422,6 @@ typedef enum {
 	BRB_SYS_READ,
 	BRB_N_SYSCALLS
 } BRB_Syscall;
-
-#define _BRB_syscallNames \
-	fromcstr("exit"), \
-	fromcstr("write"), \
-	fromcstr("read") \
 
 extern const sbuf BRB_syscallNames[];
 
@@ -432,7 +440,6 @@ typedef enum {
 extern const uintptr_t BRB_builtinValues[];
 extern const sbuf BRB_builtinNames[];
 
-
 typedef enum {
 	BRB_DP_NONE,
 	BRB_DP_BYTES, // span of bytes stored in the bytecode along with a size
@@ -446,27 +453,17 @@ typedef enum {
 	BRB_DP_BUILTIN, // pointer-sized integer, storing a built-in constant
 	BRB_N_DP_TYPES
 } BRB_DataPieceType;
-// TODO: add pre-evaluation data pieces that would pre-evaluate a block of code and embed it's output as a data piece
+// TODO: add pre-evaluation data pieces that would pre-evaluate a block of code and embed its output as a data piece
 
-static const sbuf BRB_dataPieceNames[BRB_N_DP_TYPES] = {
-	[BRB_DP_BYTES] =   fromcstr("bytes"),
-	[BRB_DP_I16] =     fromcstr("i16"),
-	[BRB_DP_I32] =     fromcstr("i32"),
-	[BRB_DP_PTR] =     fromcstr("ptr"),
-	[BRB_DP_I64] =     fromcstr("i64"),
-	[BRB_DP_TEXT]  =   fromcstr("text"),
-	[BRB_DP_DBADDR] =  fromcstr("dbaddr"),
-	[BRB_DP_ZERO] =    fromcstr("zero"),
-	[BRB_DP_BUILTIN] = fromcstr("builtin")
-};
+extern const sbuf BRB_dataPieceNames[];
 
 typedef struct {
 	BRB_DataPieceType type;
 	union {
 		sbuf data; // for PIECE_BYTES or PIECE_TEXT
-		uint64_t operand_u;
-		int64_t operand_s;
-		BRB_Builtin builtin_id;
+		uint64_t content_u;
+		int64_t content_s;
+		BRB_Type content_type;
 	};
 } BRB_DataPiece;
 declArray(BRB_DataPiece);
@@ -531,6 +528,7 @@ typedef enum {
 	BRB_ERR_ARGS_EXPECTED,
 	BRB_ERR_PROTOTYPE_MISMATCH,
 	BRB_ERR_SYSCALL_NAME_EXPECTED,
+	BRB_ERR_INVALID_ARRAY_SIZE_SPEC,
 	BRB_N_ERROR_TYPES
 } BRB_ErrorType;
 
@@ -555,7 +553,7 @@ typedef struct BRB_stacknode_t* BRB_StackNode;
 struct BRB_stacknode_t {
 	BRB_StackNode prev;
 	const char* name;
-	BRB_Size size;
+	BRB_Type type;
 };
 declArray(BRB_StackNode);
 declArray(BRB_StackNodeArray);
@@ -611,7 +609,7 @@ BRB_Error  BRB_extractModule(BRB_ModuleBuilder builder, BRB_Module* dst);
 BRB_Error BRB_setEntryPoint(BRB_ModuleBuilder* builder, size_t proc_id);
 
 BRB_Error  BRB_preallocExecSegment(BRB_ModuleBuilder* builder, uint32_t n_procs_hint);
-BRB_Error  BRB_addProc(BRB_ModuleBuilder* builder, uint32_t* proc_id_p, const char* name, size_t n_args, BRB_Size* args, BRB_Size ret_type, uint32_t n_ops_hint);
+BRB_Error  BRB_addProc(BRB_ModuleBuilder* builder, uint32_t* proc_id_p, const char* name, size_t n_args, BRB_Type* args, BRB_Type ret_type, uint32_t n_ops_hint);
 BRB_Error  BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op);
 size_t     BRB_getProcIdByName(BRB_Module* module, const char* name); // returns SIZE_MAX on error
 
@@ -621,10 +619,11 @@ BRB_Error  BRB_addDataPiece(BRB_ModuleBuilder* builder, uint32_t db_id, BRB_Data
 size_t     BRB_getDataBlockIdByName(BRB_Module* module, const char* name); // returns SIZE_MAX on error
 
 BRB_Error  BRB_labelStackItem(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id, const char* name);
-BRB_Size   BRB_getStackItemSize(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
+bool       BRB_getStackItemType(BRB_ModuleBuilder* builder, BRB_Type* dst, uint32_t proc_id, uint32_t op_id, uint32_t item_id);
 size_t     BRB_getStackItemRTOffset(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
 size_t     BRB_getStackItemRTSize(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
 size_t     BRB_getStackItemIdByName(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, const char* name); // returns SIZE_MAX on error
+size_t     BRB_getTypeRTSize(BRB_Type type);
 
 // implemented in `src/brb_write.c`
 long       BRB_writeModule(BRB_Module src, FILE* dst);
@@ -637,6 +636,9 @@ BRB_Error  BRB_initExecEnv(BRB_ExecEnv* env, BRB_Module module, size_t stack_siz
 void       BRB_execModule(BRB_ExecEnv* env, char* args[], const volatile bool* interruptor);
 
 // implemented in `src/brb_asm.c`
-BRB_Error BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* dst);
+BRB_Error  BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* dst);
+
+// implemented in `src/brb_dis.c`
+long       BRB_disassembleModule(const BRB_Module* module, FILE* dst);
 
 #endif // _BRB_
