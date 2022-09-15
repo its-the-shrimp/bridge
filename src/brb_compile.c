@@ -1,1252 +1,547 @@
-// implementation for AOT compilation of BRB modules
+// implementation for AOT compilation of BRB modules to native assembly code
 #include <brb.h>
 #include <errno.h>
 #include <math.h>
-#if 0
 
-defArray(Op);
+#define ARM64_STACK_ALIGNMENT 16
 
-#define STACK_ALIGNMENT 16
-#define DEFAULT_ENTRY_NAME ".entry"
-
-char* conditionNames_arm64[] = {
-	[COND_NON] = "",
-	[COND_EQU] = "eq",
-	[COND_NEQ] = "ne",
-	[COND_LTU] = "lo",
-	[COND_GTU] = "hs",
-	[COND_LEU] = "ls",
-	[COND_GEU] = "hi",
-	[COND_LTS] = "lt",
-	[COND_GTS] = "gt",
-	[COND_LES] = "le",
-	[COND_GES] = "ge"
-};
-#define oppositeConditionName(cond_id) conditionNames_arm64[opposite_conditions[cond_id]]
-
-static const char* regNames64[N_REGS] = {
-	[0] = "x0",
-	[1] = "x1",
-	[2] = "x2",
-	[3] = "x3",
-	[4] = "x4",
-	[5] = "x5",
-	[6] = "x6",
-	[7] = "x7",
-	[ZEROREG_ID] = "xzr"
-};
-
-static const char* regNames32[N_REGS] = {
-	[0] = "w0",
-	[1] = "w1",
-	[2] = "w2",
-	[3] = "w3",
-	[4] = "w4",
-	[5] = "w5",
-	[6] = "w6",
-	[7] = "w7",
-	[ZEROREG_ID] = "wzr"
-};
-
-static int cond_counter = 0;
-void compileCondition(FILE* dst, uint8_t cond_id, uint8_t n_ops)
-{
-	if (cond_id == COND_NON) return;
-	assert(cond_id < N_CONDS, "invalid condition ID was provided");
-	fprintf(dst, "\tb%s . + %d\n", oppositeConditionName(cond_id), (n_ops + 1) * 4);
-}
-
-int startConditionalOp(FILE* dst, uint8_t cond_id)
-{
-	assert(cond_id < N_CONDS, "invalid condition ID was provided");
-	if (!cond_id) return -1;
-	fprintf(dst, "\tb%s .co_%d\n", oppositeConditionName(cond_id), cond_counter++);
-	return cond_counter;
-}
-
-void endConditionalOp(FILE* dst, int cond_ctx)
-{
-	if (cond_ctx < 0) return;
-	fprintf(dst, ".co_%d:\n", cond_ctx);
-}
-
-static char literal_buf[32];
-
-#define INTL_REG_ONLY 0x1
-#define INTL_ADDR_OFFSET 0x2
-#define INTL_REG_ARG 0x4
-
-const char* intLiteral(FILE* dst, int8_t reg_id, int64_t value, int flag)
-{
-	if (flag == INTL_ADDR_OFFSET && inRange(value, -256, 256) ? true : !flag && inRange(value, -4096, 4096)) {
-		snprintf(literal_buf, 32, "%lld", value);
-		return literal_buf;
-	}
-
-	bool inverted = false;
-	if (value < 0) {
-		value *= -1;
-		inverted = true;
-	}
-
-	if (value == 0 && flag != INTL_REG_ONLY) return "xzr";
-
-	if (value < 65536) {
-		fprintf(dst, "\tmov x%hhd, %lld\n", reg_id, inverted ? value *= -1 : value);
-		inverted = false;
-	} else if (!(value >> 32)) {
-		fprintf(
-			dst,
-			"\tmov x%1$hhd, %2$lld\n"
-			"\tmovk x%1$hhd, %3$lld, lsl 16\n",
-			reg_id, value & 0xFFFF, value >> 16
-		);
-	} else if (!(value >> 48)) {
-		fprintf(
-			dst,
-			"\tmov x%1$hhd, %2$lld\n"
-			"\tmovk x%1$hhd, %3$lld, lsl 16\n"
-			"\tmovk x%1$hhd, %4$lld, lsl 32\n",
-			reg_id, value & 0xFFFF, (value >> 16) & 0xFFFF, value >> 32
-		);
-	} else {
-		fprintf(
-			dst,
-			"\tmov x%1$hhd, %2$lld\n"
-			"\tmovk x%1$hhd, %3$lld, lsl 16\n"
-			"\tmovk x%1$hhd, %4$lld, lsl 32\n"
-			"\tmovk x%1$hhd, %5$lld, lsl 48\n",
-			reg_id, value & 0xFFFF, (value >> 16) & 0xFFFF, (value >> 32) & 0xFFFF, value >> 48
-		);
-	}
-	if (inverted) fprintf(dst, "\tmvn x%1$hhd, x%1$hhd\n", reg_id);
-	snprintf(literal_buf, 32, "x%hhd", reg_id);
-	return literal_buf;
-}
-
-typedef struct comp_ctx {
-	FILE* dst;
-	int cur_frame_start;
-	int cur_frame_size;
-	char* src_path;
-	int src_line;
-} CompCtx;
-
-uint64_t nativeStackOffset(CompCtx* ctx, uint64_t offset)
-{
-	return alignby(ctx->cur_frame_size, STACK_ALIGNMENT) - ctx->cur_frame_size + offset;
-}
-
-typedef void (*OpNativeCompiler) (Module*, uint32_t, CompCtx*);
-
-void compileSysNoneNative(Module* module, uint32_t index, CompCtx* ctx) {}
-
-void compileSysExitNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 2);
-	fprintf(ctx->dst, "\tmov x16, 1\n\tsvc 0\n");
-}
-
-void compileSysWriteNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 5);
-	fprintf(ctx->dst,
-		"\tmov x16, 4\n"
-		"\tsvc 0\n"
-		"\tbcc . + 12\n"
-		"\tmov x26, x0\n"
-		"\tmvn x0, xzr\n"
-	);
-}
-
-void compileSysArgcNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 1);
-	fprintf(ctx->dst, "\tmov x0, x28\n");
-}
-
-void compileSysArgvNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 3);
-	fprintf(ctx->dst,
-		"\tmadd x0, x0, 8, x27\n"
-		"\tldr x0, x0\n"
-	);
-}
-
-void compileSysReadNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 5);
-	fprintf(ctx->dst,
-		"\tmov x16, 3\n"
-		"\tsvc 0\n"
-		"\tbcc . + 12\n"
-		"\tmov x26, x0\n"
-		"\tmvn x0, xzr\n"
-	);
-}
-
-void compileSysGetErrnoNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 1);
-	fprintf(ctx->dst, "\tmov x0, x26\n");
-}
-
-void compileSysSetErrnoNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 1);
-	fprintf(ctx->dst, "\tmov x26, x0\n");
-}
-
-OpNativeCompiler native_syscall_compilers[] = {
-	[SYS_OP_INVALID] = &compileSysNoneNative,
-	[SYS_OP_EXIT] = &compileSysExitNative,
-	[SYS_OP_WRITE] = &compileSysWriteNative,
-	[SYS_OP_ARGC] = &compileSysArgcNative,
-	[SYS_OP_ARGV] = &compileSysArgvNative,
-	[SYS_OP_READ] = &compileSysReadNative,
-	[SYS_OP_GET_ERRNO] = &compileSysGetErrnoNative,
-	[SYS_OP_SET_ERRNO] = &compileSysSetErrnoNative
-};
-static_assert(
-	N_SYS_OPS == sizeof(native_syscall_compilers) / sizeof(native_syscall_compilers[0]),
-	"not all syscalls have matching native compilers"
-);
-
-void compileNopNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	fprintf(ctx->dst, "\tnop\n");
-}
-
-void compileOpEndNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	if (index == module->seg_exec.length - 1) return;
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 3);
-	fprintf(
-		ctx->dst,
-		"\tmov x16, 1\n"
-		"\tmov x0, 0\n"
-		"\tsvc 0\n"
-	);
-}
-
-void compileOpMarkNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	fprintf(ctx->dst, ".m%d:\n", index);
-}
-
-void compileOpSetNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	intLiteral(ctx->dst, op.dst_reg, op.value, INTL_REG_ONLY);
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpSetrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tmov %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpSetdNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	DataBlock* block = module->seg_data.data + op.symbol_id;
-	compileCondition(ctx->dst, op.cond_id, 2);
-	if (block->is_mutable) {
-		fprintf(
-			ctx->dst,
-			"\tadrp %1$s, \"%2$s::%3$s\"@PAGE\n"
-			"\tadd %1$s, %1$s, \"%2$s::%3$s\"@PAGEOFF\n",
-			regNames64[op.dst_reg], getDataBlockSubmodule(module, block)->name, block->name
-		   );
-	} else {
-		fprintf(
-			ctx->dst,
-			"\tadr %s, \"%s::%s\"\n",
-			regNames64[op.dst_reg], getDataBlockSubmodule(module, block)->name, block->name
-		   );
-	}
-}
-
-void compileOpSetbNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	intLiteral(
-		ctx->dst,
-		op.dst_reg,
-		builtins[op.symbol_id].value,
-		INTL_REG_ONLY
-	);
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpAddNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	fprintf(ctx->dst, "\tadd %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, 0));
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpAddrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(
-		ctx->dst,
-		"\tadd %s, %s, %s\n",
-		regNames64[op.dst_reg],
-		regNames64[op.src_reg],
-		regNames64[op.src2_reg]
-	);
-}
-
-void compileOpSubNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	fprintf(ctx->dst, "\tsub %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, 0));
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpSubrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(
-		ctx->dst,
-		"\tsub %s, %s, %s\n",
-		regNames64[op.dst_reg],
-		regNames64[op.src_reg],
-		regNames64[op.src2_reg]
-	);
-}
-
-void compileOpSyscallNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	native_syscall_compilers[module->seg_exec.data[index].symbol_id](module, index, ctx);
-}
-
-void compileOpGotoNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	fprintf(ctx->dst, "\tb%s .m%lld\n", conditionNames_arm64[op.cond_id], index + op.op_offset);
-}
-
-void compileOpCmpNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	if (op.cond_id) {
-		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-		fprintf(
-			ctx->dst,
-			"\tccmp %s, %s, %s\n",
-			regNames64[op.src_reg],
-			intLiteral(ctx->dst, 8, op.value, 0),
-			conditionNames_arm64[op.cond_id]
-		);
-		endConditionalOp(ctx->dst, cond_ctx);
-	} else {
-		fprintf(ctx->dst, "\tcmp %s, %s\n", regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, 0));
-	}
-}
-
-void compileOpCmprNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	if (op.cond_id) {
-		fprintf(
-			ctx->dst,
-			"\tccmp %s, %s, %s\n",
-			regNames64[op.src_reg],
-			regNames64[op.src2_reg],
-			conditionNames_arm64[op.cond_id]
-		);
-	} else {
-		fprintf(ctx->dst, "\tcmp %s, %s\n", regNames64[op.src_reg], regNames64[op.src2_reg]);
-	}
-}
-
-void compileOpAndNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	fprintf(ctx->dst, "\tand %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, 0));
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpAndrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(
-		ctx->dst,
-		"\tand %s, %s, %s\n",
-		regNames64[op.dst_reg],
-		regNames64[op.src_reg],
-		regNames64[op.src2_reg]
-	);
-}
-
-void compileOpOrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	fprintf(ctx->dst, "\torr %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, 0));
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpOrrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(
-		ctx->dst,
-		"\torr %s, %s, %s\n",
-		regNames64[op.dst_reg],
-		regNames64[op.src_reg],
-		regNames64[op.src2_reg]
-	);
-}
-
-void compileOpNotNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tmvn %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpXorNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	fprintf(ctx->dst, "\teor %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, 0));
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpXorrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(
-		ctx->dst,
-		"\teor %s, %s, %s\n",
-		regNames64[op.dst_reg],
-		regNames64[op.src_reg],
-		regNames64[op.src2_reg]
-	);
-}
-
-void compileOpShlNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst,
-		"\tlsl %s, %s, %llu\n",
-		regNames64[op.dst_reg],
-		regNames64[op.src_reg],
-		op.value
-	);
-}
-
-void compileOpShlrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tlsl %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
-}
-
-void compileOpShrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst,
-		"\tlsr %s, %s, %llu\n",
-		regNames64[op.dst_reg],
-		regNames64[op.src_reg],
-		op.value
-	);
-}
-
-void compileOpShrrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tlsr %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
-}
-
-void compileOpShrsNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst,
-		"\tasr %s, %s, %llu\n",
-		regNames64[op.dst_reg],
-		regNames64[op.src_reg],
-		op.value
-	);
-}
-
-void compileOpShrsrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tasr %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
-}
-
-void compileOpProcNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	fprintf(
-		ctx->dst,
-		"\"%s::%s\":\n"
-		"\tstp fp, lr, [sp, -16]!\n"
-		"\tmov fp, sp\n",
-		getOpSubmodule(module, module->seg_exec.data + index)->name, op.mark_name
-	);
-}
-
-void compileOpCallNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	Op* proc = module->seg_exec.data + op.symbol_id;
-	compileCondition(ctx->dst, op.cond_id, 1);
-	if (proc->type == OP_PROC) {
-		fprintf(ctx->dst, "\tbl \"%s::%s\"\n", getOpSubmodule(module, proc)->name, proc->mark_name);
-	} else {
-		fprintf(ctx->dst, "\tbl \"%s\"\n", proc->mark_name);
-	}
-}
-
-void compileOpRetNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	compileCondition(ctx->dst, module->seg_exec.data[index].cond_id, 3);
-	fprintf(ctx->dst,
-		"\tmov sp, fp\n"
-		"\tldp fp, lr, [sp], 16\n"
-		"\tret\n"
-	);
-}
-
-void compileOpEndprocNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	ctx->cur_frame_size = 0;
-	if (module->seg_exec.data[index - 1].type == OP_RET) return;
-	fputs(
-		"\tmov sp, fp\n"
-		"\tldp fp, lr, [sp], 16\n"
-		"\tret\n",
-		ctx->dst
-	);
-}
-
-void compileOpLd64Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldr %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpStr64Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tstr %s, [%s]\n", regNames64[op.src_reg], regNames64[op.dst_reg]);
-}
-
-void compileOpLd32Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldr %s, [%s]\n", regNames32[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpStr32Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tstr %s, [%s]\n", regNames32[op.src_reg], regNames64[op.dst_reg]);
-}
-
-void compileOpLd16Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrh %s, [%s]\n", regNames32[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpStr16Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tstrh %s, [%s]\n", regNames32[op.src_reg], regNames64[op.dst_reg]);
-}
-
-void compileOpLd8Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrb %s, [%s]\n", regNames32[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpStr8Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tstrb %s, [%s]\n", regNames32[op.src_reg], regNames64[op.dst_reg]);
-}
-
-void compileOpVarNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	uint64_t offset = alignby(ctx->cur_frame_size, STACK_ALIGNMENT);
-	ctx->cur_frame_size += op.var_size;
-	offset = alignby(ctx->cur_frame_size, STACK_ALIGNMENT) - offset;
-
-	if (offset) fprintf(ctx->dst, "\tsub sp, sp, %s\n", intLiteral(ctx->dst, 8, offset, 0));
-}
-
-void compileOpSetvNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tsub %s, fp, %d\n", regNames64[op.dst_reg], op.symbol_id);
-}
-
-void compileOpMulNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	if ((signed)op.value == -1) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-	} else {
-		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-		fprintf(ctx->dst, "\tmul %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG));
-		endConditionalOp(ctx->dst, cond_ctx);
-	}
-}
-
-void compileOpMulrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tmul %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
-}
-
-void compileOpDivNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	if ((signed)op.value == -1) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-	} else {
-		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-		fprintf(ctx->dst, "\tudiv %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG));
-		endConditionalOp(ctx->dst, cond_ctx);
-	}
-}
-
-void compileOpDivrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tudiv %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
-}
-
-void compileOpDivsNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	if ((signed)op.value == -1) {
-		compileCondition(ctx->dst, op.cond_id, 1);
-		fprintf(ctx->dst, "\tneg %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-	} else {
-		int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-		fprintf(ctx->dst, "\tsdiv %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG));
-		endConditionalOp(ctx->dst, cond_ctx);
-	}
-}
-
-void compileOpDivsrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tsdiv %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]);
-}
-
-void compileOpExtprocNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	Submodule* submodule = getOpSubmodule(module, module->seg_exec.data + index);
-	char proc_name[strlen(submodule->name) + strlen(op.mark_name) + 3];
-	if (strcmp(submodule->name, ".") == 0) {
-		snprintf(proc_name, sizeof(proc_name), "%s", op.mark_name);
-	} else {
-		snprintf(proc_name, sizeof(proc_name), "%s::%s", submodule->name, op.mark_name);
-	}
-	fprintf(
-		ctx->dst,
-		".global \"%1$s\"\n"
-		"\"%1$s\":\n"
-		"\tstp fp, lr, [sp, -16]!\n"
-		"\tmov fp, sp\n",
-		proc_name
-	);
-}
-
-void compileOpLdvNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	const char* literal = intLiteral(ctx->dst, 8, -op.symbol_id, INTL_ADDR_OFFSET);
-	switch (op.var_size) {
-		case 1:
-			fprintf(ctx->dst, "\tldrb %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
-			break;
-		case 2:
-			fprintf(ctx->dst, "\tldrh %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
-			break;
-		case 4:
-			fprintf(ctx->dst, "\tldrw %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
-			break;
-		case 8:
-			fprintf(ctx->dst, "\tldr %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
-			break;
-		default:
-			eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hu\n", op.var_size);
-			abort();
-	}
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpStrvNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	const char* literal = intLiteral(ctx->dst, 8, -op.symbol_id, INTL_ADDR_OFFSET);
-	switch (op.var_size) {
-		case 1:
-			fprintf(ctx->dst, "\tstrb %s, [fp, %s]\n", regNames32[op.src_reg], literal);
-			break;
-		case 2:
-			fprintf(ctx->dst, "\tstrh %s, [fp, %s]\n", regNames32[op.src_reg], literal);
-			break;
-		case 4:
-			fprintf(ctx->dst, "\tstr %s, [fp, %s]\n", regNames32[op.src_reg], literal);
-			break;
-		case 8:
-			fprintf(ctx->dst, "\tstr %s, [fp, %s]\n", regNames64[op.src_reg], literal);
-			break;
-		default:
-			eprintf("internal compiler bug in compileOpStrvNative: unexpected variable size %hu\n", op.var_size);
-			abort();
-	}
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpPopvNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	uint64_t offset = nativeStackOffset(ctx, 0);
-
-	switch (op.var_size) {
-		case 1:
-			fprintf(ctx->dst, "\tldrsb %s, [sp, %llu]\n", regNames64[op.dst_reg], offset);
-			break;
-		case 2:
-			fprintf(ctx->dst, "\tldrsh %s, [sp, %llu]\n", regNames64[op.dst_reg], offset);
-			break;
-		case 4:
-			fprintf(ctx->dst, "\tldrsw %s, [sp, %llu]\n", regNames64[op.dst_reg], offset);
-			break;
-		case 8:
-			fprintf(ctx->dst, "\tldr %s, [sp, %llu]\n", regNames64[op.dst_reg], offset);
-			break;
-		default:
-			eprintf("internal compiler bug in compileOpPopvNative: unexpected variable size %hu\n", op.var_size);
-	}
-
-	if (offset + op.var_size >= STACK_ALIGNMENT) {
-		fprintf(ctx->dst, "\tadd sp, sp, "_s(STACK_ALIGNMENT)"\n");
-	}
-	ctx->cur_frame_size -= op.var_size;
-}
-
-void compileOpPushvNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	if (alignby(ctx->cur_frame_size, STACK_ALIGNMENT) < alignby(ctx->cur_frame_size + op.var_size, STACK_ALIGNMENT)) {
-		fprintf(ctx->dst, "\tsub sp, sp, "_s(STACK_ALIGNMENT)"\n");
-	}
-	ctx->cur_frame_size += op.var_size;
-	uint64_t offset = nativeStackOffset(ctx, 0);
-
-	switch (op.var_size) {
-		case 1:
-			fprintf(ctx->dst, "\tstrb %s, [sp, %llu]\n", regNames32[op.src_reg], offset);
-			break;
-		case 2:
-			fprintf(ctx->dst, "\tstrh %s, [sp, %llu]\n", regNames32[op.src_reg], offset);
-			break;
-		case 4:
-			fprintf(ctx->dst, "\tstr %s, [sp, %llu]\n", regNames32[op.src_reg], offset);
-			break;
-		case 8:
-			fprintf(ctx->dst, "\tstr %s, [sp, %llu]\n", regNames64[op.src_reg], offset);
-			break;
-		default:
-			eprintf("internal compiler bug in compileOpPushvNative: unexpected variable size %hu\n", op.var_size);
-			abort();
-	}
-}
-
-void compileOpAtfNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	ctx->src_path = module->seg_exec.data[index].mark_name;
-	ctx->src_line = 0;
-	fprintf(ctx->dst, "// %s:%d\n", ctx->src_path, ctx->src_line);
-}
-
-void compileOpAtlNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	ctx->src_line = module->seg_exec.data[index].symbol_id;
-	fprintf(ctx->dst, "// %s:%d\n", ctx->src_path, ctx->src_line);
-}
-
-void compileOpSetcNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tcset %s, %s\n", regNames64[op.dst_reg], conditionNames_arm64[op.cond_arg]);
-}
-
-void compileOpDelnvNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int64_t aligned_offset = alignby(ctx->cur_frame_size, STACK_ALIGNMENT);
-	ctx->cur_frame_size -= op.symbol_id;
-	aligned_offset -= alignby(ctx->cur_frame_size, STACK_ALIGNMENT);
-
-	if (aligned_offset) {
-		int cond_id = startConditionalOp(ctx->dst, op.cond_id);
-		fprintf(ctx->dst, "\tadd sp, sp, %s\n", intLiteral(ctx->dst, 8, aligned_offset, 0));
-		endConditionalOp(ctx->dst, cond_id);
-	}
-}
-
-void compileOpLd64SNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldr %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpLd32SNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrsw %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpLd16SNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrsh %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpLd8SNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	compileCondition(ctx->dst, op.cond_id, 1);
-	fprintf(ctx->dst, "\tldrsb %s, [%s]\n", regNames64[op.dst_reg], regNames64[op.src_reg]);
-}
-
-void compileOpLdvsNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	int cond_ctx = startConditionalOp(ctx->dst, op.cond_id);
-	const char* literal = intLiteral(ctx->dst, 8, -op.symbol_id, INTL_ADDR_OFFSET);
-	switch (op.var_size) {
-		case 1:
-			fprintf(ctx->dst, "\tldrsb %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
-			break;
-		case 2:
-			fprintf(ctx->dst, "\tldrsh %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
-			break;
-		case 4:
-			fprintf(ctx->dst, "\tldrsw %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
-			break;
-		case 8:
-			fprintf(ctx->dst, "\tldr %s, [fp, %s]\n", regNames64[op.dst_reg], literal);
-			break;
-		default:
-			eprintf("internal compiler bug in compileOpLdvNative: unexpected variable size %hu\n", op.var_size);
-			abort();
-	}
-	endConditionalOp(ctx->dst, cond_ctx);
-}
-
-void compileOpSx32Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	fprintf(ctx->dst, "\tsxtw %s, %s\n", regNames64[op.dst_reg], regNames32[op.src_reg]);
-}
-
-void compileOpSx16Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	fprintf(ctx->dst, "\tsxth %s, %s\n", regNames64[op.dst_reg], regNames32[op.src_reg]);
-}
-
-void compileOpSx8Native(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	fprintf(ctx->dst, "\tsxtb %s, %s\n", regNames64[op.dst_reg], regNames32[op.src_reg]);
-}
-
-void compileOpModNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-
-	if ((op.value & (op.value - 1)) == 0) {
-		fprintf(ctx->dst, "\tand %s, %s, %s\n", regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value - 1, 0));
-	} else if (op.dst_reg == op.src_reg) {
-		fprintf(
-			ctx->dst,
-			"\tmov x9, %1$s\n"
-			"\tudiv %1$s, %1$s, %2$s\n"
-			"\tmul %1$s, %1$s, %2$s\n"
-			"\tsub %1$s, x9, %1$s\n",
-			regNames64[op.dst_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG)
-		);
-	} else {
-		fprintf(
-			ctx->dst,
-			"\tudiv %1$s, %1$s, %3$s\n"
-			"\tmul %1$s, %1$s, %3$s\n"
-			"\tsub %1$s, %2$s, %1$s\n",
-			regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG)
-		);
-	}
-}
-
-void compileOpModsNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	if (op.dst_reg == op.src_reg) {
-		fprintf(
-			ctx->dst,
-			"\tmov x9, %1$s\n"
-			"\tsdiv %1$s, %1$s, %2$s\n"
-			"\tmul %1$s, %1$s, %2$s\n"
-			"\tsub %1$s, x9, %1$s\n",
-			regNames64[op.dst_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG)
-		);
-	} else {
-		fprintf(
-			ctx->dst,
-			"\tsdiv %1$s, %1$s, %3$s\n"
-			"\tmul %1$s, %1$s, %3$s\n"
-			"\tsub %1$s, %2$s, %1$s\n",
-			regNames64[op.dst_reg], regNames64[op.src_reg], intLiteral(ctx->dst, 8, op.value, INTL_REG_ARG)
-		);
-	}
-}
-
-void compileOpModrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	if (op.dst_reg == op.src_reg) {
-		fprintf(
-			ctx->dst,
-			"\tmov x8, %1$s\n"
-			"\tudiv %1$s, %1$s, %2$s\n"
-			"\tmul %1$s, %1$s, %2$s\n"
-			"\tsub %1$s, x8, %1$s\n",
-			regNames64[op.dst_reg], regNames64[op.src2_reg]
-		);
-	} else if (op.dst_reg == op.src2_reg) {
-		fprintf(
-			ctx->dst,
-			"\tmov x8, %1$s\n"
-			"\tudiv %1$s, %2$s, x8\n"
-			"\tmul %1$s, %1$s, x8\n"
-			"\tsub %1$s, %2$s, %1$s\n",
-			regNames64[op.dst_reg], regNames64[op.src_reg]
-		);
-	} else {
-		fprintf(
-			ctx->dst,
-			"\tudiv %1$s, %2$s, %3$s\n"
-			"\tmul %1$s, %1$s, %3$s\n"
-			"\tsub %1$s, %2$s, %1$s\n",
-			regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]
-		);
-	}
-}
-
-void compileOpModsrNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	if (op.dst_reg == op.src_reg) {
-		fprintf(
-			ctx->dst,
-			"\tmov x8, %1$s\n"
-			"\tsdiv %1$s, %1$s, %2$s\n"
-			"\tmul %1$s, %1$s, %2$s\n"
-			"\tsub %1$s, x8, %1$s\n",
-			regNames64[op.dst_reg], regNames64[op.src2_reg]
-		);
-	} else if (op.dst_reg == op.src2_reg) {
-		fprintf(
-			ctx->dst,
-			"\tmov x8, %1$s\n"
-			"\tsdiv %1$s, %2$s, x8\n"
-			"\tmul %1$s, %1$s, x8\n"
-			"\tsub %1$s, %2$s, %1$s\n",
-			regNames64[op.dst_reg], regNames64[op.src_reg]
-		);
-	} else {
-		fprintf(
-			ctx->dst,
-			"\tsdiv %1$s, %2$s, %3$s\n"
-			"\tmul %1$s, %1$s, %3$s\n"
-			"\tsub %1$s, %2$s, %1$s\n",
-			regNames64[op.dst_reg], regNames64[op.src_reg], regNames64[op.src2_reg]
-		);
-	}
-}
-
-void compileOpArgNative(Module* module, uint32_t index, CompCtx* ctx)
-{
-	Op op = module->seg_exec.data[index];
-	if (!ctx->cur_frame_start) ctx->cur_frame_start = -STACKFRAME_SIZE;
-	ctx->cur_frame_start -= op.var_size;
-	ctx->cur_frame_size += op.var_size;
-}
-
-OpNativeCompiler native_op_compilers[] = {
-	[OP_NONE] = &compileNopNative,
-	[OP_END] = &compileOpEndNative,
-	[OP_MARK] = &compileOpMarkNative,
-	[OP_SET] = &compileOpSetNative,
-	[OP_SETR] = &compileOpSetrNative,
-	[OP_SETD] = &compileOpSetdNative,
-	[OP_SETB] = &compileOpSetbNative,
-	[OP_ADD] = &compileOpAddNative,
-	[OP_ADDR] = &compileOpAddrNative,
-	[OP_SUB] = &compileOpSubNative,
-	[OP_SUBR] = &compileOpSubrNative,
-	[OP_SYS] = &compileOpSyscallNative,
-	[OP_GOTO] = &compileOpGotoNative,
-	[OP_CMP] = &compileOpCmpNative,
-	[OP_CMPR] = &compileOpCmprNative,
-	[OP_AND] = &compileOpAndNative,
-	[OP_ANDR] = &compileOpAndrNative,
-	[OP_OR] = &compileOpOrNative,
-	[OP_ORR] = &compileOpOrrNative,
-	[OP_NOT] = &compileOpNotNative,
-	[OP_XOR] = &compileOpXorNative,
-	[OP_XORR] = &compileOpXorrNative,
-	[OP_SHL] = &compileOpShlNative,
-	[OP_SHLR] = &compileOpShlrNative,
-	[OP_SHR] = &compileOpShrNative,
-	[OP_SHRR] = &compileOpShrrNative,
-	[OP_SHRS] = &compileOpShrsNative,
-	[OP_SHRSR] = &compileOpShrsrNative,
-	[OP_PROC] = &compileOpProcNative,
-	[OP_CALL] = &compileOpCallNative,
-	[OP_RET] = &compileOpRetNative,
-	[OP_ENDPROC] = &compileOpEndprocNative,
-	[OP_LD64] = &compileOpLd64Native,
-	[OP_STR64] = &compileOpStr64Native,
-	[OP_LD32] = &compileOpLd32Native,
-	[OP_STR32] = &compileOpStr32Native,
-	[OP_LD16] = &compileOpLd16Native,
-	[OP_STR16] = &compileOpStr16Native,
-	[OP_LD8] = &compileOpLd8Native,
-	[OP_STR8] = &compileOpStr8Native,
-	[OP_VAR] = &compileOpVarNative,
-	[OP_SETV] = &compileOpSetvNative,
-	[OP_MUL] = &compileOpMulNative,
-	[OP_MULR] = &compileOpMulrNative,
-	[OP_DIV] = &compileOpDivNative,
-	[OP_DIVR] = &compileOpDivrNative,
-	[OP_DIVS] = &compileOpDivsNative,
-	[OP_DIVSR] = &compileOpDivsrNative,
-	[OP_EXTPROC] = &compileOpExtprocNative,
-	[OP_LDV] = &compileOpLdvNative,
-	[OP_STRV] = &compileOpStrvNative,
-	[OP_POPV] = &compileOpPopvNative,
-	[OP_PUSHV] = &compileOpPushvNative,
-	[OP_ATF] = &compileOpAtfNative,
-	[OP_ATL] = &compileOpAtlNative,
-	[OP_SETC] = &compileOpSetcNative,
-	[OP_DELNV] = &compileOpDelnvNative,
-	[OP_LD64S] = &compileOpLd64SNative,
-	[OP_LD32S] = &compileOpLd32SNative,
-	[OP_LD16S] = &compileOpLd16SNative,
-	[OP_LD8S] = &compileOpLd8SNative,
-	[OP_LDVS] = &compileOpLdvsNative,
-	[OP_SX32] = &compileOpSx32Native,
-	[OP_SX16] = &compileOpSx16Native,
-	[OP_SX8] = &compileOpSx8Native,
-	[OP_MOD] = &compileOpModNative,
-	[OP_MODS] = &compileOpModsNative,
-	[OP_MODR] = &compileOpModrNative,
-	[OP_MODSR] = &compileOpModsrNative,
-	[OP_ARG] = &compileOpArgNative
-};
-static_assert(
-	N_OPS == sizeof(native_op_compilers) / sizeof(native_op_compilers[0]),
-	"not all operations have matching native compilers"
-);
-
-bool isForDataSegment(DataBlock* block)
+static bool isForDataSegment(BRB_DataBlock* block)
 {
-	arrayForeach (DataPiece, piece, block->pieces) {
-		if (piece->type == PIECE_DB_ADDR) return true;
+	arrayForeach (BRB_DataPiece, piece, block->pieces) {
+		if (piece->type == BRB_DP_DBADDR) return true;
 	}
 	return block->is_mutable;
 }
 
-bool isForBSSSegment(DataBlock* block)
-//	   ^
+static bool isForBSSSegment(BRB_DataBlock* block)
 {
-	arrayForeach(DataPiece, piece, block->pieces) {
-		if (piece->type != PIECE_ZERO) return false;
+	arrayForeach(BRB_DataPiece, piece, block->pieces) {
+		if (piece->type != BRB_DP_ZERO) return false;
 	}
 	return true;
 }
 
-void compileModule(Module* src, FILE* dst)
-// notes: 
-// 		x28 - argc
-// 		x27 - argv
-// 		x26 - errno
+static long compileDataPiece_darwin_arm64(const BRB_ModuleBuilder* builder, uint32_t db_id, uint32_t piece_id, FILE* dst)
 {
-	CompCtx ctx = {.dst = dst};
-#	define CUR_SEG_BSS 1
-#	define CUR_SEG_DATA 2
-#	define CUR_SEG_TEXT 3
-	char cur_seg = 0;
-	static_assert(N_PIECE_TYPES == 8, "not all data piece types are handled in `compileModule`");
-	if (src->seg_data.length) {
-		arrayForeach (DataBlock, block, src->seg_data) {
-			if (isForBSSSegment(block) && cur_seg != CUR_SEG_BSS) {
-				fputs(".bss\n", dst);
-				cur_seg = CUR_SEG_BSS;
-			} else if (isForDataSegment(block) && cur_seg != CUR_SEG_DATA) {
-				fputs(".data\n", dst);
-				cur_seg = CUR_SEG_DATA;
-			} else if (cur_seg != CUR_SEG_TEXT) {
-				fputs(".text\n", dst);
-				cur_seg = CUR_SEG_TEXT;
-			}
-			fprintf(dst, "\"%s::%s\":\n", getDataBlockSubmodule(src, block)->name, block->name);
-			arrayForeach (DataPiece, piece, block->pieces) {
-				switch (piece->type) {
-					case PIECE_BYTES:
-					case PIECE_TEXT:
-						fputs("\t.ascii \"", dst);
-						fputsbufesc(dst, piece->data, BYTEFMT_ESC_DQUOTE | BYTEFMT_HEX);
-						fputs("\"\n", dst);
-						break;
-					case PIECE_INT16:
-					case PIECE_INT32:
-					case PIECE_INT64:
-						fprintf(dst, "\t.%dbyte %lld\n", 2 << (piece->type - PIECE_INT16), piece->integer);
-						break;
-					case PIECE_DB_ADDR:
-						fprintf(
-							dst,
-							"\t.quad \"%s::%s\"\n",
-							src->submodules.data[piece->module_id].name,
-							src->seg_data.data[piece->symbol_id].name
-						);
-						break;
-					case PIECE_ZERO:
-						fprintf(dst, "\t.zero %lld\n", piece->n_bytes);
-						break;
-					case PIECE_NONE:
-					case N_PIECE_TYPES:
-					default:
-						eprintf("internal compiler bug: invalid block piece type %d\n", piece->type);
-						abort();
-				}
-			}
-			fprintf(dst, ".align 4\n");
-		}
-		if (cur_seg != CUR_SEG_TEXT) fprintf(dst, ".text\n.align 4\n");
-	} else fprintf(dst, ".text\n.align 4\n");
-
-
-	fprintf(
-		dst,
-		".global "DEFAULT_ENTRY_NAME"\n"
-		DEFAULT_ENTRY_NAME":\n"
-		"\tmov x28, x0\n"
-		"\tmov x27, x1\n"
-		"\tmov x26, 0\n"
-		"\tmov x0, 0\n"
-		"\tmov x1, 0\n"
-		"\tmov x2, 0\n"
-		"\tmov x3, 0\n"
-		"\tmov x4, 0\n"
-		"\tmov x5, 0\n"
-		"\tmov x6, 0\n"
-		"\tmov x7, 0\n"
-	);
-
-// compile the code outside the procedures
-	arrayForeach (Op, op, src->seg_exec) {
-		while (op->type == OP_PROC || op->type == OP_EXTPROC)
-			while ((op++)->type != OP_ENDPROC);
-		native_op_compilers[op->type](src, op - src->seg_exec.data, &ctx);
-	}
-
-	fprintf(
-		dst,
-		"\tmov x0, 0\n"
-		"\tmov x16, 1\n"
-		"\tsvc 0\n"
-	);
-// compile the procedures
-	int first_op = 0;
-	arrayForeach(Op, op, src->seg_exec) {
-		if (op->type == OP_PROC || op->type == OP_EXTPROC) break;
-		first_op += 1;
-	}
-	arrayForeach (Op, op, OpArray_slice(src->seg_exec, first_op, -1)) {
-		native_op_compilers[op->type](src, op - src->seg_exec.data, &ctx);
-		if (op->type == OP_ENDPROC) {
-			while (op->type != OP_END ? op->type != OP_PROC && op->type != OP_EXTPROC : false) {
-				op += 1;
-			}
-			op -= 1;
-		}
+	BRB_DataPiece* piece = &builder->module.seg_data.data[db_id].pieces.data[piece_id];
+	switch (piece->type) {
+		case BRB_DP_BYTES:
+			return fputstr(dst, "\t.ascii ")
+				+ fputsbuflnesc(dst, piece->data, BYTEFMT_HEX | BYTEFMT_DQUOTED | BYTEFMT_ESC_DQUOTE);
+		case BRB_DP_TEXT:
+			return fputstr(dst, "\t.asciz ")
+				+ fputsbuflnesc(dst, piece->data, BYTEFMT_HEX | BYTEFMT_DQUOTED | BYTEFMT_ESC_DQUOTE);
+		case BRB_DP_I16:
+			return fprintf(dst, "\t.2byte %hu\n", (uint16_t)piece->content_u);
+		case BRB_DP_I32:
+			return fprintf(dst, "\t.4byte %u\n", (uint32_t)piece->content_u);
+		case BRB_DP_PTR:
+			return fprintf(dst, "\t.quad %lu\n", (uintptr_t)piece->content_u);
+		case BRB_DP_I64:
+			return fprintf(dst, "\t.8byte %llu\n", piece->content_u);
+		case BRB_DP_DBADDR:
+			return fputstr(dst, "\t.quad \"_")
+				+ fputstresc(dst, builder->module.seg_data.data[piece->content_u].name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
+				+ fputstr(dst, "\"\n");
+		case BRB_DP_ZERO:
+			return fprintf(dst, "\t.zero %llu\n", piece->content_u);
+		case BRB_DP_BUILTIN:
+			return fprintf(dst, "\t.quad %lu\n", BRB_builtinValues[piece->content_u]);
+		case BRB_DP_NONE:
+		case BRB_N_DP_TYPES:
+			assert(false, "unknown data piece type %u", piece->type);
 	}
 }
-#endif
+
+typedef enum {
+	LI_OFFSET,
+	LI_BASE,
+	LI_EXT,
+	LI_2REG
+} arm64_LiteralIntent;
+
+static char* compileIntLiteral_arm64(FILE* dst, int64_t value, uint8_t reg_id, arm64_LiteralIntent intent, long* acc_p)
+{
+	static int64_t min_bounds[] = {
+		[LI_OFFSET] = -256,
+		[LI_BASE] = -4096,
+		[LI_EXT] = -65536,
+		[LI_2REG] = 42 // arbitrary value to make the condition below always fail
+	};
+	static int64_t max_bounds[] = {
+		[LI_OFFSET] = 256,
+		[LI_BASE] = 4096,
+		[LI_EXT] = 65536,
+		[LI_2REG] = -42
+	};
+	static char retbuf[32];
+
+	if (inRange(value, min_bounds[intent], max_bounds[intent])) { // the condition is this one
+		snprintf(retbuf, sizeof(retbuf), "%lld", value);
+		return retbuf;
+	} else {
+		bool inverted;
+		if ((inverted = value < 0)) value = -value;
+		if (!(value >> 16)) {
+			*acc_p += fprintf(dst,
+				"\t%s x%hhu, %lld\n",
+				inverted ? "movn" : "mov", reg_id, value);
+		} else if (!(value >> 32)) {
+			*acc_p += fprintf(dst,
+				"\t%s x%hhu, %lld\n"
+				"\tmovk x%hhu, %llu, lsl 16\n",
+				inverted ? "movn" : "mov", reg_id, value & 0xFFFF,
+				reg_id, (inverted ? -value : value) >> 16);
+		} else if (!(value >> 48)) {
+			*acc_p += fprintf(dst,
+				"\t%s x%hhu, %lld\n"
+				"\tmovk x%hhu, %llu, lsl 16\n"
+				"\tmovk x%hhu, %llu, lsl 32\n",
+				inverted ? "movn" : "mov", reg_id, value & 0xFFFF,
+				reg_id, ((inverted ? -value : value) >> 16) & 0xFFFF,
+				reg_id, (inverted ? -value : value) >> 32);
+		} else *acc_p += fprintf(dst,
+			"\t%s x%hhd, %lld\n"
+			"\tmovk x%hhd, %llu, lsl 16\n"
+			"\tmovk x%hhd, %llu, lsl 32\n"
+			"\tmovk x%hhd, %llu, lsl 48\n",
+			inverted ? "movn" : "mov", reg_id, value & 0xFFFF,
+			reg_id, ((inverted ? -value : value) >> 16) & 0xFFFF,
+			reg_id, ((inverted ? -value : value) >> 32) & 0xFFFF,
+			reg_id, (inverted ? -value : value) >> 48);
+		return "x8";
+	}
+}
+
+static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, size_t vframe_offset, size_t vframe_offset_before, FILE* dst)
+{
+	long acc = 0;
+	BRB_Op* op = &builder->module.seg_exec.data[proc_id].body.data[op_id];
+	char* offset;
+	switch (op->type) {
+		case BRB_OP_NOP:
+			return fputstr(dst, "\tnop\n");
+		case BRB_OP_END:
+			return fputstr(dst, "\tmov x0, 0\n\tmov x16, 1\n\tsvc 0\n");
+		case BRB_OP_I8:
+			compileIntLiteral_arm64(dst, op->operand_s, 8, LI_2REG, &acc);
+			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+			return acc + fprintf(dst, "\tstrb w8, [sp, %s]\n", offset);
+		case BRB_OP_I16:
+			compileIntLiteral_arm64(dst, op->operand_s, 8, LI_2REG, &acc);
+			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+			return acc + fprintf(dst, "\tstrh w8, [sp, %s]\n", offset);
+		case BRB_OP_I32:
+			compileIntLiteral_arm64(dst, op->operand_s, 8, LI_2REG, &acc);
+			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+			return acc + fprintf(dst, "\tstr w8, [sp, %s]\n", offset);
+		case BRB_OP_BUILTIN:
+			op->operand_u = BRB_builtinValues[op->operand_u];
+		case BRB_OP_PTR:
+		case BRB_OP_I64:
+			compileIntLiteral_arm64(dst, op->operand_s, 8, LI_2REG, &acc);
+			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+			return acc + fprintf(dst, "\tstr x8, [sp, %s]\n", offset);
+		case BRB_OP_ADDR:
+			offset = compileIntLiteral_arm64(dst, vframe_offset + BRB_getStackItemRTOffset(builder, proc_id, op_id, op->operand_u), 8, LI_BASE, &acc);
+			acc += fprintf(dst, "\tadd x8, sp, %s\n", offset);
+			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+			return acc + fprintf(dst, "\tstr x8, [sp, %s]\n", offset);
+		case BRB_OP_DBADDR: // TODO: utilize arm64 `adr` instruction for data blocks that are put into the `text` segment
+			acc += fputstr(dst, "\tadrp x8, \"_")
+				+ fputstresc(dst, builder->module.seg_data.data[op->operand_u].name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
+				+ fputstr(dst, "\"@PAGE\n\tadd x8, x8, \"_")
+				+ fputstresc(dst, builder->module.seg_data.data[op->operand_u].name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
+				+ fputstr(dst, "\"@PAGEOFF\n");
+			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+			return acc + fprintf(dst, "\t str x8, [sp, %s]\n", offset);
+		case BRB_OP_LD: {
+			size_t load_size = BRB_getTypeRTSize(op->operand_type);
+			offset = compileIntLiteral_arm64(dst, vframe_offset + load_size - sizeof(void*), 9, LI_OFFSET, &acc);
+			acc += fprintf(dst, "\tldr x%c, [sp, %s]\n", load_size > 16 ? '1' : '8', offset);
+			switch (load_size) {
+				case 1:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldrb w10, [x8]\n\tstrb w10, [sp, %s]\n", offset);
+				case 2:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldrh w10, [x8]\n\tstrh w10, [sp, %s]\n", offset);
+				case 3:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst, "\tldrh w10, [x8], 2\n\tstrh w10, [sp, %s]\n", offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 2, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldrb w10, [x8]\n\tstrb w10, [sp, %s]\n", offset);
+				case 4:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldr w10, [x8]\n\tstr w10, [sp, %s]\n", offset);
+				case 5:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst, "\tldr w10, [x8], 4\n\tstr w10, [sp, %s]\n", offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 4, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldrb w10, [x8]\n\tstrb w10, [sp, %s]\n", offset);
+				case 6:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst, "\tldr w10, [x8], 4\n\tstr w10, [sp, %s]\n", offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 4, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldrh w10, [x8]\n\tstrh w10, [sp, %s]\n", offset);
+				case 7:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  w10, [x8], 4\n"
+						"\tstr  w10, [x9], 4\n"
+						"\tldrh w10, [x8], 2\n"
+						"\tstrh w10, [x9], 2\n"
+						"\tldrb w10, [x8]\n"
+						"\tstrb w10, [x9]\n",
+						offset);
+				case 8:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldr x10, [x8]\n\tstr x10, [sp, %s]\n", offset);
+				case 9:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst, "\tldr x10, [x8], 8\n\tstr x10, [sp, %s]\n", offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 8, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldrb w10, [x8]\n\tstrb w10, [sp, %s]\n", offset);
+				case 10:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst, "\tldr x10, [x8], 8\n\tstr x10, [sp, %s]\n", offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 8, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldrh w10, [x8]\n\tstrh w10, [sp, %s]\n", offset);
+				case 11:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  x10, [x8], 8\n"
+						"\tstr  x10, [x9], 8\n"
+						"\tldrh w10, [x8], 2\n"
+						"\tstrh w10, [x9], 2\n"
+						"\tldrb w10, [x8]\n"
+						"\tstrb w10, [x9]\n",
+						offset);
+				case 12:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst, "\tldr x10, [x8], 8\n\tstr x10, [sp, %s]\n", offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 8, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst, "\tldr w10, [x8]\n\tstr w10, [sp, %s]\n", offset);
+				case 13:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  x10, [x8], 8\n"
+						"\tstr  x10, [x9], 8\n"
+						"\tldr  w10, [x8], 4\n"
+						"\tstr  w10, [x9], 4\n"
+						"\tldrb w10, [x8]\n"
+						"\tstrb w10, [x9]\n",
+						offset);
+				case 14:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  x10, [x8], 8\n"
+						"\tstr  x10, [x9], 8\n"
+						"\tldr  w10, [x8], 4\n"
+						"\tstr  w10, [x9], 4\n"
+						"\tldrh w10, [x8]\n"
+						"\tstrh w10, [x9]\n",
+						offset);
+				case 15:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  x10, [x8], 8\n"
+						"\tstr  x10, [x9], 8\n"
+						"\tldr  w10, [x8], 4\n"
+						"\tstr  w10, [x9], 4\n"
+						"\tldrh w10, [x8], 2\n"
+						"\tstrh w10, [x9], 2\n"
+						"\tldrb w10, [x8]\n"
+						"\tstrb w10, [x9]\n",
+						offset);
+				case 16:
+					if (vframe_offset % 8 == 0 && vframe_offset <= 504)
+						return acc + fprintf(dst,
+							"\tldp x10, x11, [x8]\n"
+							"\tstp x10, x11, [sp, %zu]\n",
+							vframe_offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd x9, sp, %s\n"
+						"\tldp x10, x11, [x8]\n"
+						"\tstp x10, x11, [x9]\n",
+						offset);
+				default:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 1, LI_BASE, &acc);
+					compileIntLiteral_arm64(dst, load_size, 2, LI_2REG, &acc);
+					return acc + fprintf(dst,
+						"\tadd x0, sp, %s\n"
+						"\tcall _memmove\n",
+						offset);
+			}
+		}
+		case BRB_OP_STR: {
+			size_t store_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
+			offset = compileIntLiteral_arm64(dst, vframe_offset_before, 9, LI_OFFSET, &acc);
+			acc += fprintf(dst, "\tldr x%c, [sp, %s]\n", store_size > 16 ? '0' : '8', offset);
+			vframe_offset -= store_size;
+			switch (store_size) {
+				case 1:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldrb w10, [sp, %s]\n"
+						"\tstrb w10, [x8]\n",
+						offset);
+				case 2:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldrh w10, [sp, %s]\n"
+						"\tstrh w10, [x8]\n",
+						offset);
+				case 3:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst,
+						"\tldrh w10, [sp, %s]\n"
+						"\tstrh w10, [x8], 2\n",
+						offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 2, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldrb w10, [sp, %s]\n"
+						"\tstrb w10, [x8]\n",
+						offset);
+				case 4:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldr w10, [sp, %s]\n"
+						"\tstr w10, [x8]\n",
+						offset);
+				case 5:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst,
+						"\tldr w10, [sp, %s]\n"
+						"\tstr w10, [x8], 4\n",
+						offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 4, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldrb w10, [sp, %s]\n"
+						"\tstrb w10, [x8]\n",
+						offset);
+				case 6:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst,
+						"\tldr w10, [sp, %s]\n"
+						"\tstr w10, [x8], 4\n",
+						offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 4, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldrh w10, [sp, %s]\n"
+						"\tstrh w10, [x8]\n",
+						offset);
+				case 7:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  w10, [x9], 4\n"
+						"\tstr  w10, [x8], 4\n"
+						"\tldrh w10, [x9], 2\n"
+						"\tstrh w10, [x8], 2\n"
+						"\tldrb w10, [x9]\n"
+						"\tstrb w10, [x8]\n",
+						offset);
+				case 8:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldr x10, [sp, %s]\n"
+						"\tstr x10, [x8]\n",
+						offset);
+				case 9:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst,
+						"\tldr x10, [sp, %s]\n"
+						"\tstr x10, [x8], 8\n",
+						offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 8, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldrb w10, [sp, %s]\n"
+						"\tstrb w10, [x8]\n",
+						offset);
+				case 10:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst,
+						"\tldr x10, [sp, %s]\n"
+						"\tstr x10, [x8], 8\n",
+						offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 8, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldrh w10, [sp, %s]\n"
+						"\tstrh w10, [x8]\n",
+						offset);
+				case 11:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  x10, [x9], 8\n"
+						"\tstr  x10, [x8], 8\n"
+						"\tldrh w10, [x9], 2\n"
+						"\tstrh w10, [x8], 2\n"
+						"\tldrb w10, [x9]\n"
+						"\tstrb w10, [x8]\n",
+						offset);
+				case 12:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
+					acc += fprintf(dst,
+						"\tldr x10, [sp, %s]\n"
+						"\tstr x10, [x8], 8\n",
+						offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset + 8, 9, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tldr w10, [sp, %s]\n"
+						"\tstr w10, [x8]\n",
+						offset);
+				case 13:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  x10, [x9], 8\n"
+						"\tstr  x10, [x8], 8\n"
+						"\tldr  w10, [x9], 4\n"
+						"\tstr  w10, [x8], 4\n"
+						"\tldrb w10, [x9]\n"
+						"\tstrb w10, [x8]\n",
+						offset);
+				case 14:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  x10, [x9], 8\n"
+						"\tstr  x10, [x8], 8\n"
+						"\tldr  w10, [x9], 4\n"
+						"\tstr  w10, [x8], 4\n"
+						"\tldrh w10, [x9]\n"
+						"\tstrh w10, [x8]\n",
+						offset);
+				case 15:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd  x9,  sp,   %s\n"
+						"\tldr  x10, [x9], 8\n"
+						"\tstr  x10, [x8], 8\n"
+						"\tldr  w10, [x9], 4\n"
+						"\tstr  w10, [x8], 4\n"
+						"\tldrh w10, [x9], 2\n"
+						"\tstrh w10, [x8], 2\n"
+						"\tldrb w10, [x9]\n"
+						"\tstrb w10, [x8]\n",
+						offset);
+				case 16:
+					if (vframe_offset % 8 == 0 && vframe_offset <= 504)
+						return acc + fprintf(dst,
+							"\tldp x10, x11, [sp, %zu]\n"
+							"\tstp x10, x11, [x8]\n",
+							vframe_offset);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd x9, sp, %s\n"
+						"\tldp x10, x11, [x9]\n"
+						"\tstp x10, x11, [x8]\n",
+						offset);
+				default:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 1, LI_BASE, &acc);
+					compileIntLiteral_arm64(dst, store_size, 2, LI_2REG, &acc);
+					return acc + fprintf(dst,
+						"\tadd x1, sp, %s\n"
+						"\tbl _memmove\n",
+						offset);
+			}
+		}
+		case BRB_OP_SYS: {
+			offset = compileIntLiteral_arm64(dst, vframe_offset_before, 8, LI_BASE, &acc);
+			acc += fprintf(dst, "\tadd x8, sp, %s\n", offset);
+			for (uint8_t i = 0; i < BRB_syscallNArgs[op->operand_u]; ++i) {
+				acc += fprintf(dst, "\tldr x%hhu, [x8]%s\n", i, i < BRB_syscallNArgs[op->operand_u] - 1 ? ", 8" : "");
+			}
+			static sbuf sys_to_proc_name[] = {
+				[BRB_SYS_EXIT] = fromcstr("_exit"),
+				[BRB_SYS_WRITE] = fromcstr("_write"),
+				[BRB_SYS_READ] = fromcstr("_read")
+			};
+			acc += fprintf(dst, "\tbl %.*s\n", unpack(sys_to_proc_name[op->operand_u]));
+			if (op->operand_u != BRB_SYS_EXIT) {
+				offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+				acc += fprintf(dst, "\tstr x0, [sp, %s]\n", offset);
+			}
+			return acc;
+		}
+		case BRB_N_OPS:
+		default:
+			assert(false, "invalid operation type %u", op->type);
+	}
+}
+
+long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
+{
+	BRB_ModuleBuilder builder;
+	BRB_Error err = BRB_analyzeModule(module, &builder);
+	if (err.type) {
+		BRB_printErrorMsg(stderr, err, "error while analyzing module");
+		abort();
+	}
+	
+	long acc = 0;
+	bool in_text_seg = true;
+	arrayForeach (BRB_DataBlock, block, module->seg_data) {
+		if (isForBSSSegment(block)) {
+			in_text_seg = false;
+			acc += fputstr(dst, ".bss\n");
+		} else if (isForDataSegment(block)) {
+			in_text_seg = false;
+			acc += fputstr(dst, ".data\n");
+		} else {
+			in_text_seg = true;
+			acc += fputstr(dst, ".text\n");
+		}
+		acc += fputstr(dst, "\"_")
+			+ fputstresc(dst, block->name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
+			+ fputstr(dst, "\":\n");
+		for (uint32_t i = 0; i < block->pieces.length; ++i) {
+			acc += compileDataPiece_darwin_arm64(&builder, block - module->seg_data.data, i, dst);
+		}
+	}
+
+	acc += fputstr(dst, in_text_seg ? ".align 4\n" : ".text\n");
+	arrayForeach (BRB_Proc, proc, module->seg_exec) {
+// making the label global if the proc is the entry point
+		const bool is_entry = module->exec_entry_point == (uintptr_t)(proc - module->seg_exec.data);
+		if (is_entry)
+			acc += fputstr(dst, ".global \"_")
+				+ fputstresc(dst, proc->name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
+				+ fputstr(dst, "\"\n");
+// generating the label
+		acc += fputstr(dst, "\"_")
+			+ fputstresc(dst, proc->name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
+			+ fputstr(dst, "\":\n");
+		if (is_entry)
+			acc += fprintf(dst, "\tmov x28, x1\n\tmov x27, x0\n");
+// pre-computing the stack frame size after each operation in the procedure
+		size_t sizes[proc->body.length + 1],
+			max_size = 0;
+		sizes[0] = BRB_getStackRTSize(&builder, proc - module->seg_exec.data, UINT32_MAX);
+		for (uint32_t i = 1; i <= proc->body.length; ++i) {
+			sizes[i] = BRB_getStackRTSize(&builder, proc - module->seg_exec.data, i - 1) - sizes[0];
+			if (sizes[i] > max_size) max_size = sizes[i];
+		}
+		max_size = alignby(max_size, ARM64_STACK_ALIGNMENT);
+		sizes[0] = 0;
+		
+		acc += fprintf(dst, "\tsub sp, sp, %zu\n", max_size);
+		for (uint32_t i = 0; i < proc->body.length; ++i) {
+			acc += compileOp_darwin_arm64(&builder, proc - module->seg_exec.data, i, max_size - sizes[i + 1], max_size - sizes[i], dst);
+		}
+		acc += fputstr(dst, is_entry
+			? "\tmov x0, 0\n"
+			  "\tbl _exit\n"
+			: "\tret\n");
+	}
+
+	return acc;
+}

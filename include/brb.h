@@ -390,7 +390,9 @@ extern const sbuf BRB_typeNames[];
 #define BRB_VOID_TYPE   ((BRB_Type){.kind = BRB_TYPE_VOID             })
 
 typedef struct {
-	BRB_TypeKind kind;
+	BRB_TypeKind kind:8;
+	bool is_any;
+	bool is_any_int;
 	uint32_t n_items;
 } BRB_Type;
 static_assert(sizeof(BRB_Type) <= sizeof(uint64_t), "just for compactness");
@@ -529,6 +531,8 @@ typedef enum {
 	BRB_ERR_PROTOTYPE_MISMATCH,
 	BRB_ERR_SYSCALL_NAME_EXPECTED,
 	BRB_ERR_INVALID_ARRAY_SIZE_SPEC,
+	BRB_ERR_TYPE_MISMATCH,
+	BRB_ERR_DEL_ARGS,
 	BRB_N_ERROR_TYPES
 } BRB_ErrorType;
 
@@ -545,6 +549,11 @@ typedef struct {
 			uint32_t expected_stack_length;
 			uint32_t actual_stack_length;
 		};
+		struct {
+			BRB_Type expected_type;
+			BRB_Type actual_type;
+			uint32_t arg_id;
+		};
 		uint64_t operand;
 	};
 } BRB_Error;
@@ -554,6 +563,7 @@ struct BRB_stacknode_t {
 	BRB_StackNode prev;
 	const char* name;
 	BRB_Type type;
+	uint8_t flags;
 };
 declArray(BRB_StackNode);
 declArray(BRB_StackNodeArray);
@@ -605,8 +615,9 @@ fieldArray BRB_getNameFields(BRB_Module* module);
 FILE*      BRB_findModule(const char* module_name, const char* search_paths[]);
 
 BRB_Error  BRB_initModuleBuilder(BRB_ModuleBuilder* builder);
+BRB_Error  BRB_analyzeModule(const BRB_Module* module, BRB_ModuleBuilder* dst);
 BRB_Error  BRB_extractModule(BRB_ModuleBuilder builder, BRB_Module* dst);
-BRB_Error BRB_setEntryPoint(BRB_ModuleBuilder* builder, size_t proc_id);
+BRB_Error  BRB_setEntryPoint(BRB_ModuleBuilder* builder, size_t proc_id);
 
 BRB_Error  BRB_preallocExecSegment(BRB_ModuleBuilder* builder, uint32_t n_procs_hint);
 BRB_Error  BRB_addProc(BRB_ModuleBuilder* builder, uint32_t* proc_id_p, const char* name, size_t n_args, BRB_Type* args, BRB_Type ret_type, uint32_t n_ops_hint);
@@ -620,8 +631,10 @@ size_t     BRB_getDataBlockIdByName(BRB_Module* module, const char* name); // re
 
 BRB_Error  BRB_labelStackItem(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id, const char* name);
 bool       BRB_getStackItemType(BRB_ModuleBuilder* builder, BRB_Type* dst, uint32_t proc_id, uint32_t op_id, uint32_t item_id);
-size_t     BRB_getStackItemRTOffset(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
+size_t     BRB_getStackItemRTOffset(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, size_t item_id); // if `item_id` is not SIZE_MAX, returns SIZE_MAX on error
+size_t     BRB_getStackRTSize(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id);
 size_t     BRB_getStackItemRTSize(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
+ssize_t    BRB_getStackRTSizeDiff(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id);
 size_t     BRB_getStackItemIdByName(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, const char* name); // returns SIZE_MAX on error
 size_t     BRB_getTypeRTSize(BRB_Type type);
 
@@ -639,6 +652,10 @@ void       BRB_execModule(BRB_ExecEnv* env, char* args[], const volatile bool* i
 BRB_Error  BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* dst);
 
 // implemented in `src/brb_dis.c`
+long       BRB_printType(BRB_Type type, FILE* dst);
 long       BRB_disassembleModule(const BRB_Module* module, FILE* dst);
+
+// implemented in `src/brb_compile.c`
+long       BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst);
 
 #endif // _BRB_

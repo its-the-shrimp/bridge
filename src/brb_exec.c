@@ -109,7 +109,7 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 				op->operand_u = BRB_getTypeRTSize(op->operand_type) - sizeof(void*);
 				break;
 			case BRB_OP_STR:
-				op->operand_u = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, op->operand_u);
+				op->operand_u = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
 				break;
 			case BRB_OP_BUILTIN:
 				op->operand_u = BRB_builtinValues[op->operand_u];

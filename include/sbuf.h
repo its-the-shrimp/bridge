@@ -48,8 +48,8 @@ const sbuf TEMPVAR=(obj);for(char* name=TEMPVAR.data;(sbuf_size_t)(name-TEMPVAR.
 #define BYTEFMT_HEX         0x2
 #define BYTEFMT_HEX_LITERAL 0x4
 #define BYTEFMT_RAW         0x8
-//                          0x10
-//                          0x20
+#define BYTEFMT_DQUOTED     0x10
+#define BYTEFMT_QUOTED      0x20
 #define BYTEFMT_ESC_DQUOTE  0x40
 #define BYTEFMT_ESC_QUOTE   0x80
 
@@ -132,7 +132,7 @@ char fputcesc(FILE* fd, unsigned char obj, unsigned char format);
 #define putcharesc(obj, format) fputcesc(stdout, obj, format)
 
 sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format);
-#define fputsbuflnesc(fd, obj, format) (fputsbufesc(fd, obj, format) + (fputc("\n", fd) != EOF))
+#define fputsbuflnesc(fd, obj, format) (fputsbufesc(fd, obj, format) + (fputc('\n', fd) != EOF))
 #define fputsbuf(fd, obj) fputsbufesc(fd, obj, BYTEFMT_RAW)
 #define fputsbufln(fd, obj) (fputsbuf(fd, obj) + (fputc('\n', fd) != EOF))
 #define putsbufesc(obj, format) fputsbufesc(stdout, obj, format)
@@ -681,13 +681,20 @@ char fputcesc(FILE* fd, unsigned char obj, unsigned char format)
 }
 
 // performs the `fputcesc` function on all the characters in the sized string `obj`.
+// supported formatting flags:
+//	BYTEFMT_QUOTED - print the string with single quotes around it
+//	BYTEFMT_DQUOTED - print the string with double quotes around it
 sbuf_size_t fputsbufesc(FILE* fd, sbuf obj, unsigned char format)
 {
-	if (format & BYTEFMT_RAW) return fwrite(obj.data, 1, obj.length, fd);
 	register sbuf_size_t n = 0;
+	if (format & BYTEFMT_QUOTED) n += fputc('\'', fd) != EOF;
+	if (format & BYTEFMT_DQUOTED) n += fputc('"', fd) != EOF;
+	if (format & BYTEFMT_RAW) return fwrite(obj.data, 1, obj.length, fd);
 	sbufForeachChar (iter, obj) {
 		n += fputcesc(fd, *iter, format);
 	}
+	if (format & BYTEFMT_QUOTED) n += fputc('\'', fd) != EOF;
+	if (format & BYTEFMT_DQUOTED) n += fputc('"', fd) != EOF;
 	return n;
 }
 

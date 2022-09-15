@@ -2,7 +2,7 @@
 #include <brb.h>
 defArray(BRB_Type);
 
-static long printType(BRB_Type type, FILE* dst)
+long BRB_printType(BRB_Type type, FILE* dst)
 {
 	return fputsbuf(dst, BRB_typeNames[type.kind])
 		+ (type.n_items > 1
@@ -20,12 +20,12 @@ static long printDataBlockDecl(BRB_DataBlock block, FILE* dst)
 
 static long printProcDecl(BRB_Proc proc, FILE* dst)
 {
-	long acc = printType(proc.ret_type, dst)
+	long acc = BRB_printType(proc.ret_type, dst)
 		+ fputstr(dst, " \"")
 		+ fputstresc(dst, proc.name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
 		+ fputstr(dst, "\"(");
 	arrayForeach (BRB_Type, arg, proc.args) {
-		acc += printType(*arg, dst)
+		acc += BRB_printType(*arg, dst)
 			+ (arg != arrayhead(proc.args)
 				? fputstr(dst, ", ")
 				: 0);
@@ -52,7 +52,7 @@ static long printDataPiece(BRB_DataPiece piece, const BRB_Module* module, FILE* 
 				+ fputstr(dst, "\"\n");
 		case BRB_DP_ZERO:
 			return fprintf(dst, "\t%.*s ", unpack(BRB_dataPieceNames[piece.type]))
-				+ printType(piece.content_type, dst)
+				+ BRB_printType(piece.content_type, dst)
 				+ fputstr(dst, "\n");
 		case BRB_DP_BUILTIN:
 			return fprintf(dst, "\t%.*s %.*s", unpack(BRB_dataPieceNames[piece.type]), unpack(BRB_builtinNames[piece.content_u]));
@@ -71,7 +71,7 @@ static long printOp(BRB_Op op, const BRB_Module* module, FILE* dst)
 			return fprintf(dst, "\t%.*s %llu\n", unpack(BRB_opNames[op.type]), op.operand_u);
 		case BRB_OPF_OPERAND_TYPE:
 			return fprintf(dst, "\t%.*s ", unpack(BRB_opNames[op.type]))
-				+ printType(op.operand_type, dst)
+				+ BRB_printType(op.operand_type, dst)
 				+ fputstr(dst, "\n");
 		case BRB_OPF_OPERAND_DB_NAME:
 			return fprintf(dst, "\t%.*s \"", unpack(BRB_opNames[op.type]))
@@ -126,4 +126,3 @@ long BRB_disassembleModule(const BRB_Module* module, FILE* dst)
 	}
 	return acc;
 }
-
