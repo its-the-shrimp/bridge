@@ -7,6 +7,7 @@
 #include <datasets.h>
 #include <errno.h>
 #include <sys/cdefs.h>
+#include <external/arena.h>
 
 typedef enum {
 	TOKEN_NONE,
@@ -113,6 +114,7 @@ struct BRP {
 	BRP_TokenArray pending;
 	BRP_MacroArray macros;
 	BRP_TokenLocArray conditional_blocks;
+	Arena arena;
 };
 #define BRP_KEYWORD(spec) fromcstr(spec)
 #define BRP_SYMBOL(spec) fromcstr(spec)
@@ -191,7 +193,7 @@ bool BRP_setKeywords(BRP* const obj, sbuf* const kws)
 {
 	long n_kws = 1;
 	for (sbuf* kw = kws; kw->data; ++kw) ++n_kws;
-	obj->keywords = memcpy(malloc(n_kws * sizeof(sbuf)), kws, n_kws * sizeof(sbuf));
+	obj->keywords = memcpy(arena_alloc(&obj->arena, n_kws * sizeof(sbuf)), kws, n_kws * sizeof(sbuf));
 	return obj->keywords != NULL;
 }
 
@@ -205,8 +207,8 @@ bool BRP_setSymbols(BRP* obj, sbuf symbols[])
 		if (BRP_isSymbolSpecHidden(*symbol)) n_hidden_symbols++;
 	}
 // copying the symbols array
-	obj->symbols = malloc((n_symbols + 2) * sizeof(sbuf));
-	obj->hidden_symbols = malloc(n_hidden_symbols * sizeof(sbuf));
+	obj->symbols = arena_alloc(&obj->arena, (n_symbols + 2) * sizeof(sbuf));
+	obj->hidden_symbols = arena_alloc(&obj->arena, n_hidden_symbols * sizeof(sbuf));
 	if (!obj->symbols || !obj->hidden_symbols) return false;
 
 	n_hidden_symbols = 0;
@@ -285,7 +287,7 @@ bool BRP_appendInput(BRP *obj, BRP_InputCtx* const input, FILE* input_fd, BRP_To
 		return false;
 	}
 
-	BRP_InputCtx* prev_ctx = malloc(sizeof(BRP_InputCtx));
+	BRP_InputCtx* prev_ctx = arena_alloc(&obj->arena, sizeof(BRP_InputCtx));
 	*prev_ctx = *input;
 	input->cur_loc = initial_loc;
 	input->buffer = removeComments(filecontent(input_fd));
@@ -302,7 +304,7 @@ bool BRP_appendInput(BRP *obj, BRP_InputCtx* const input, FILE* input_fd, BRP_To
 
 	input->orig_data = input->buffer.data;
 	if (include_loc.src_name) {
-		input->cur_loc.included_from = malloc(sizeof(BRP_TokenLoc));
+		input->cur_loc.included_from = arena_alloc(&obj->arena, sizeof(BRP_TokenLoc));
 		*input->cur_loc.included_from = include_loc;
 	}
 
@@ -313,12 +315,10 @@ bool BRP_appendInput(BRP *obj, BRP_InputCtx* const input, FILE* input_fd, BRP_To
 
 static void delInput(BRP* obj, BRP_InputCtx* const input)
 {
-	free(input->orig_data);
 	BRP_InputCtx* to_free = input->prev;
 	if (to_free) {
 		*input = *input->prev;
 	} else *input = (BRP_InputCtx){0};
-	free(to_free);
 
 	if (!input && obj->conditional_blocks.length) {
 		obj->error_code = BRP_ERR_UNCLOSED_CONDITION;
@@ -422,7 +422,7 @@ static void preprocessInput(BRP* obj, BRP_InputCtx* const input);
 
 static inline BRP_InputCtx* expandMacro(BRP* const obj, BRP_InputCtx* const input, const BRP_Macro macro)
 {
-	BRP_InputCtx* prev_ctx = malloc(sizeof(BRP_InputCtx));
+	BRP_InputCtx* prev_ctx = arena_alloc(&obj->arena, sizeof(BRP_InputCtx));
 	*prev_ctx = *input;
 	input->buffer = macro.def;
 	input->orig_data = NULL;
@@ -430,7 +430,7 @@ static inline BRP_InputCtx* expandMacro(BRP* const obj, BRP_InputCtx* const inpu
 	input->prev = prev_ctx;
 	input->locals = BRP_MacroArray_new(-macro.args.length);
 	input->locals.length = macro.args.length;
-	input->cur_loc.included_from = malloc(sizeof(BRP_TokenLoc));
+	input->cur_loc.included_from = arena_alloc(&obj->arena, sizeof(BRP_TokenLoc));
 	*input->cur_loc.included_from = prev_ctx->cur_loc;
 	int name_length = strlen(macro.name);
 	sbufshift(prev_ctx->buffer, name_length);
@@ -505,6 +505,7 @@ static void preprocessInput(BRP* obj, BRP_InputCtx* const input)
 			}
 			case BRP_INCLUDE: {
 				input->cur_loc.colno += brp_directives[BRP_INCLUDE].length + sbufstripl(&input->buffer, SPACE, TAB).length;
+// TODO: make BRP distinguish between `#include "..."` and `#include <...>`
 				char path_start = sbufcutc(&input->buffer, fromcstr("<\""));
 				if (!path_start) {
 					obj->error_code = BRP_ERR_INVALID_CMD_SYNTAX;
@@ -1120,13 +1121,10 @@ BRP* BRP_initBRP(BRP* obj, BRP_ErrorHandler handler, char flags)
 
 void BRP_delBRP(BRP* obj)
 {
-	free(obj->keywords);
-	free(obj->symbols);
-	free(obj->hidden_symbols);
 	BRP_TokenArray_clear(&obj->pending);
 	BRP_MacroArray_clear(&obj->macros);
 	BRP_TokenLocArray_clear(&obj->conditional_blocks);
-
+	arena_free(&obj->arena);
 	while (obj->cur_input.prev) delInput(obj, &obj->cur_input);
 }
 

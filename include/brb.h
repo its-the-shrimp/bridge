@@ -2,6 +2,8 @@
 #define _BRB_
 
 #include <br.h>
+#define ARENA_ASSERT(expr) assert(expr, #expr)
+#include <external/arena.h>
 #include <brp.h>
 
 typedef enum {
@@ -19,7 +21,7 @@ Notes:
 	BRB_OP_NOP,      // [] -> nop -> []
 	// does nothing
 	BRB_OP_END,      // [] -> end -> []
-	// if inside a control flow block, closes the block; in other cases, stops execution of the program
+	// stops execution of the program
 	BRB_OP_I8,       // [] -> i8 <x> -> [i8]
 	// pushes 1 byte-sized integer literal <x> onto the stack
 	BRB_OP_I16,      // [] -> i16 <x> -> [i16]
@@ -388,7 +390,6 @@ extern const sbuf BRB_typeNames[];
 #define BRB_PTR_TYPE(n) ((BRB_Type){.kind = BRB_TYPE_PTR, .n_items = n})
 #define BRB_I64_TYPE(n) ((BRB_Type){.kind = BRB_TYPE_I64, .n_items = n})
 #define BRB_VOID_TYPE   ((BRB_Type){.kind = BRB_TYPE_VOID             })
-
 typedef struct {
 	BRB_TypeKind kind:8;
 	bool is_any;
@@ -572,6 +573,7 @@ typedef struct {
 	BRB_Module module;
 	BRB_StackNodeArrayArray procs;
 	BRB_Error error;
+	Arena arena;
 } BRB_ModuleBuilder;
 
 typedef enum {
@@ -647,6 +649,7 @@ BRB_Error  BRB_loadModule(FILE* src, BRB_Module* dst);
 // implemented in `src/brb_exec.c`
 BRB_Error  BRB_initExecEnv(BRB_ExecEnv* env, BRB_Module module, size_t stack_size);
 void       BRB_execModule(BRB_ExecEnv* env, char* args[], const volatile bool* interruptor);
+void       BRB_delExecEnv(BRB_ExecEnv* env);
 
 // implemented in `src/brb_asm.c`
 BRB_Error  BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* dst);

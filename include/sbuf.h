@@ -651,7 +651,7 @@ sbuf_size_t sbufstripva(sbuf* src, sbuf* ldst, sbuf* rdst, va_list args)
 char fputcesc(FILE* fd, unsigned char obj, unsigned char format)
 {
 	if (format == BYTEFMT_HEX_LITERAL)
-		return fprintf(fd, "\\x%hhX", obj);
+		return fprintf(fd, "\\x%02hhX", obj);
 	switch (obj) {
 		case '\0':
 			return fwrite("\\0", 1, 2, fd);
@@ -675,7 +675,7 @@ char fputcesc(FILE* fd, unsigned char obj, unsigned char format)
 					+ (fputc( obj & 7  /*0b00000111*/ + '0', fd) != EOF)
 					+ (fputc((obj & 56 /*0b00111000*/ >> 3) + '0', fd) != EOF)
 					+ (fputc((obj & 192/*0b11000000*/ >> 6) + '0', fd) != EOF);
-			} else if (format & BYTEFMT_HEX) return fprintf(fd, "\\x%hhX", obj);
+			} else if (format & BYTEFMT_HEX) return fprintf(fd, "\\x%02hhX", obj);
 			assert(false, "invalid escape format specified");
 	}
 }

@@ -9,6 +9,8 @@
 #include <spawn.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#define ARENA_IMPLEMENTATION
+#include <external/arena.h>
 extern char** environ;
 
 defArray(BRB_Proc);
@@ -431,10 +433,10 @@ BRB_Error BRB_analyzeModule(const BRB_Module* module, BRB_ModuleBuilder* dst)
 BRB_Error BRB_extractModule(BRB_ModuleBuilder builder, BRB_Module* dst)
 {
 	if (builder.error.type) return builder.error;
-	// TODO: improve memory reusability by adding arena allocators in various places
 	arrayForeach (BRB_StackNodeArray, proc_info, builder.procs) {
 		BRB_StackNodeArray_clear(proc_info);
 	}
+	arena_free(&builder.arena);
 	BRB_StackNodeArrayArray_clear(&builder.procs);
 	*dst = builder.module;
 	return (BRB_Error){0};
@@ -497,7 +499,7 @@ static bool compareTypes(BRB_Type field, BRB_Type entry)
 
 #define BRB_ANY_TYPE ((BRB_Type){.is_any = true})
 #define BRB_INT_TYPE ((BRB_Type){.is_any_int = true})
-static BRB_Error changeStack(BRB_StackNodeArray* stack, BRB_OpType op_type, size_t n_in, BRB_Type* in_types, size_t n_out, BRB_Type* out_types)
+static BRB_Error changeStack(BRB_StackNodeArray* stack, BRB_OpType op_type, size_t n_in, BRB_Type* in_types, size_t n_out, BRB_Type* out_types, Arena* allocator)
 {
 	BRB_StackNode iter = *arrayhead(*stack);
 	if (getStackLength(iter) < n_in)
@@ -524,27 +526,28 @@ static BRB_Error changeStack(BRB_StackNodeArray* stack, BRB_OpType op_type, size
 	BRB_StackNode new = getNthStackNode(*arrayhead(*stack), n_in), prev;
 	arrayRevForeach (BRB_Type, type, ((BRB_TypeArray){.data = out_types, .length = n_out})) {
 		prev = new;
-		if (!(new = calloc(1, sizeof(struct BRB_stacknode_t)))) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
+		if (!(new = arena_alloc(allocator, sizeof(struct BRB_stacknode_t)))) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
+		*new = (struct BRB_stacknode_t){0};
 		new->prev = prev;
 		new->type = *type;
 	}
 	return (BRB_Error){.type = BRB_StackNodeArray_append(stack, new) ? 0 : BRB_ERR_NO_MEMORY};
 }
 
-static inline BRB_Error addStackItem(BRB_StackNodeArray* stack, BRB_OpType op_type, BRB_Type item_type)
+static inline BRB_Error addStackItem(BRB_StackNodeArray* stack, BRB_OpType op_type, BRB_Type item_type, Arena* allocator)
 {
-	return changeStack(stack, op_type, 0, NULL, 1, &item_type);
+	return changeStack(stack, op_type, 0, NULL, 1, &item_type, allocator);
 }
 
-static inline BRB_Error preserveStack(BRB_StackNodeArray* stack, BRB_OpType op_type)
+static inline BRB_Error preserveStack(BRB_StackNodeArray* stack, BRB_OpType op_type, Arena* allocator)
 {
-	return changeStack(stack, op_type, 0, NULL, 0, NULL);
+	return changeStack(stack, op_type, 0, NULL, 0, NULL, allocator);
 }
 
-static inline BRB_Error replaceStackHead(BRB_StackNodeArray* stack, BRB_OpType op_type, BRB_Type new_head_type)
+static inline BRB_Error replaceStackHead(BRB_StackNodeArray* stack, BRB_OpType op_type, BRB_Type new_head_type, Arena* allocator)
 {
 	static BRB_Type arg = BRB_ANY_TYPE;
-	return changeStack(stack, op_type, 1, &arg, 1, &new_head_type);
+	return changeStack(stack, op_type, 1, &arg, 1, &new_head_type, allocator);
 }
 
 static BRB_Error clearStack(BRB_StackNodeArray* stack, BRB_OpType op_type)
@@ -586,7 +589,7 @@ BRB_Error BRB_addProc(BRB_ModuleBuilder* builder, uint32_t* proc_id_p, const cha
 	BRB_StackNode input = NULL, prev;
  	while (n_args--) {
 		prev = input;
-		if (!(input = malloc(sizeof(struct BRB_stacknode_t)))) return (builder->error = (BRB_Error){.type = BRB_ERR_NO_MEMORY});
+		if (!(input = arena_alloc(&builder->arena, sizeof(struct BRB_stacknode_t)))) return (builder->error = (BRB_Error){.type = BRB_ERR_NO_MEMORY});
 		input->prev = prev;
 		input->type = args[n_args];
 		input->name = NULL;
@@ -594,7 +597,7 @@ BRB_Error BRB_addProc(BRB_ModuleBuilder* builder, uint32_t* proc_id_p, const cha
 	}
 
 	prev = input;
-	if (!(input = malloc(sizeof(struct BRB_stacknode_t)))) return (builder->error = (BRB_Error){.type = BRB_ERR_NO_MEMORY});
+	if (!(input = arena_alloc(&builder->arena, sizeof(struct BRB_stacknode_t)))) return (builder->error = (BRB_Error){.type = BRB_ERR_NO_MEMORY});
 	input->prev = prev;
 	input->type = BRB_PTR_TYPE(2);
 	input->name = NULL;
@@ -611,7 +614,7 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 		return (builder->error = (BRB_Error){.type = BRB_ERR_NO_MEMORY});
 	switch (op.type) {
 		case BRB_OP_NOP:
-			if ((builder->error = preserveStack(&builder->procs.data[proc_id], BRB_OP_NOP)).type) {
+			if ((builder->error = preserveStack(&builder->procs.data[proc_id], BRB_OP_NOP, &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
@@ -622,31 +625,31 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 			}
 			break;
 		case BRB_OP_I8:
-			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_I8, BRB_I8_TYPE(1))).type) {
+			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_I8, BRB_I8_TYPE(1), &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
 			break;
 		case BRB_OP_I16:
-			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_I16, BRB_I16_TYPE(1))).type) {
+			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_I16, BRB_I16_TYPE(1), &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
 			break;
 		case BRB_OP_I32:
-			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_I32, BRB_I32_TYPE(1))).type) {
+			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_I32, BRB_I32_TYPE(1), &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
 			break;
 		case BRB_OP_PTR:
-			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_PTR, BRB_PTR_TYPE(1))).type) {
+			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_PTR, BRB_PTR_TYPE(1), &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
 			break;
 		case BRB_OP_I64:
-			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_I64, BRB_I64_TYPE(1))).type) {
+			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_I64, BRB_I64_TYPE(1), &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
@@ -660,7 +663,7 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = BRB_OP_ADDR, .operand = op.operand_u});
 			}
-			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_ADDR, BRB_PTR_TYPE(1))).type) {
+			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_ADDR, BRB_PTR_TYPE(1), &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
@@ -674,20 +677,20 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = BRB_OP_DBADDR, .operand = op.operand_u});
 			}
-			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_DBADDR, BRB_PTR_TYPE(1))).type) {
+			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_DBADDR, BRB_PTR_TYPE(1), &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
 			break;
 		case BRB_OP_LD:
-			if ((builder->error = replaceStackHead(&builder->procs.data[proc_id], BRB_OP_LD, op.operand_type)).type) {
+			if ((builder->error = replaceStackHead(&builder->procs.data[proc_id], BRB_OP_LD, op.operand_type, &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
 			break;
 		case BRB_OP_STR: {
 			static BRB_Type op_args[2] = { BRB_PTR_TYPE(1), BRB_ANY_TYPE };
-			if ((builder->error = changeStack(&builder->procs.data[proc_id], BRB_OP_STR, 2, op_args, 0, NULL)).type) {
+			if ((builder->error = changeStack(&builder->procs.data[proc_id], BRB_OP_STR, 2, op_args, 0, NULL, &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}
@@ -705,7 +708,7 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 			static BRB_Type op_retval = BRB_PTR_TYPE(1);
 			if ((builder->error = (op.operand_u == BRB_SYS_EXIT
 				? clearStack(&builder->procs.data[proc_id], BRB_OP_SYS)
-				: changeStack(&builder->procs.data[proc_id], BRB_OP_SYS, BRB_syscallNArgs[op.operand_u], op_args, 1, &op_retval))
+				: changeStack(&builder->procs.data[proc_id], BRB_OP_SYS, BRB_syscallNArgs[op.operand_u], op_args, 1, &op_retval, &builder->arena))
 			).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
@@ -716,7 +719,7 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return (builder->error = (BRB_Error){ .type = BRB_ERR_INVALID_BUILTIN, .builtin_id = op.operand_u });
 			}
-			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_BUILTIN, BRB_PTR_TYPE(1))).type) {
+			if ((builder->error = addStackItem(&builder->procs.data[proc_id], BRB_OP_BUILTIN, BRB_PTR_TYPE(1), &builder->arena)).type) {
 				--builder->module.seg_exec.data[proc_id].body.length;
 				return builder->error;
 			}

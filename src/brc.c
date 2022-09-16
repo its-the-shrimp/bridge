@@ -3501,10 +3501,10 @@ typedef void (*ExprCompiler) (CodegenCtx*, Expr, BRB_DataBlock*);
 ExprCompiler expr_compilers[N_EXPR_TYPES];
 
 #define ASSERT_NO_BRB_ERR(err) { \
-	BRB_LoadStatus _brb_temp_err = err; \
-	if (_brb_temp_err.type != BRB_LS_OK) { \
+	BRB_Error _brb_temp_err = err; \
+	if (_brb_temp_err.type != BRB_ERR_OK) { \
 		eprintf("unexpected codegen failure:\n"); \
-		BRB_printLoadStatus(stderr, _brb_temp_err); \
+		BRB_printErrorMsg(stderr, _brb_temp_err, "codegen error"); \
 		abort(); \
 	} \
 }

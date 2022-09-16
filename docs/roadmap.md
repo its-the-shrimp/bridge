@@ -22,24 +22,25 @@
 - ~Bytecode optimization: level 1 (failed)~
 - ~`static` variables~
 - Rewrite Bridge Virtual Machine from a register-based to a stack-based one
-- Change built-in types' syntax
-	From:
-		int32* x;
-	To:
-		i32& x;
-	Also add pointer-sized integer, `iptr`, just like C's `intptr_t`
-
-- Tuples instead of arrays
+- Rename standard integer types:
+	int8 -> s8
+	int16 -> s16
+	int32 -> s32
+	int64 -> s64
+	also add pointer-sized integer, `sptr`, just like C's `intptr_t`
+- Unsigned integer types: u8, u16, u32, uptr, u64
+- Floating-point numbers: f32, f64, fptr
+- Exceptions
 	Example:
-		int32*3 arr;
-	Equivalent in C/C++:
-		int arr[3];
+		str src;
+		s64 res;
+		try return x -> s64; catch (IntParsingError err) res = 0;
 
 - Classes
 	Example:
 		type Bytes {
-			i8& data;
-			iptr length;
+			s8& data;
+			sptr length;
 			public i64 size() -> this.length;
 			public:
 				Bytes concat(Bytes other): ...
@@ -48,9 +49,6 @@
 - Operator overloads
 	Example:
 		str Bytes.builtin <<.(RStream& dst): ...
-
-- Floating-point numbers
-	`f32` for a 32-bit float, f64 for a 64-bit float, `fptr` for a pointer-sized float (maybe even `f128` ???)
 
 - BRP: enhanced integer literals:
 	Specifying number of kilobytes:
@@ -63,7 +61,7 @@
 - Callable types
 	In custom types, it can be added as an operator `()` overload
 	Syntax for function types is the following:
-		String <- (i64&) f; // defines `f` as a reference to a function that accepts a reference to a 64-bit integer and returns a `String` object
+		String <- (s64&) f; // defines `f` as a reference to a function that accepts a reference to a 64-bit integer and returns a `String` object
 
 - Interfaces
 	Example:

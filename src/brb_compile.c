@@ -154,7 +154,7 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				+ fputstresc(dst, builder->module.seg_data.data[op->operand_u].name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
 				+ fputstr(dst, "\"@PAGEOFF\n");
 			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
-			return acc + fprintf(dst, "\t str x8, [sp, %s]\n", offset);
+			return acc + fprintf(dst, "\tstr x8, [sp, %s]\n", offset);
 		case BRB_OP_LD: {
 			size_t load_size = BRB_getTypeRTSize(op->operand_type);
 			offset = compileIntLiteral_arm64(dst, vframe_offset + load_size - sizeof(void*), 9, LI_OFFSET, &acc);
