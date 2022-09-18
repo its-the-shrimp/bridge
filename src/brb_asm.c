@@ -28,6 +28,13 @@ typedef enum {
 	BRB_KW_ADDIAT32,
 	BRB_KW_ADDIATP,
 	BRB_KW_ADDIAT64,
+	BRB_KW_SUB,
+	BRB_KW_SUBI,
+	BRB_KW_SUBIAT8,
+	BRB_KW_SUBIAT16,
+	BRB_KW_SUBIAT32,
+	BRB_KW_SUBIATP,
+	BRB_KW_SUBIAT64,
 	BRB_KW_DROP,
 	BRB_KW_DATA,
 	BRB_KW_BYTES,
@@ -57,6 +64,13 @@ static sbuf asm_kws[] = {
 	[BRB_KW_ADDIAT32] = fromcstr("add-i@32"),
 	[BRB_KW_ADDIATP]  = fromcstr("add-i@p"),
 	[BRB_KW_ADDIAT64] = fromcstr("add-i@64"),
+	[BRB_KW_SUB]      = fromcstr("sub"),
+	[BRB_KW_SUBI]     = fromcstr("sub-i"),
+	[BRB_KW_SUBIAT8]  = fromcstr("sub-i@8"),
+	[BRB_KW_SUBIAT16] = fromcstr("sub-i@16"),
+	[BRB_KW_SUBIAT32] = fromcstr("sub-i@32"),
+	[BRB_KW_SUBIATP]  = fromcstr("sub-i@p"),
+	[BRB_KW_SUBIAT64] = fromcstr("sub-i@64"),
 	[BRB_KW_DROP]     = fromcstr("drop"),
 	[BRB_KW_BUILTIN]  = fromcstr("builtin"),
 	[BRB_KW_DATA]     = fromcstr("data"),
@@ -67,7 +81,7 @@ static sbuf asm_kws[] = {
 	[BRB_KW_ENTRY]    = fromcstr("entry"),
 	(sbuf){0}
 };
-static_assert(BRB_N_OPS == 21, "not all operations have their names defined in the assembler");
+static_assert(BRB_N_OPS == 28, "not all operations have their names defined in the assembler");
 static_assert(BRB_N_DP_TYPES == 10, "not all data pieces have their names defined in the assemblr");
 
 
@@ -163,9 +177,16 @@ static BRB_OpType kw_to_op[] = {
 	[BRB_KW_ADDIAT32] = BRB_OP_ADDIAT32,
 	[BRB_KW_ADDIATP]  = BRB_OP_ADDIATP,
 	[BRB_KW_ADDIAT64] = BRB_OP_ADDIAT64,
+	[BRB_KW_SUB]      = BRB_OP_SUB,
+	[BRB_KW_SUBI]     = BRB_OP_SUBI,
+	[BRB_KW_SUBIAT8]  = BRB_OP_SUBIAT8,
+	[BRB_KW_SUBIAT16] = BRB_OP_SUBIAT16,
+	[BRB_KW_SUBIAT32] = BRB_OP_SUBIAT32,
+	[BRB_KW_SUBIATP]  = BRB_OP_SUBIATP,
+	[BRB_KW_SUBIAT64] = BRB_OP_SUBIAT64,
 	[BRB_KW_DROP]     = BRB_OP_DROP
 };
-static_assert(BRB_N_OPS == 21, "not all BRB operations are defined in the assembler");
+static_assert(BRB_N_OPS == 28, "not all BRB operations are defined in the assembler");
 
 static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op* op)
 {

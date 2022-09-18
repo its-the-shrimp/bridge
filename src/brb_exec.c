@@ -103,6 +103,11 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_ADDIAT32:
 			case BRB_OP_ADDIATP:
 			case BRB_OP_ADDIAT64:
+			case BRB_OP_SUBIAT8:
+			case BRB_OP_SUBIAT16:
+			case BRB_OP_SUBIAT32:
+			case BRB_OP_SUBIATP:
+			case BRB_OP_SUBIAT64:
 				break;
 			case BRB_OP_ADDR:
 				op->operand_u = BRB_getStackItemRTOffset(builder, proc_id, op_id, op->operand_u);
@@ -120,8 +125,10 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 				op->operand_u = BRB_builtinValues[op->operand_u];
 				break;
 			case BRB_OP_ADD:
+			case BRB_OP_SUB:
 				op->x_op2_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
 			case BRB_OP_ADDI:
+			case BRB_OP_SUBI:
 			case BRB_OP_DROP:
 				op->x_op1_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0);
 				break;
@@ -336,6 +343,64 @@ bool BRB_execOp(BRB_ExecEnv* env)
 		case BRB_OP_ADDIAT64: {
 			register uint64_t* temp = *(uint64_t**)env->stack_head;
 			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp += op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SUB: {
+			uint64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(uint8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(uint16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(uint32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(uint64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)(env->stack_head + op.x_op2_size) = *(uint8_t *)env->stack_head - op2; break;
+				case 2: *(uint16_t*)(env->stack_head + op.x_op2_size) = *(uint16_t*)env->stack_head - op2; break;
+				case 4: *(uint32_t*)(env->stack_head + op.x_op2_size) = *(uint32_t*)env->stack_head - op2; break;
+				case 8: *(uint64_t*)(env->stack_head + op.x_op2_size) = *(uint64_t*)env->stack_head - op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SUBI:
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)env->stack_head -= op.operand_u; break;
+				case 2: *(uint16_t*)env->stack_head -= op.operand_u; break;
+				case 4: *(uint32_t*)env->stack_head -= op.operand_u; break;
+				case 8: *(uint64_t*)env->stack_head -= op.operand_u; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_SUBIAT8: {
+			register uint8_t* temp = *(uint8_t**)env->stack_head;
+			*(uint8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp -= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SUBIAT16: {
+			register uint16_t* temp = *(uint16_t**)env->stack_head;
+			*(uint16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp -= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SUBIAT32: {
+			register uint32_t* temp = *(uint32_t**)env->stack_head;
+			*(uint32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp -= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SUBIATP: {
+			register uintptr_t* temp = *(uintptr_t**)env->stack_head;
+			*(uintptr_t*)env->stack_head = (*temp -= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SUBIAT64: {
+			register uint64_t* temp = *(uint64_t**)env->stack_head;
+			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp -= op.operand_u);
 			++env->exec_index;
 			return false;
 		}

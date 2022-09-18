@@ -45,6 +45,13 @@ const sbuf BRB_opNames[]  = {
 	[BRB_OP_ADDIAT32] = fromcstr("add-i@32"),
 	[BRB_OP_ADDIATP]  = fromcstr("add-i@p"),
 	[BRB_OP_ADDIAT64] = fromcstr("add-i@64"),
+	[BRB_OP_SUB]      = fromcstr("sub"),
+	[BRB_OP_SUBI]     = fromcstr("sub-i"),
+	[BRB_OP_SUBIAT8]  = fromcstr("sub-i@8"),
+	[BRB_OP_SUBIAT16] = fromcstr("sub-i@16"),
+	[BRB_OP_SUBIAT32] = fromcstr("sub-i@32"),
+	[BRB_OP_SUBIATP]  = fromcstr("sub-i@p"),
+	[BRB_OP_SUBIAT64] = fromcstr("sub-i@64"),
 	[BRB_OP_DROP]     = fromcstr("drop")
 };
 static_assert(sizeof(BRB_opNames) / sizeof(BRB_opNames[0]) == BRB_N_OPS, "not all BRB operations have their names defined");
@@ -70,6 +77,13 @@ const uint8_t BRB_opFlags[] = {
 	[BRB_OP_ADDIAT32] = BRB_OPF_OPERAND_INT,
 	[BRB_OP_ADDIATP]  = BRB_OPF_OPERAND_INT,
 	[BRB_OP_ADDIAT64] = BRB_OPF_OPERAND_INT,
+	[BRB_OP_SUB]      = 0,
+	[BRB_OP_SUBI]     = BRB_OPF_OPERAND_INT,
+	[BRB_OP_SUBIAT8]  = BRB_OPF_OPERAND_INT,
+	[BRB_OP_SUBIAT16] = BRB_OPF_OPERAND_INT,
+	[BRB_OP_SUBIAT32] = BRB_OPF_OPERAND_INT,
+	[BRB_OP_SUBIATP]  = BRB_OPF_OPERAND_INT,
+	[BRB_OP_SUBIAT64] = BRB_OPF_OPERAND_INT,
 	[BRB_OP_DROP]     = 0
 };
 static_assert(sizeof(BRB_opFlags) / sizeof(BRB_opFlags[0]) == BRB_N_OPS, "not all BRB operations have their flags defined");
@@ -667,6 +681,13 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 		[BRB_OP_ADDIAT32] = 1,
 		[BRB_OP_ADDIATP]  = 1,
 		[BRB_OP_ADDIAT64] = 1,
+		[BRB_OP_SUB]      = 2,
+		[BRB_OP_SUBI]     = 1,
+		[BRB_OP_SUBIAT8]  = 1,
+		[BRB_OP_SUBIAT16] = 1,
+		[BRB_OP_SUBIAT32] = 1,
+		[BRB_OP_SUBIATP]  = 1,
+		[BRB_OP_SUBIAT64] = 1,
 		[BRB_OP_DROP]     = 1
 	};
 	static BRB_Type in_types[][3] = {
@@ -690,9 +711,16 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 		[BRB_OP_ADDIAT32] = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADDIATP]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADDIAT64] = { BRB_PTR_TYPE(1) },
+		[BRB_OP_SUB]      = { BRB_INT_TYPE, BRB_INT_TYPE },
+		[BRB_OP_SUBI]     = { BRB_INT_TYPE },
+		[BRB_OP_SUBIAT8]  = { BRB_PTR_TYPE(1) },
+		[BRB_OP_SUBIAT16] = { BRB_PTR_TYPE(1) },
+		[BRB_OP_SUBIAT32] = { BRB_PTR_TYPE(1) },
+		[BRB_OP_SUBIATP]  = { BRB_PTR_TYPE(1) },
+		[BRB_OP_SUBIAT64] = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DROP]     = { BRB_ANY_TYPE }
 	};
-	static_assert(BRB_N_OPS == 21, "not all BRB operations have their input types defined");
+	static_assert(BRB_N_OPS == 28, "not all BRB operations have their input types defined");
 	static uint8_t n_out[] = {
 		[BRB_OP_NOP]      = 0,
 		[BRB_OP_END]      = 0,
@@ -714,6 +742,13 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 		[BRB_OP_ADDIAT32] = 1,
 		[BRB_OP_ADDIATP]  = 1,
 		[BRB_OP_ADDIAT64] = 1,
+		[BRB_OP_SUB]      = 1,
+		[BRB_OP_SUBI]     = 1,
+		[BRB_OP_SUBIAT8]  = 1,
+		[BRB_OP_SUBIAT16] = 1,
+		[BRB_OP_SUBIAT32] = 1,
+		[BRB_OP_SUBIATP]  = 1,
+		[BRB_OP_SUBIAT64] = 1,
 		[BRB_OP_DROP]     = 0
 	};
 	static BRB_Type out_types[][1] = {
@@ -737,9 +772,16 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op)
 		[BRB_OP_ADDIAT32] = { BRB_I32_TYPE(1) },
 		[BRB_OP_ADDIATP]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADDIAT64] = { BRB_I64_TYPE(1) },
+		[BRB_OP_SUB]      = { BRB_TYPEOF(0) },
+		[BRB_OP_SUBI]     = { BRB_TYPEOF(0) },
+		[BRB_OP_SUBIAT8]  = { BRB_I8_TYPE(1) },
+		[BRB_OP_SUBIAT16] = { BRB_I16_TYPE(1) },
+		[BRB_OP_SUBIAT32] = { BRB_I32_TYPE(1) },
+		[BRB_OP_SUBIATP]  = { BRB_PTR_TYPE(1) },
+		[BRB_OP_SUBIAT64] = { BRB_I64_TYPE(1) },
 		[BRB_OP_DROP]     = { BRB_VOID_TYPE }
 	};
-	static_assert(BRB_N_OPS == 21, "not all BRB operations have their output types defined");
+	static_assert(BRB_N_OPS == 28, "not all BRB operations have their output types defined");
 	static uint8_t sys_n_in[] = {
 		[BRB_SYS_EXIT] = 1,
 		[BRB_SYS_WRITE] = 3,

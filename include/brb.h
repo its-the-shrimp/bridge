@@ -46,38 +46,39 @@ Data Types:
 		[A:ptr, B:ptr, C:ptr] -> sys write -> [ptr] // write C bytes from address B to file descriptor A
 		[A:ptr, B:ptr, C:ptr] -> sys read -> [ptr] // read C bytes from file descriptor A to address B
 	*/
-	BRB_OP_BUILTIN,  // [] -> builtin <id> -> ptr
+	BRB_OP_BUILTIN,  // [] -> builtin <id> -> [ptr]
 	// place a pointer-sized built-in constant on top of the stack
+
 	BRB_OP_ADD,      // [A:int, B:int] -> add -> [typeof A]
 	// replace A and B with their sum, that is of the same type as A
 	BRB_OP_ADDI, 	 // [A:int] -> add-i <n> -> [typeof A]
 	// increment A by <n>
 	BRB_OP_ADDIAT8,  // [A:ptr] -> add-i@8 <n> -> [i8]
-	// increment an `i8` at address A by <n>, replaces A with the resulting value; like *(uint8_t*)A += 1
+	// increment an `i8` at address A by <n>, replace A with the resulting value; like *(uint8_t*)A += 1
 	BRB_OP_ADDIAT16,  // [A:ptr] -> add-i@16 <n> -> [i16]
-	// increment an `i16` at address A by <n>, replaces A with the resulting value; like *(uint16_t*)A += 1
+	// increment an `i16` at address A by <n>, replace A with the resulting value; like *(uint16_t*)A += 1
 	BRB_OP_ADDIAT32,  // [A:ptr] -> add-i@32 <n> -> [i32]
-	// increment an `i32` at address A by <n>, replaces A with the resulting value; like *(uint32_t*)A += 1
-	BRB_OP_ADDIATP,   // [A:ptr] -> add-i@p <n>  -> [A:ptr]
-	// increment a `ptr` at address A by <n>, replaces A with the resulting value; like *(uintptr_t*)A += 1
-	BRB_OP_ADDIAT64,  // [A:ptr] -> add-i@64 <n> -> [A:ptr]
-	// increment an `i64` at address A by <n>, replaces A with the resulting value; like *(uint64_t*)A += 1
-/* TODO:
+	// increment an `i32` at address A by <n>, replace A with the resulting value; like *(uint32_t*)A += 1
+	BRB_OP_ADDIATP,   // [A:ptr] -> add-i@p <n>  -> [ptr]
+	// increment a `ptr` at address A by <n>, replace A with the resulting value; like *(uintptr_t*)A += 1
+	BRB_OP_ADDIAT64,  // [A:ptr] -> add-i@64 <n> -> [i64]
+	// increment an `i64` at address A by <n>, replace A with the resulting value; like *(uint64_t*)A += 1
 
-	BRB_OP_SUB,      // [A:int, B:int] -> sub -> [int]
-	// replace A and B with their difference
-	BRB_OP_SUBI, 	 // [A:int] -> sub-i <n> -> [int]
+	BRB_OP_SUB,      // [A:int, B:int] -> sub -> [typeof A]
+	// replace A and B with their difference, that is of the same type as A
+	BRB_OP_SUBI, 	 // [A:int] -> sub-i <n> -> [typeof A]
 	// decrement A by <n>
-	BRB_OP_SUBI@8,   // [A:ptr] -> sub-i@8 <n> -> [A:ptr]
+	BRB_OP_SUBIAT8,   // [A:ptr] -> sub-i@8 <n> -> [i8]
 	// decrement an `i8` at address A by <n>
-	BRB_OP_SUBI@16,  // [A:ptr] -> sub-i@16 <n> -> [A:ptr]
+	BRB_OP_SUBIAT16,  // [A:ptr] -> sub-i@16 <n> -> [i16]
 	// decrement an `i16` at address A by <n>
-	BRB_OP_SUBI@32,  // [A:ptr] -> sub-i@32 <n> -> [A:ptr]
+	BRB_OP_SUBIAT32,  // [A:ptr] -> sub-i@32 <n> -> [i32]
 	// decrement an `i32` at address A by <n>
-	BRB_OP_SUBI@P,   // [A:ptr] -> sub-i@p <n>  -> [A:ptr]
+	BRB_OP_SUBIATP,   // [A:ptr] -> sub-i@p <n>  -> [ptr]
 	// decrement a `ptr` at address A by <n>
-	BRB_OP_SUBI@64,  // [A:ptr] -> sub-i@64 <n> -> [A:ptr]
+	BRB_OP_SUBIAT64,  // [A:ptr] -> sub-i@64 <n> -> [i64]
 	// decrement an `i64` at address A by <n>
+/* TODO:
 
 	BRB_OP_MUL,      // [A:int, B:int] -> mul -> [int]
 	// replace A and B with their product
