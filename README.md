@@ -10,8 +10,7 @@ $ python3 build.py --release
 ```
 
 ## Tools
-- [bridge](src/bridge.c) - The main tool for everything about the language; It's a compiler, assembler and interpreter, all in one
-- [brbd](src/brbd.c) - BRidge Bytecode Debugger, a tool for debugging BRB modules
+- [bridge](src/brc.c) - The main tool for everything about the language; It's a compiler, assembler, disassembler and interpreter, all in one
 
 ## Documentation
 Not yet :(

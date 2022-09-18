@@ -16,54 +16,53 @@ Data Types:
 	i64 - an 8-byte value
 	int - any of the above
 
-Notes:
 */
 	BRB_OP_NOP,      // [] -> nop -> []
-	// does nothing
+	// do nothing
 	BRB_OP_END,      // [] -> end -> []
-	// stops execution of the program
+	// stop execution of the program
 	BRB_OP_I8,       // [] -> i8 <x> -> [i8]
-	// pushes 1 byte-sized integer literal <x> onto the stack
+	// push 1 byte-sized integer literal <x> onto the stack
 	BRB_OP_I16,      // [] -> i16 <x> -> [i16]
-	// pushes 2 byte-sized integer literal <x> onto the stack
+	// push 2 byte-sized integer literal <x> onto the stack
 	BRB_OP_I32,      // [] -> i32 <x> -> [i32]
-	// pushes 4 byte-sized integer literal <x> onto the stack
+	// push 4 byte-sized integer literal <x> onto the stack
 	BRB_OP_I64,      // [] -> i64 <x> -> [i64]
-	// pushes 8 byte-sized integer literal <x> onto the stack
+	// push 8 byte-sized integer literal <x> onto the stack
 	BRB_OP_PTR,     // [] -> ptr <x> -> [ptr]
 	// pushes pointer-sized integer literal <x> onto the stack
 	BRB_OP_ADDR,     // [A, *] -> addr <i> -> [A, *, ptr]
-	// pushes address of the stack item at index <i> onto the stack; <i> refers to the index on the stack after pushing the address
+	// push address of the stack item at index <i> onto the stack; <i> refers to the index on the stack after pushing the address
 	BRB_OP_DBADDR,   // [] -> dbaddr <i> -> [ptr]
-	// pushes address of data block at index <i> onto the stack
+	// push address of data block at index <i> onto the stack
 	BRB_OP_LD,       // [A:ptr] -> ld <T> -> [<T>]
 	// replace address A with item of type <T> loaded from it
 	BRB_OP_STR,      // [A:ptr, B] -> str -> []
 	// store B at the address A; same as *A = B;
 	BRB_OP_SYS,
-	// executes system procedure <f> with arguments from the stack
+	// execute system procedure <f> with arguments from the stack
 	/* System calls:
 		[A:ptr] -> sys exit // exits the program with exit code A
 		[A:ptr, B:ptr, C:ptr] -> sys write -> [ptr] // write C bytes from address B to file descriptor A
 		[A:ptr, B:ptr, C:ptr] -> sys read -> [ptr] // read C bytes from file descriptor A to address B
 	*/
 	BRB_OP_BUILTIN,  // [] -> builtin <id> -> ptr
-	// places a pointer-sized built-in constant on top of the stack
-/* TODO
-	BRB_OP_ADD,      // [A:int, B:int] -> add -> [int]
-	// replace A and B with their sum
-	BRB_OP_ADDI, 	 // [A:int] -> add-i <n> -> [int]
+	// place a pointer-sized built-in constant on top of the stack
+	BRB_OP_ADD,      // [A:int, B:int] -> add -> [typeof A]
+	// replace A and B with their sum, that is of the same type as A
+	BRB_OP_ADDI, 	 // [A:int] -> add-i <n> -> [typeof A]
 	// increment A by <n>
-	BRB_OP_ADDI@8,   // [A:ptr] -> add-i@8 <n> -> [A:ptr]
-	// increment an `i8` at address A by <n>
-	BRB_OP_ADDI@16,  // [A:ptr] -> add-i@16 <n> -> [A:ptr]
-	// increment an `i16` at address A by <n>
-	BRB_OP_ADDI@32,  // [A:ptr] -> add-i@32 <n> -> [A:ptr]
-	// increment an `i32` at address A by <n>
-	BRB_OP_ADDI@P,   // [A:ptr] -> add-i@p <n>  -> [A:ptr]
-	// increment a `ptr` at address A by <n>
-	BRB_OP_ADDI@64,  // [A:ptr] -> add-i@64 <n> -> [A:ptr]
-	// increment an `i64` at address A by <n>
+	BRB_OP_ADDIAT8,  // [A:ptr] -> add-i@8 <n> -> [i8]
+	// increment an `i8` at address A by <n>, replaces A with the resulting value; like *(uint8_t*)A += 1
+	BRB_OP_ADDIAT16,  // [A:ptr] -> add-i@16 <n> -> [i16]
+	// increment an `i16` at address A by <n>, replaces A with the resulting value; like *(uint16_t*)A += 1
+	BRB_OP_ADDIAT32,  // [A:ptr] -> add-i@32 <n> -> [i32]
+	// increment an `i32` at address A by <n>, replaces A with the resulting value; like *(uint32_t*)A += 1
+	BRB_OP_ADDIATP,   // [A:ptr] -> add-i@p <n>  -> [A:ptr]
+	// increment a `ptr` at address A by <n>, replaces A with the resulting value; like *(uintptr_t*)A += 1
+	BRB_OP_ADDIAT64,  // [A:ptr] -> add-i@64 <n> -> [A:ptr]
+	// increment an `i64` at address A by <n>, replaces A with the resulting value; like *(uint64_t*)A += 1
+/* TODO:
 
 	BRB_OP_SUB,      // [A:int, B:int] -> sub -> [int]
 	// replace A and B with their difference
@@ -257,7 +256,13 @@ Notes:
 	// invertsthe bits of an `ptr` at address A
 	BRB_OP_NOT@64,   // [A:ptr] -> inv-@64 -> [A:ptr]
 	// invertsthe bits of an `i64` at address A
+*/
 
+	BRB_OP_DROP,     // [A:any] -> drop -> []
+	// deletes A from the stack
+/* TODO:
+	BRB_OP_DROPN,    // [A:any * <n>] -> drop-n <n> -> []
+	// deletes <n> items from the top of the stack
 	BRB_OP_NEW,      // [] -> new <T> -> [<T>]
 	// create new item of type <T> on top of the stack; content of the item is undefined
 	BRB_OP_NEWZ,     // [] -> new-z <T> -> [<T>]
@@ -342,6 +347,7 @@ Notes:
 } BRB_OpType;
 
 extern const sbuf BRB_opNames[];
+extern const uint8_t BRB_opFlags[];
 
 #define BRB_OPF_OPERAND_INT8 1
 #define BRB_OPF_OPERAND_INT  2
@@ -355,23 +361,6 @@ extern const sbuf BRB_opNames[];
 	| BRB_OPF_OPERAND_INT   \
 	| BRB_OPF_OPERAND_TYPE   )
 
-static const uint8_t BRB_opFlags[] = {
-	[BRB_OP_NOP] = 0,
-	[BRB_OP_END] = 0,
-	[BRB_OP_I8] = BRB_OPF_OPERAND_INT8,
-	[BRB_OP_I16] = BRB_OPF_OPERAND_INT,
-	[BRB_OP_I32] = BRB_OPF_OPERAND_INT,
-	[BRB_OP_I64] = BRB_OPF_OPERAND_INT,
-	[BRB_OP_PTR] = BRB_OPF_OPERAND_INT,
-	[BRB_OP_ADDR] = BRB_OPF_OPERAND_VAR_NAME,
-	[BRB_OP_DBADDR] = BRB_OPF_OPERAND_DB_NAME,
-	[BRB_OP_LD] = BRB_OPF_OPERAND_TYPE,
-	[BRB_OP_STR] = 0,
-	[BRB_OP_SYS] = BRB_OPF_OPERAND_SYSCALL_NAME,
-	[BRB_OP_BUILTIN] = BRB_OPF_OPERAND_BUILTIN
-};
-static_assert(sizeof(BRB_opFlags) / sizeof(BRB_opFlags[0]) == BRB_N_OPS, "not all BRB operations have their flags set defined in `BRB_opFlags`"); 
-
 typedef enum {
 	BRB_TYPE_I8,
 	BRB_TYPE_I16,	
@@ -381,6 +370,18 @@ typedef enum {
 	BRB_TYPE_VOID,
 	BRB_N_TYPE_KINDS
 } BRB_TypeKind;
+
+#ifdef _BRB_INTERNAL
+#	define BRB_TYPE_ANY   1
+#	define BRB_TYPE_INT   2
+#	define BRB_TYPE_OF    3
+#	define BRB_TYPE_INPUT 4
+#	define BRB_ANY_TYPE  ((BRB_Type){.internal_kind = BRB_TYPE_ANY})
+#	define BRB_INT_TYPE  ((BRB_Type){.internal_kind = BRB_TYPE_INT})
+#	define BRB_TYPEOF(i) ((BRB_Type){.internal_kind = BRB_TYPE_OF, .n_items = i })
+#	define BRB_INPUT_TYPE ((BRB_Type){.internal_kind = BRB_TYPE_INPUT})
+// the `BRB_TYPE_OF` and `BRB_TYPE_INPUT` internal type kinds are only checked in the output types (those that are provided in `out_types`), in other cases they are ignored
+#endif // _BRB_INTERNAL
 
 extern const sbuf BRB_typeNames[];
 
@@ -392,8 +393,7 @@ extern const sbuf BRB_typeNames[];
 #define BRB_VOID_TYPE   ((BRB_Type){.kind = BRB_TYPE_VOID             })
 typedef struct {
 	BRB_TypeKind kind:8;
-	bool is_any;
-	bool is_any_int;
+	uint8_t internal_kind;
 	uint32_t n_items;
 } BRB_Type;
 static_assert(sizeof(BRB_Type) <= sizeof(uint64_t), "just for compactness");
@@ -401,6 +401,8 @@ declArray(BRB_Type);
 
 typedef struct {
 	BRB_OpType type:8;
+	uint8_t x_op1_size; // only for the `add` operation and only during execution
+	uint8_t x_op2_size;
 	union {
 		uint64_t operand_u;	
 		int64_t operand_s;

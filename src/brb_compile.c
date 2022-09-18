@@ -113,6 +113,12 @@ static char* compileIntLiteral_arm64(FILE* dst, int64_t value, uint8_t reg_id, a
 	}
 }
 
+#define ARM64_LDP64_OP2_MIN -512
+#define ARM64_LDP64_OP2_MAX  504
+#define ARM64_LDP32_OP2_MIN -256
+#define ARM64_LDP32_OP2_MAX  252
+#define ARM64_ADDR_OFFSET_MIN -256
+#define ARM64_ADDR_OFFSET_MAX  255
 static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, size_t vframe_offset, size_t vframe_offset_before, FILE* dst)
 {
 	long acc = 0;
@@ -472,6 +478,266 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 			}
 			return acc;
 		}
+		case BRB_OP_ADD: {
+			size_t main_op_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0), op2_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
+			if (main_op_size == op2_size && op2_size == 8) {
+				if (vframe_offset_before <= ARM64_LDP64_OP2_MAX && vframe_offset_before % 8 == 0) {
+					acc += fprintf(dst,
+						"\tldp x9, x10, [sp, %zu]\n"
+						"\tadd x9, x9, x10\n",
+						vframe_offset_before);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_OFFSET, &acc);
+					switch (main_op_size) {
+						case 1:  acc += fprintf(dst, "\tstrb w9, [sp, %s]\n", offset); break;
+						case 2:  acc += fprintf(dst, "\tstrh w9, [sp, %s]\n", offset); break;
+						case 4:  acc += fprintf(dst, "\tstr w9, [sp, %s]\n", offset); break;
+						case 8:  acc += fprintf(dst, "\tstr x9, [sp, %s]\n", offset); break;
+						default: assert(false, "unexpected argument type");
+					}
+				} else {
+					compileIntLiteral_arm64(dst, vframe_offset, 8, LI_2REG, &acc);
+					acc += fprintf(dst,
+						"\tldp x9, x10, [x8], 8\n"
+						"\tadd x9, x9, x10\n");
+					switch (main_op_size) {
+						case 1:  acc += fputstr(dst, "\tstrb w9, [x8]\n"); break;
+						case 2:  acc += fputstr(dst, "\tstrh w9, [x8]\n"); break;
+						case 4:  acc += fputstr(dst, "\tstr w9, [x8]\n"); break;
+						case 8:  acc += fputstr(dst, "\tstr x9, [x8]\n"); break;
+						default: assert(false, "unexpected argument type");
+					}
+				}
+
+			} else if (main_op_size == op2_size && op2_size == 4) {
+				if (vframe_offset_before <= ARM64_LDP32_OP2_MAX && vframe_offset_before % 4 == 0) {
+					acc += fprintf(dst,
+						"\tldp w9, w10, [sp, %zu]\n"
+						"\tadd x9, x9, x10\n",
+						vframe_offset_before);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_OFFSET, &acc);
+					switch (main_op_size) {
+						case 1:  acc += fprintf(dst, "\tstrb w9, [sp, %s]\n", offset); break;
+						case 2:  acc += fprintf(dst, "\tstrh w9, [sp, %s]\n", offset); break;
+						case 4:  acc += fprintf(dst, "\tstr w9, [sp, %s]\n", offset); break;
+						case 8:  acc += fprintf(dst, "\tstr x9, [sp, %s]\n", offset); break;
+						default: assert(false, "unexpected argument type");
+					}
+				} else {
+					compileIntLiteral_arm64(dst, vframe_offset, 8, LI_2REG, &acc);
+					acc += fprintf(dst,
+						"\tldp w9, w10, [x8], 4\n"
+						"\tadd x9, x9, x10\n");
+					switch (main_op_size) {
+						case 1:  acc += fputstr(dst, "\tstrb w9, [x8]\n"); break;
+						case 2:  acc += fputstr(dst, "\tstrh w9, [x8]\n"); break;
+						case 4:  acc += fputstr(dst, "\tstr w9, [x8]\n"); break;
+						case 8:  acc += fputstr(dst, "\tstr x9, [x8]\n"); break;
+						default: assert(false, "unexpected argument type");
+					}
+				}
+			} else {
+				if (vframe_offset_before + main_op_size <= ARM64_ADDR_OFFSET_MAX) {
+					switch (main_op_size) {
+						case 1:  acc += fprintf(dst, "\tldrb w9, [sp, %zu]\n", vframe_offset_before); break;
+						case 2:  acc += fprintf(dst, "\tldrh w9, [sp, %zu]\n", vframe_offset_before); break;
+						case 4:  acc += fprintf(dst, "\tldr w9, [sp, %zu]\n", vframe_offset_before); break;
+						case 8:  acc += fprintf(dst, "\tldr x9, [sp, %zu]\n", vframe_offset_before); break;
+						default: assert(false, "unexpected argument type");
+					}
+					switch (op2_size) {
+						case 1:  acc += fprintf(dst, "\tldrb w10, [sp, %zu]\n", vframe_offset_before + main_op_size); break;
+						case 2:  acc += fprintf(dst, "\tldrb w10, [sp, %zu]\n", vframe_offset_before + main_op_size); break;
+						case 4:  acc += fprintf(dst, "\tldr w10, [sp, %zu]\n", vframe_offset_before + main_op_size); break;
+						case 8:  acc += fprintf(dst, "\tldr x10, [sp, %zu]\n", vframe_offset_before + main_op_size); break;
+						default: assert(false, "unexpected argument type");
+					}
+					acc += fputstr(dst, "\tadd x9, x9, x10\n");
+					switch (main_op_size) {
+						case 1:  acc += fprintf(dst, "\tstrb w9, [sp, %zu]\n", vframe_offset); break;
+						case 2:  acc += fprintf(dst, "\tstrh w9, [sp, %zu]\n", vframe_offset); break;
+						case 4:  acc += fprintf(dst, "\tstr w9, [sp, %zu]\n", vframe_offset); break;
+						case 8:  acc += fprintf(dst, "\tstr x9, [sp, %zu]\n", vframe_offset); break;
+						default: assert(false, "unexpected argument type");
+					}
+				} else {
+					compileIntLiteral_arm64(dst, vframe_offset_before, 8, LI_2REG, &acc);
+					switch (main_op_size) {
+						case 1:  acc += fputstr(dst, "\tldrb w9, [x8], 1\n"); break;
+						case 2:  acc += fputstr(dst, "\tldrh w9, [x8], 2\n"); break;
+						case 4:  acc += fputstr(dst, "\tldr w9, [x8], 4\n"); break;
+						case 8:  acc += fputstr(dst, "\tldr x9, [x8], 8\n"); break;
+						default: assert(false, "unexpected argument type");
+					}
+					switch (op2_size) {
+						case 1:  acc += fprintf(dst, "\tldrb w10, [x8], %i\n", (int)(1 - main_op_size)); break;
+						case 2:  acc += fprintf(dst, "\tldrb w10, [x8], %i\n", (int)(2 - main_op_size)); break;
+						case 4:  acc += fprintf(dst, "\tldr w10, [x8], %i\n", (int)(4 - main_op_size)); break;
+						case 8:  acc += fprintf(dst, "\tldr x10, [x8], %i\n", (int)(8 - main_op_size)); break;
+						default: assert(false, "unexpected argument type");
+					}
+					acc += fputstr(dst, "\tadd x9, x9, x10\n");
+					switch (main_op_size) {
+						case 1:  acc += fputstr(dst, "\tstrb w9, [x8]\n"); break;
+						case 2:  acc += fputstr(dst, "\tstrh w9, [x8]\n"); break;
+						case 4:  acc += fputstr(dst, "\tstr w9, [x8]\n"); break;
+						case 8:  acc += fputstr(dst, "\tstr x9, [x8]\n"); break;
+						default: assert(false, "unexpected argument type");
+					}
+				}
+			}
+			return acc;
+		}
+		case BRB_OP_ADDI:
+			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 9, LI_BASE, &acc);
+				switch (BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0)) {
+					case 1: acc += fprintf(dst,
+						"\tldrb w8, [sp, %zu]\n"
+						"\tadd  w8, w8, %s\n"
+						"\tstrb w8, [sp, %zu]\n",
+						vframe_offset, offset, vframe_offset);
+						break;
+					case 2: acc += fprintf(dst,
+						"\tldrh w8, [sp, %zu]\n"
+						"\tadd  w8, w8, %s\n"
+						"\tstrh w8, [sp, %zu]\n",
+						vframe_offset, offset, vframe_offset);
+						break;
+					case 4: acc += fprintf(dst,
+						"\tldr w8, [sp, %zu]\n"
+						"\tadd w8, w8, %s\n"
+						"\tstr w8, [sp, %zu]\n",
+						vframe_offset, offset, vframe_offset);
+						break;
+					case 8: acc += fprintf(dst,
+						"\tldr x8, [sp, %zu]\n"
+						"\tadd x8, x8, %s\n"
+						"\tstr x8, [sp, %zu]\n",
+						vframe_offset, offset, vframe_offset);
+						break;
+					default:
+						assert(false, "unexpected argument size");
+				}
+			} else {
+				compileIntLiteral_arm64(dst, vframe_offset, 9, LI_2REG, &acc);
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, LI_BASE, &acc);
+				switch (BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0)) {
+					case 1: acc += fprintf(dst,
+						"\tldrb w8, [sp, x9]\n"
+						"\tadd  w8, w8, %s\n"
+						"\tstrb w8, [sp, x9]\n",
+						offset);
+						break;
+					case 2: acc += fprintf(dst,
+						"\tldrh w8, [sp, x9]\n"
+						"\tadd  w8, w8, %s\n"
+						"\tstrh w8, [sp, x9]\n",
+						offset);
+						break;
+					case 4: acc += fprintf(dst,
+						"\tldr w8, [sp, x9]\n"
+						"\tadd w8, w8, %s\n"
+						"\tstr w8, [sp, x9]\n",
+						offset);
+						break;
+					case 8: acc += fprintf(dst,
+						"\tldr x8, [sp, x9]\n"
+						"\tadd x8, x8, %s\n"
+						"\tstr x8, [sp, x9]\n",
+						offset);
+						break;
+					default:
+						assert(false, "unexpected argument size");
+				}
+			}
+			return acc;
+		case BRB_OP_ADDIAT8:
+			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 9, LI_BASE, &acc);
+				return acc + fprintf(dst,
+					"\tldr  x8, [sp, %zu]\n"
+					"\tldrb w8, [x8]\n"
+					"\tadd  x8, x8, %s\n"
+					"\tstrb w8, [sp, %zu]\n",
+					vframe_offset_before,
+					offset,
+					vframe_offset);
+			} else {
+				compileIntLiteral_arm64(dst, vframe_offset_before, 9, LI_2REG, &acc);
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, LI_BASE, &acc);
+				return acc + fprintf(dst,
+					"\tldr  x8, [x9], 7\n"
+					"\tldrb w8, [x8]\n"
+					"\tadd  x8, x8, %s\n"
+					"\tstrb w8, [x9]\n",
+					offset);
+			}
+		case BRB_OP_ADDIAT16:
+			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 9, LI_BASE, &acc);
+				return acc + fprintf(dst,
+					"\tldr  x8, [sp, %zu]\n"
+					"\tldrh w8, [x8]\n"
+					"\tadd  x8, x8, %s\n"
+					"\tstrh w8, [sp, %zu]\n",
+					vframe_offset_before,
+					offset,
+					vframe_offset);
+			} else {
+				compileIntLiteral_arm64(dst, vframe_offset_before, 9, LI_2REG, &acc);
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, LI_BASE, &acc);
+				return acc + fprintf(dst,
+					"\tldr  x8, [x9], 6\n"
+					"\tldrh w8, [x8]\n"
+					"\tadd  x8, x8, %s\n"
+					"\tstrh w8, [x9]\n",
+					offset);
+			}
+		case BRB_OP_ADDIAT32:
+			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 9, LI_BASE, &acc);
+				return acc + fprintf(dst,
+					"\tldr x8, [sp, %zu]\n"
+					"\tldr w8, [x8]\n"
+					"\tadd x8, x8, %s\n"
+					"\tstr w8, [sp, %zu]\n",
+					vframe_offset_before,
+					offset,
+					vframe_offset);
+			} else {
+				compileIntLiteral_arm64(dst, vframe_offset_before, 9, LI_2REG, &acc);
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, LI_BASE, &acc);
+				return acc + fprintf(dst,
+					"\tldr x8, [x9], 4\n"
+					"\tldr w8, [x8]\n"
+					"\tadd x8, x8, %s\n"
+					"\tstr w8, [x9]\n",
+					offset);
+			}
+		case BRB_OP_ADDIATP:
+		case BRB_OP_ADDIAT64:
+			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 9, LI_BASE, &acc);
+				return acc + fprintf(dst,
+					"\tldr x8, [sp, %zu]\n"
+					"\tldr x8, [x8]\n"
+					"\tadd x8, x8, %s\n"
+					"\tstr x8, [sp, %zu]\n",
+					vframe_offset_before,
+					offset,
+					vframe_offset);
+			} else {
+				compileIntLiteral_arm64(dst, vframe_offset_before, 9, LI_2REG, &acc);
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, LI_BASE, &acc);
+				return acc + fprintf(dst,
+					"\tldr x8, [x9]\n"
+					"\tldr x8, [x8]\n"
+					"\tadd x8, x8, %s\n"
+					"\tstr x8, [x9]\n",
+					offset);
+			}
+		case BRB_OP_DROP:
+			return acc;
 		case BRB_N_OPS:
 		default:
 			assert(false, "invalid operation type %u", op->type);
@@ -486,7 +752,7 @@ long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
 		BRB_printErrorMsg(stderr, err, "error while analyzing module");
 		abort();
 	}
-	
+
 	long acc = 0;
 	bool in_text_seg = true;
 	arrayForeach (BRB_DataBlock, block, module->seg_data) {
@@ -532,7 +798,7 @@ long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
 		}
 		max_size = alignby(max_size, ARM64_STACK_ALIGNMENT);
 		sizes[0] = 0;
-		
+
 		acc += fprintf(dst, "\tsub sp, sp, %zu\n", max_size);
 		for (uint32_t i = 0; i < proc->body.length; ++i) {
 			acc += compileOp_darwin_arm64(&builder, proc - module->seg_exec.data, i, max_size - sizes[i + 1], max_size - sizes[i], dst);

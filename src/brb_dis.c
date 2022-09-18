@@ -1,13 +1,27 @@
 // implementation of disassembly of BRB modules
+#define _BRB_INTERNAL
 #include <brb.h>
 defArray(BRB_Type);
 
 long BRB_printType(BRB_Type type, FILE* dst)
 {
-	return fputsbuf(dst, BRB_typeNames[type.kind])
-		+ (type.n_items > 1
-			? fprintf(dst, "[%u]", type.n_items)
-			: 0);
+	switch (type.internal_kind) {
+		case BRB_TYPE_OF:
+			return fprintf(dst, "__typeof %u", type.n_items);
+		case BRB_TYPE_ANY:
+			return fputsbuf(dst, fromcstr("__any"));
+		case BRB_TYPE_INT:
+			return fputsbuf(dst, fromcstr("__int"));
+		case BRB_TYPE_INPUT:
+			return fputsbuf(dst, fromcstr("__input"));
+		case 0:
+			return fputsbuf(dst, BRB_typeNames[type.kind])
+				+ (type.n_items > 1
+					? fprintf(dst, "[%u]", type.n_items)
+					: 0);
+		default:
+			assert(false, "unknown internal type kind");
+	}
 }
 
 static long printDataBlockDecl(BRB_DataBlock block, FILE* dst)

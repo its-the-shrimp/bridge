@@ -21,6 +21,14 @@ typedef enum {
 	BRB_KW_STR,
 	BRB_KW_SYS,
 	BRB_KW_BUILTIN,
+	BRB_KW_ADD,
+	BRB_KW_ADDI,
+	BRB_KW_ADDIAT8,
+	BRB_KW_ADDIAT16,
+	BRB_KW_ADDIAT32,
+	BRB_KW_ADDIATP,
+	BRB_KW_ADDIAT64,
+	BRB_KW_DROP,
 	BRB_KW_DATA,
 	BRB_KW_BYTES,
 	BRB_KW_TEXT,
@@ -29,29 +37,39 @@ typedef enum {
 	BRB_KW_ENTRY,
 	BRB_N_KWS
 } BRB_AsmKw;
-
 static sbuf asm_kws[] = {
-	[BRB_KW_NOP    ] = fromcstr("nop"),
-	[BRB_KW_END    ] = fromcstr("end"),
-	[BRB_KW_I8     ] = fromcstr("i8"),
-	[BRB_KW_I16    ] = fromcstr("i16"),
-	[BRB_KW_I32    ] = fromcstr("i32"),
-	[BRB_KW_I64    ] = fromcstr("i64"),
-	[BRB_KW_PTR    ] = fromcstr("ptr"),
-	[BRB_KW_ADDR   ] = fromcstr("addr"),
-	[BRB_KW_DBADDR ] = fromcstr("dbaddr"),
-	[BRB_KW_LD     ] = fromcstr("ld"),
-	[BRB_KW_STR    ] = fromcstr("str"),
-	[BRB_KW_SYS    ] = fromcstr("sys"),
-	[BRB_KW_BUILTIN] = fromcstr("builtin"),
-	[BRB_KW_DATA   ] = fromcstr("data"),
-	[BRB_KW_BYTES  ] = fromcstr("bytes"),
-	[BRB_KW_TEXT   ] = fromcstr("text"),
-	[BRB_KW_ZERO   ] = fromcstr("zero"),
-	[BRB_KW_VOID   ] = fromcstr("void"),
-	[BRB_KW_ENTRY  ] = fromcstr("entry"),
+	[BRB_KW_NOP]      = fromcstr("nop"),
+	[BRB_KW_END]      = fromcstr("end"),
+	[BRB_KW_I8]       = fromcstr("i8"),
+	[BRB_KW_I16]      = fromcstr("i16"),
+	[BRB_KW_I32]      = fromcstr("i32"),
+	[BRB_KW_I64]      = fromcstr("i64"),
+	[BRB_KW_PTR]      = fromcstr("ptr"),
+	[BRB_KW_ADDR]     = fromcstr("addr"),
+	[BRB_KW_DBADDR]   = fromcstr("dbaddr"),
+	[BRB_KW_LD]       = fromcstr("ld"),
+	[BRB_KW_STR]      = fromcstr("str"),
+	[BRB_KW_SYS]      = fromcstr("sys"),
+	[BRB_KW_ADD]      = fromcstr("add"),
+	[BRB_KW_ADDI]     = fromcstr("add-i"),
+	[BRB_KW_ADDIAT8]  = fromcstr("add-i@8"),
+	[BRB_KW_ADDIAT16] = fromcstr("add-i@16"),
+	[BRB_KW_ADDIAT32] = fromcstr("add-i@32"),
+	[BRB_KW_ADDIATP]  = fromcstr("add-i@p"),
+	[BRB_KW_ADDIAT64] = fromcstr("add-i@64"),
+	[BRB_KW_DROP]     = fromcstr("drop"),
+	[BRB_KW_BUILTIN]  = fromcstr("builtin"),
+	[BRB_KW_DATA]     = fromcstr("data"),
+	[BRB_KW_BYTES]    = fromcstr("bytes"),
+	[BRB_KW_TEXT]     = fromcstr("text"),
+	[BRB_KW_ZERO]     = fromcstr("zero"),
+	[BRB_KW_VOID]     = fromcstr("void"),
+	[BRB_KW_ENTRY]    = fromcstr("entry"),
 	(sbuf){0}
 };
+static_assert(BRB_N_OPS == 21, "not all operations have their names defined in the assembler");
+static_assert(BRB_N_DP_TYPES == 10, "not all data pieces have their names defined in the assemblr");
+
 
 typedef enum {
 	BRB_SYM_BRACKET_L,
@@ -125,20 +143,29 @@ static BRB_Error getType(BRP* obj, BRB_Type* res_p)
 }
 
 static BRB_OpType kw_to_op[] = {
-	[BRB_KW_NOP] = BRB_OP_NOP,
-	[BRB_KW_END] = BRB_OP_END,
-	[BRB_KW_I8] = BRB_OP_I8,
-	[BRB_KW_I16] = BRB_OP_I16,
-	[BRB_KW_I32] = BRB_OP_I32,
-	[BRB_KW_I64] = BRB_OP_I64,
-	[BRB_KW_PTR] = BRB_OP_PTR,
-	[BRB_KW_ADDR] = BRB_OP_ADDR,
-	[BRB_KW_DBADDR] = BRB_OP_DBADDR,
-	[BRB_KW_LD] = BRB_OP_LD,
-	[BRB_KW_STR] = BRB_OP_STR,
-	[BRB_KW_SYS] = BRB_OP_SYS,
-	[BRB_KW_BUILTIN] = BRB_OP_BUILTIN
+	[BRB_KW_NOP]      = BRB_OP_NOP,
+	[BRB_KW_END]      = BRB_OP_END,
+	[BRB_KW_I8]       = BRB_OP_I8,
+	[BRB_KW_I16]      = BRB_OP_I16,
+	[BRB_KW_I32]      = BRB_OP_I32,
+	[BRB_KW_I64]      = BRB_OP_I64,
+	[BRB_KW_PTR]      = BRB_OP_PTR,
+	[BRB_KW_ADDR]     = BRB_OP_ADDR,
+	[BRB_KW_DBADDR]   = BRB_OP_DBADDR,
+	[BRB_KW_LD]       = BRB_OP_LD,
+	[BRB_KW_STR]      = BRB_OP_STR,
+	[BRB_KW_SYS]      = BRB_OP_SYS,
+	[BRB_KW_BUILTIN]  = BRB_OP_BUILTIN,
+	[BRB_KW_ADD]      = BRB_OP_ADD,
+	[BRB_KW_ADDI]     = BRB_OP_ADDI,
+	[BRB_KW_ADDIAT8]  = BRB_OP_ADDIAT8,
+	[BRB_KW_ADDIAT16] = BRB_OP_ADDIAT16,
+	[BRB_KW_ADDIAT32] = BRB_OP_ADDIAT32,
+	[BRB_KW_ADDIATP]  = BRB_OP_ADDIATP,
+	[BRB_KW_ADDIAT64] = BRB_OP_ADDIAT64,
+	[BRB_KW_DROP]     = BRB_OP_DROP
 };
+static_assert(BRB_N_OPS == 21, "not all BRB operations are defined in the assembler");
 
 static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op* op)
 {
@@ -173,7 +200,9 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 			op->operand_u = token.value;
 			break;
 		case BRB_OPF_OPERAND_VAR_NAME:
-			assert(false, "named stack items are not implemented yet");
+			if ((token = BRP_fetchToken(obj)).type != TOKEN_INT)
+				assert(false, "named stack items are not implemented yet");
+			op->operand_u = token.value;
 			break;
 		case BRB_OPF_OPERAND_DB_NAME:
 			token = BRP_fetchToken(obj);

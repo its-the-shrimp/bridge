@@ -13,7 +13,7 @@
 #define arrayForeach(T, item, array) \
 const T##Array TEMPVAR=(array);for(T*item=TEMPVAR.data;(uint64_t)(item-TEMPVAR.data)<TEMPVAR.length;++item)
 #define arrayRevForeach(T, item, array) \
-const T##Array TEMPVAR=(array);for(T*item=TEMPVAR.data+TEMPVAR.length-1;item>=TEMPVAR.data;--item)
+const T##Array TEMPVAR=(array);if(TEMPVAR.length)for(T*item=TEMPVAR.data+TEMPVAR.length-1;item>=TEMPVAR.data;--item)
 #define chainForeach(T, item, chain) \
 const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.start->value;item!=&TEMPVAR.end->next->value;item=&((T##Node*)((void**)item-1))->next->value)
 #define chainRevForeach(T, item, chain) \
