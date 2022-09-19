@@ -215,14 +215,18 @@ static long writeOp(BRB_ModuleWriter* writer, BRB_Op op)
 // writing the type
 	long acc = writeInt8(writer->dst, op.type);
 // writing the operand, if needed
-	switch (BRB_opFlags[op.type] & BRB_OPF_HAS_OPERAND) {
-		case BRB_OPF_OPERAND_INT8:
+	switch (BRB_GET_OPERAND_TYPE(op.type)) {
+		case BRB_OPERAND_INT8:
 			return acc + writeInt8(writer->dst, op.operand_u);
-		case BRB_OPF_OPERAND_INT:
+		case BRB_OPERAND_INT:
+		case BRB_OPERAND_VAR_NAME:
+		case BRB_OPERAND_DB_NAME:
+		case BRB_OPERAND_SYSCALL_NAME:
+		case BRB_OPERAND_BUILTIN:
 			return acc + writeIntOnly(writer->dst, op.operand_u);
-		case BRB_OPF_OPERAND_TYPE:
+		case BRB_OPERAND_TYPE:
 			return acc + writeType(writer->dst, op.operand_type);
-		case 0:
+		case BRB_OPERAND_NONE:
 			return acc;
 		default:
 			assert(false, "invlalid operation type info");

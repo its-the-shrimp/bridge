@@ -80,6 +80,7 @@ static char* compileIntLiteral_arm64(FILE* dst, int64_t value, uint8_t reg_id, a
 		snprintf(retbuf, sizeof(retbuf), "%lld", value);
 		return retbuf;
 	} else {
+		if (intent == LI_2REG && value == 0) return "xzr";
 		bool inverted;
 		if ((inverted = value < 0)) value = -value;
 		if (!(value >> 16)) {
@@ -109,7 +110,8 @@ static char* compileIntLiteral_arm64(FILE* dst, int64_t value, uint8_t reg_id, a
 			reg_id, ((inverted ? -value : value) >> 16) & 0xFFFF,
 			reg_id, ((inverted ? -value : value) >> 32) & 0xFFFF,
 			reg_id, (inverted ? -value : value) >> 48);
-		return "x8";
+		snprintf(retbuf, sizeof(retbuf), "x%hhu", reg_id);
+		return retbuf;
 	}
 }
 
@@ -479,16 +481,22 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 			return acc;
 		}
 		case BRB_OP_ADD:
-		case BRB_OP_SUB: {
+		case BRB_OP_SUB:
+		case BRB_OP_MUL:
+		case BRB_OP_DIV:
+		case BRB_OP_DIVS: {
 			static const char* op_postfix[] = {
 				[1] = "b w",
-				[2] = "h w",	
+				[2] = "h w",
 				[4] = "  w",
 				[8] = "  x"
 			};
 			static const char* native_op[] = {
-				[BRB_OP_ADD] = "\tadd x9, x9, x10\n",
-				[BRB_OP_SUB] = "\tsub x9, x9, x10\n"
+				[BRB_OP_ADD]  = "\tadd x9, x9, x10\n",
+				[BRB_OP_SUB]  = "\tsub x9, x9, x10\n",
+				[BRB_OP_MUL]  = "\tmul x9, x9, x10\n",
+				[BRB_OP_DIV]  = "\tudiv x9, x9, x10\n",
+				[BRB_OP_DIVS] = "\tsdiv x9, x9, x10\n"
 			};
 			size_t main_op_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0),
 				op2_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
@@ -558,32 +566,44 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 			return acc;
 		}
 		case BRB_OP_ADDI:
-		case BRB_OP_SUBI: {
+		case BRB_OP_SUBI:
+		case BRB_OP_MULI:
+		case BRB_OP_DIVI:
+		case BRB_OP_DIVSI: {
 			static const char* native_op[] = {
-				[BRB_OP_ADDI] = "\tadd x8, x8, %s\n",
-				[BRB_OP_SUBI] = "\tsub x8, x8, %s\n"
+				[BRB_OP_ADDI]  = "\tadd  x8, x8, %s\n",
+				[BRB_OP_SUBI]  = "\tsub  x8, x8, %s\n",
+				[BRB_OP_MULI]  = "\tmul  x8, x8, %s\n",
+				[BRB_OP_DIVI]  = "\tudiv x8, x8, %s\n",
+				[BRB_OP_DIVSI] = "\tsdiv x8, x8, %s\n"
 			};
-			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
-			const char* op2 = compileIntLiteral_arm64(dst, op->operand_u, 10, LI_BASE, &acc);
-			switch (BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0)) {
-				case 1: return acc
-					+ fprintf(dst, "\tldrb w8, [sp, %s]\n", offset)
-					+ fprintf(dst, native_op[op->type], op2)
-					+ fprintf(dst, "\tstrb w8, [sp, %s]\n", offset);
-				case 2: return acc
-					+ fprintf(dst, "\tldrh w8, [sp, %s]\n", offset)
-					+ fprintf(dst, native_op[op->type], op2)
-					+ fprintf(dst, "\tstrh w8, [sp, %s]\n", offset);
-				case 4: return acc
-					+ fprintf(dst, "\tldr w8, [sp, %s]\n", offset)
-					+ fprintf(dst, native_op[op->type], op2)
-					+ fprintf(dst, "\tstr w8, [sp, %s]\n", offset);
-				case 8: return acc
-					+ fprintf(dst, "\tldr x8, [sp, %s]\n", offset)
-					+ fprintf(dst, native_op[op->type], op2)
-					+ fprintf(dst, "\tstr x8, [sp, %s]\n", offset);
-				default:
-					assert(false, "unexpected argument size");
+			static const char* op_postfix[] = {
+				[1] = "b w8",
+				[2] = "h w8",
+				[4] = "  w8",
+				[8] = "  x8",
+			};
+			static const arm64_LiteralIntent op2_placement[] = {
+				[BRB_OP_ADDI]  = LI_BASE,
+				[BRB_OP_SUBI]  = LI_BASE,
+				[BRB_OP_MULI]  = LI_2REG,
+				[BRB_OP_DIVI]  = LI_2REG,
+				[BRB_OP_DIVSI] = LI_2REG
+			};
+			const size_t op_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0);
+			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[op->type], &acc);
+				return acc
+					+ fprintf(dst, "\tldr%s, [sp, %zu]\n", op_postfix[op_size], vframe_offset)
+					+ fprintf(dst, native_op[op->type], offset)
+					+ fprintf(dst, "\tstr%s, [sp, %zu]\n", op_postfix[op_size], vframe_offset);
+			} else {
+				compileIntLiteral_arm64(dst, vframe_offset, 9, LI_2REG, &acc);
+				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[op->type], &acc);
+				return acc
+					+ fprintf(dst, "\tldr%s, [sp, x9]\n", op_postfix[op_size])
+					+ fprintf(dst, native_op[op->type], offset)
+					+ fprintf(dst, "\tstr%s, [sp, x9]\n", op_postfix[op_size]);
 			}
 		}
 		case BRB_OP_ADDIAT8:
@@ -595,60 +615,66 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 		case BRB_OP_SUBIAT16:
 		case BRB_OP_SUBIAT32:
 		case BRB_OP_SUBIATP:
-		case BRB_OP_SUBIAT64: {
+		case BRB_OP_SUBIAT64:
+		case BRB_OP_MULIAT8:
+		case BRB_OP_MULIAT16:
+		case BRB_OP_MULIAT32:
+		case BRB_OP_MULIATP:
+		case BRB_OP_MULIAT64:
+		case BRB_OP_DIVIAT8:
+		case BRB_OP_DIVIAT16:
+		case BRB_OP_DIVIAT32:
+		case BRB_OP_DIVIATP:
+		case BRB_OP_DIVIAT64:
+		case BRB_OP_DIVSIAT8:
+		case BRB_OP_DIVSIAT16:
+		case BRB_OP_DIVSIAT32:
+		case BRB_OP_DIVSIATP:
+		case BRB_OP_DIVSIAT64: {
 			static const char* op_postfix[] = {
-				[BRB_OP_ADDIAT8]  = "b w8",
-				[BRB_OP_ADDIAT16] = "h w8",
-				[BRB_OP_ADDIAT32] = "  w8",
-				[BRB_OP_ADDIATP]  = "  x8",
-				[BRB_OP_ADDIAT64] = "  x8",
-				[BRB_OP_SUBIAT8]  = "b w8",
-				[BRB_OP_SUBIAT16] = "h w8",
-				[BRB_OP_SUBIAT32] = "  w8",
-				[BRB_OP_SUBIATP]  = "  x8",
-				[BRB_OP_SUBIAT64] = "  x8"
+				[BRB_ADDR_I8]  = "b w8",
+				[BRB_ADDR_I16] = "h w8",
+				[BRB_ADDR_I32] = "  w8",
+				[BRB_ADDR_PTR] = "  x8",
+				[BRB_ADDR_I64] = "  x8",
 			};
-			const char* native_op[] = {
-				[BRB_OP_ADDIAT8]  = "\tadd  x8, x8, %s\n",
-				[BRB_OP_ADDIAT16] = "\tadd  x8, x8, %s\n",
-				[BRB_OP_ADDIAT32] = "\tadd  x8, x8, %s\n",
-				[BRB_OP_ADDIATP]  = "\tadd  x8, x8, %s\n",
-				[BRB_OP_ADDIAT64] = "\tadd  x8, x8, %s\n",
-				[BRB_OP_SUBIAT8]  = "\tsub  x8, x8, %s\n",
-				[BRB_OP_SUBIAT16] = "\tsub  x8, x8, %s\n",
-				[BRB_OP_SUBIAT32] = "\tsub  x8, x8, %s\n",
-				[BRB_OP_SUBIATP]  = "\tsub  x8, x8, %s\n",
-				[BRB_OP_SUBIAT64] = "\tsub  x8, x8, %s\n"
+			static const char* native_op[] = {
+				[BRB_OP_ADD]  = "\tadd  x8, x8, %s\n",
+				[BRB_OP_SUB]  = "\tsub  x8, x8, %s\n",
+				[BRB_OP_MUL]  = "\tmul  x8, x8, %s\n",
+				[BRB_OP_DIV]  = "\tsdiv x8, x8, %s\n",
+				[BRB_OP_DIVS] = "\tsdiv x8, x8, %s\n"
 			};
+			static const arm64_LiteralIntent op2_placement[] = {
+				[BRB_OP_ADD]  = LI_BASE,
+				[BRB_OP_SUB]  = LI_BASE,
+				[BRB_OP_MUL]  = LI_2REG,
+				[BRB_OP_DIV]  = LI_2REG,
+				[BRB_OP_DIVS] = LI_2REG
+			};
+			offset = compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[BRB_GET_BASE_OP_TYPE(op->type)], &acc);
 			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
-				offset = compileIntLiteral_arm64(dst, op->operand_u, 9, LI_BASE, &acc);
 				return acc + fprintf(dst,
 						"\tldr  x8, [sp, %zu]\n"
 						"\tldr%s, [x8]\n",
-						vframe_offset_before, op_postfix[op->type])
-					+ fprintf(dst, native_op[op->type], offset)
-					+ fprintf(dst, "\tstr%s, [sp, %zu]\n", op_postfix[op->type], vframe_offset);
+						vframe_offset_before, op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)])
+					+ fprintf(dst, native_op[BRB_GET_BASE_OP_TYPE(op->type)], offset)
+					+ fprintf(dst, "\tstr%s, [sp, %zu]\n", op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)], vframe_offset);
 			} else {
 				static uint8_t native_offset[] = {
-					[BRB_OP_ADDIAT8]  = 7,
-					[BRB_OP_ADDIAT16] = 6,
-					[BRB_OP_ADDIAT32] = 4,
-					[BRB_OP_ADDIATP]  = 0,
-					[BRB_OP_ADDIAT64] = 0,
-					[BRB_OP_SUBIAT8]  = 7,
-					[BRB_OP_SUBIAT16] = 6,
-					[BRB_OP_SUBIAT32] = 4,
-					[BRB_OP_SUBIATP]  = 0,
-					[BRB_OP_SUBIAT64] = 0
+					[BRB_ADDR_I8]  = 7,
+					[BRB_ADDR_I16] = 6,
+					[BRB_ADDR_I32] = 4,
+					[BRB_ADDR_PTR] = 0,
+					[BRB_ADDR_I64] = 0,
 				};
 				compileIntLiteral_arm64(dst, vframe_offset_before, 9, LI_2REG, &acc);
-				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, LI_BASE, &acc);
 				return acc + fprintf(dst,
 						"\tldr  x8, [x9], %hhu\n"
 						"\tldr%s, [x8]\n",
-						native_offset[op->type], op_postfix[op->type])
-					+ fprintf(dst, native_op[op->type], offset)
-					+ fprintf(dst, "\tstr%s, [x9]\n", op_postfix[op->type]);
+						native_offset[BRB_GET_ADDR_OP_TYPE(op->type)], op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)])
+					+ fprintf(dst, native_op[BRB_GET_BASE_OP_TYPE(op->type)], offset)
+					+ fprintf(dst, "\tstr%s, [x9]\n", op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)]);
 			}
 		}
 		case BRB_OP_DROP:

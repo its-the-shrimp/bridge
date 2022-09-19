@@ -27,10 +27,10 @@ Data Types:
 	// push 2 byte-sized integer literal <x> onto the stack
 	BRB_OP_I32,      // [] -> i32 <x> -> [i32]
 	// push 4 byte-sized integer literal <x> onto the stack
-	BRB_OP_I64,      // [] -> i64 <x> -> [i64]
-	// push 8 byte-sized integer literal <x> onto the stack
 	BRB_OP_PTR,     // [] -> ptr <x> -> [ptr]
 	// pushes pointer-sized integer literal <x> onto the stack
+	BRB_OP_I64,      // [] -> i64 <x> -> [i64]
+	// push 8 byte-sized integer literal <x> onto the stack
 	BRB_OP_ADDR,     // [A, *] -> addr <i> -> [A, *, ptr]
 	// push address of the stack item at index <i> onto the stack; <i> refers to the index on the stack after pushing the address
 	BRB_OP_DBADDR,   // [] -> dbaddr <i> -> [ptr]
@@ -38,7 +38,7 @@ Data Types:
 	BRB_OP_LD,       // [A:ptr] -> ld <T> -> [<T>]
 	// replace address A with item of type <T> loaded from it
 	BRB_OP_STR,      // [A:ptr, B] -> str -> []
-	// store B at the address A; same as *A = B;
+	// store B at the address A; same as (void)(*A = B)
 	BRB_OP_SYS,
 	// execute system procedure <f> with arguments from the stack
 	/* System calls:
@@ -54,76 +54,76 @@ Data Types:
 	BRB_OP_ADDI, 	 // [A:int] -> add-i <n> -> [typeof A]
 	// increment A by <n>
 	BRB_OP_ADDIAT8,  // [A:ptr] -> add-i@8 <n> -> [i8]
-	// increment an `i8` at address A by <n>, replace A with the resulting value; like *(uint8_t*)A += 1
+	// increment an `i8` at address A by <n>, replace A with the resulting value; like *(uint8_t*)A += n
 	BRB_OP_ADDIAT16,  // [A:ptr] -> add-i@16 <n> -> [i16]
-	// increment an `i16` at address A by <n>, replace A with the resulting value; like *(uint16_t*)A += 1
+	// increment an `i16` at address A by <n>, replace A with the resulting value; like *(uint16_t*)A += n
 	BRB_OP_ADDIAT32,  // [A:ptr] -> add-i@32 <n> -> [i32]
-	// increment an `i32` at address A by <n>, replace A with the resulting value; like *(uint32_t*)A += 1
+	// increment an `i32` at address A by <n>, replace A with the resulting value; like *(uint32_t*)A += n
 	BRB_OP_ADDIATP,   // [A:ptr] -> add-i@p <n>  -> [ptr]
-	// increment a `ptr` at address A by <n>, replace A with the resulting value; like *(uintptr_t*)A += 1
+	// increment a `ptr` at address A by <n>, replace A with the resulting value; like *(uintptr_t*)A += n
 	BRB_OP_ADDIAT64,  // [A:ptr] -> add-i@64 <n> -> [i64]
-	// increment an `i64` at address A by <n>, replace A with the resulting value; like *(uint64_t*)A += 1
+	// increment an `i64` at address A by <n>, replace A with the resulting value; like *(uint64_t*)A += n
 
 	BRB_OP_SUB,      // [A:int, B:int] -> sub -> [typeof A]
 	// replace A and B with their difference, that is of the same type as A
 	BRB_OP_SUBI, 	 // [A:int] -> sub-i <n> -> [typeof A]
 	// decrement A by <n>
-	BRB_OP_SUBIAT8,   // [A:ptr] -> sub-i@8 <n> -> [i8]
-	// decrement an `i8` at address A by <n>
-	BRB_OP_SUBIAT16,  // [A:ptr] -> sub-i@16 <n> -> [i16]
-	// decrement an `i16` at address A by <n>
-	BRB_OP_SUBIAT32,  // [A:ptr] -> sub-i@32 <n> -> [i32]
-	// decrement an `i32` at address A by <n>
-	BRB_OP_SUBIATP,   // [A:ptr] -> sub-i@p <n>  -> [ptr]
-	// decrement a `ptr` at address A by <n>
-	BRB_OP_SUBIAT64,  // [A:ptr] -> sub-i@64 <n> -> [i64]
-	// decrement an `i64` at address A by <n>
-/* TODO:
+	BRB_OP_SUBIAT8,  // [A:ptr] -> sub-i@8 <n> -> [i8]
+	// decrement an `i8` at address A by <n>, replace A with the resulting value; like *(uint8_t*)A -= n
+	BRB_OP_SUBIAT16, // [A:ptr] -> sub-i@16 <n> -> [i16]
+	// decrement an `i16` at address A by <n>, replace A with the resulting value; like *(uint16_t*)A -= n
+	BRB_OP_SUBIAT32, // [A:ptr] -> sub-i@32 <n> -> [i32]
+	// decrement an `i32` at address A by <n>, replace A with the resulting value; like *(uint32_t*)A -= n
+	BRB_OP_SUBIATP,  // [A:ptr] -> sub-i@p <n>  -> [ptr]
+	// decrement a `ptr` at address A by <n>, replace A with the resulting value; like *(uintptr_t*)A -= n
+	BRB_OP_SUBIAT64, // [A:ptr] -> sub-i@64 <n> -> [i64]
+	// decrement an `i64` at address A by <n>, replace A with the resulting value; like *(uint64_t*)A -= n
 
-	BRB_OP_MUL,      // [A:int, B:int] -> mul -> [int]
-	// replace A and B with their product
-	BRB_OP_MULI, 	 // [A:int] -> mul-i <n> -> [int]
+	BRB_OP_MUL,      // [A:int, B:int] -> mul -> [typeof A]
+	// replace A and B with their product, that is of the same type as A
+	BRB_OP_MULI, 	 // [A:int] -> mul-i <n> -> [typeof A]
 	// multiply A by <n>
-	BRB_OP_MULI@8,   // [A:ptr] -> mul-i@8 <n> -> [A:ptr]
-	// multiply an `i8` at address A by <n>
-	BRB_OP_MULI@16,  // [A:ptr] -> mul-i@16 <n> -> [A:ptr]
-	// multiply an `i16` at address A by <n>
-	BRB_OP_MULI@32,  // [A:ptr] -> mul-i@32 <n> -> [A:ptr]
-	// multiply an `i32` at address A by <n>
-	BRB_OP_MULI@P,   // [A:ptr] -> mul-i@p <n>  -> [A:ptr]
-	// multiply a `ptr` at address A by <n>
-	BRB_OP_MULI@64,  // [A:ptr] -> mul-i@64 <n> -> [A:ptr]
-	// multiply an `i64` at address A by <n>
+	BRB_OP_MULIAT8,  // [A:ptr] -> mul-i@8 <n> -> [i8]
+	// multiply an `i8` at address A by <n>, replaces A with the resulting value; like *(uint8_t*)A *= n
+	BRB_OP_MULIAT16, // [A:ptr] -> mul-i@16 <n> -> [i16]
+	// multiply an `i16` at address A by <n>, replaces A with the resulting value; like *(uint16_t*)A *= n
+	BRB_OP_MULIAT32, // [A:ptr] -> mul-i@32 <n> -> [i32]
+	// multiply an `i32` at address A by <n>, replaces A with the resulting value; like *(uint32_t*)A *= n
+	BRB_OP_MULIATP,  // [A:ptr] -> mul-i@p <n>  -> [ptr]
+	// multiply a `ptr` at address A by <n>, replaces A with the resulting value; like *(uintptr_t*)A *= n
+	BRB_OP_MULIAT64, // [A:ptr] -> mul-i@64 <n> -> [i64]
+	// multiply an `i64` at address A by <n>, replaces A with the resulting value; like *(uint64_t*)A *= n
 
-	BRB_OP_DIV,      // [A:int, B:int] -> div -> [int]
+	BRB_OP_DIV,      // [A:int, B:int] -> div -> [typeof A]
 	// replace A and B with their quotient; division is unsigned
-	BRB_OP_DIVI, 	 // [A:int] -> div-i <n> -> [int]
+	BRB_OP_DIVI, 	 // [A:int] -> div-i <n> -> [typeof A]
 	// divide A by <n>; division is unsigned
-	BRB_OP_DIVI@8,   // [A:ptr] -> div-i@8 <n> -> [A:ptr]
-	// divide an `i8` at address A by <n>; division is unsigned
-	BRB_OP_DIVI@16,  // [A:ptr] -> div-i@16 <n> -> [A:ptr]
-	// divide an `i16` at address A by <n>; division is unsigned
-	BRB_OP_DIVI@32,  // [A:ptr] -> div-i@32 <n> -> [A:ptr]
-	// divide an `i32` at address A by <n>; division is unsigned
-	BRB_OP_DIVI@P,   // [A:ptr] -> div-i@p <n>  -> [A:ptr]
-	// divide a `ptr` at address A by <n>; division is unsigned
-	BRB_OP_DIVI@64,  // [A:ptr] -> div-i@64 <n> -> [A:ptr]
-	// divide an `i64` at address A by <n>; division is unsigned
+	BRB_OP_DIVIAT8,   // [A:ptr] -> div-i@8 <n> -> [i8]
+	// divide an `i8` at address A by <n>, replaces A with the resulting value; like *(uint64_t*)A /= n; division is unsigned
+	BRB_OP_DIVIAT16,  // [A:ptr] -> div-i@16 <n> -> [i16]
+	// divide an `i16` at address A by <n>, replaces A with the resulting value; like *(uint64_t*)A /= n; division is unsigned
+	BRB_OP_DIVIAT32,  // [A:ptr] -> div-i@32 <n> -> [i32]
+	// divide an `i32` at address A by <n>, replaces A with the resulting value; like *(uint64_t*)A /= n; division is unsigned
+	BRB_OP_DIVIATP,   // [A:ptr] -> div-i@p <n>  -> [ptr]
+	// divide a `ptr` at address A by <n>, replaces A with the resulting value; like *(uint64_t*)A /= n; division is unsigned
+	BRB_OP_DIVIAT64,  // [A:ptr] -> div-i@64 <n> -> [i64]
+	// divide an `i64` at address A by <n>, replaces A with the resulting value; like *(uint64_t*)A /= n; division is unsigned
 
-	BRB_OP_DIVS,     // [A:int, B:int] -> divs -> [int]
+	BRB_OP_DIVS,     // [A:int, B:int] -> divs -> [typeof A]
 	// replace A and B with their quotient; divsision is signed
-	BRB_OP_DIVSI, 	 // [A:int] -> divs-i <n> -> [int]
+	BRB_OP_DIVSI, 	 // [A:int] -> divs-i <n> -> [typeof A]
 	// divide A by <n>; division is signed
-	BRB_OP_DIVSI@8,  // [A:ptr] -> divs-i@8 <n> -> [A:ptr]
-	// divide an `i8` at address A by <n>; division is signed
-	BRB_OP_DIVSI@16, // [A:ptr] -> divs-i@16 <n> -> [A:ptr]
-	// divide an `i16` at address A by <n>; division is signed
-	BRB_OP_DIVSI@32, // [A:ptr] -> divs-i@32 <n> -> [A:ptr]
-	// divide an `i32` at address A by <n>; division is signed
-	BRB_OP_DIVSI@P,  // [A:ptr] -> divs-i@p <n>  -> [A:ptr]
-	// divide a `ptr` at address A by <n>; division is signed
-	BRB_OP_DIVSI@64, // [A:ptr] -> divs-i@64 <n> -> [A:ptr]
-	// divide an `i64` at address A by <n>; division is signed
+	BRB_OP_DIVSIAT8,  // [A:ptr] -> divs-i@8 <n> -> [i8]
+	// divide an `i8` at address A by <n>, replaces A with the resulting value; like *(int8_t*)A /= n; division is signed
+	BRB_OP_DIVSIAT16, // [A:ptr] -> divs-i@16 <n> -> [i16]
+	// divide an `i16` at address A by <n>, replaces A with the resulting value; like *(int16_t*)A /= n; division is signed
+	BRB_OP_DIVSIAT32, // [A:ptr] -> divs-i@32 <n> -> [i32]
+	// divide an `i32` at address A by <n>, replaces A with the resulting value; like *(int32_t*)A /= n; division is signed
+	BRB_OP_DIVSIATP,  // [A:ptr] -> divs-i@p <n>  -> [ptr]
+	// divide a `ptr` at address A by <n>, replaces A with the resulting value; like *(intptr_t*)A /= n; division is signed
+	BRB_OP_DIVSIAT64, // [A:ptr] -> divs-i@64 <n> -> [i64]
+	// divide an `i64` at address A by <n>, replaces A with the resulting value; like *(int64_t*)A /= n; division is signed
+/* TODO:
 
 	BRB_OP_MOD,      // [A:int, B:int] -> mod -> [int]
 	// replace A and B with the remainder of A / B; division is unsigned
@@ -348,19 +348,30 @@ Data Types:
 } BRB_OpType;
 
 extern const sbuf BRB_opNames[];
-extern const uint8_t BRB_opFlags[];
+extern const uint64_t BRB_opFlags[];
 
-#define BRB_OPF_OPERAND_INT8 1
-#define BRB_OPF_OPERAND_INT  2
-#define BRB_OPF_OPERAND_TYPE 4
-#define BRB_OPF_OPERAND_VAR_NAME     (BRB_OPF_OPERAND_INT  |  8)
-#define BRB_OPF_OPERAND_DB_NAME      (BRB_OPF_OPERAND_INT  | 16)
-#define BRB_OPF_OPERAND_SYSCALL_NAME (BRB_OPF_OPERAND_INT8 | 32)
-#define BRB_OPF_OPERAND_BUILTIN      (BRB_OPF_OPERAND_INT8 | 64)
-#define BRB_OPF_HAS_OPERAND   \
-	( BRB_OPF_OPERAND_INT8 \
-	| BRB_OPF_OPERAND_INT   \
-	| BRB_OPF_OPERAND_TYPE   )
+typedef enum {
+	BRB_OPERAND_NONE,
+	BRB_OPERAND_INT8,
+	BRB_OPERAND_INT,
+	BRB_OPERAND_TYPE,
+	BRB_OPERAND_VAR_NAME,
+	BRB_OPERAND_DB_NAME,
+	BRB_OPERAND_SYSCALL_NAME,
+	BRB_OPERAND_BUILTIN,
+} BRB_OperandType;
+#define BRB_GET_OPERAND_TYPE(type) ((BRB_OperandType)(BRB_opFlags[type] & 7))
+
+typedef enum {
+	BRB_ADDR_NONE,
+	BRB_ADDR_I8,
+	BRB_ADDR_I16,
+	BRB_ADDR_I32,
+	BRB_ADDR_PTR,
+	BRB_ADDR_I64,
+} BRB_AddrOperandType;
+#define BRB_GET_ADDR_OP_TYPE(type) ((BRB_AddrOperandType)((BRB_opFlags[type] >> 3) & 7))
+#define BRB_GET_BASE_OP_TYPE(type) ((BRB_OpType)(BRB_opFlags[type] >> 6))
 
 typedef enum {
 	BRB_TYPE_I8,

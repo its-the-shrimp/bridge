@@ -13,8 +13,8 @@ typedef enum {
 	BRB_KW_I8,
 	BRB_KW_I16,
 	BRB_KW_I32,
-	BRB_KW_I64,
 	BRB_KW_PTR,
+	BRB_KW_I64,
 	BRB_KW_ADDR,
 	BRB_KW_DBADDR,
 	BRB_KW_LD,
@@ -35,6 +35,27 @@ typedef enum {
 	BRB_KW_SUBIAT32,
 	BRB_KW_SUBIATP,
 	BRB_KW_SUBIAT64,
+	BRB_KW_MUL,
+	BRB_KW_MULI,
+	BRB_KW_MULIAT8,
+	BRB_KW_MULIAT16,
+	BRB_KW_MULIAT32,
+	BRB_KW_MULIATP,
+	BRB_KW_MULIAT64,
+	BRB_KW_DIV,
+	BRB_KW_DIVI,
+	BRB_KW_DIVIAT8,
+	BRB_KW_DIVIAT16,
+	BRB_KW_DIVIAT32,
+	BRB_KW_DIVIATP,
+	BRB_KW_DIVIAT64,
+	BRB_KW_DIVS,
+	BRB_KW_DIVSI,
+	BRB_KW_DIVSIAT8,
+	BRB_KW_DIVSIAT16,
+	BRB_KW_DIVSIAT32,
+	BRB_KW_DIVSIATP,
+	BRB_KW_DIVSIAT64,
 	BRB_KW_DROP,
 	BRB_KW_DATA,
 	BRB_KW_BYTES,
@@ -45,43 +66,64 @@ typedef enum {
 	BRB_N_KWS
 } BRB_AsmKw;
 static sbuf asm_kws[] = {
-	[BRB_KW_NOP]      = fromcstr("nop"),
-	[BRB_KW_END]      = fromcstr("end"),
-	[BRB_KW_I8]       = fromcstr("i8"),
-	[BRB_KW_I16]      = fromcstr("i16"),
-	[BRB_KW_I32]      = fromcstr("i32"),
-	[BRB_KW_I64]      = fromcstr("i64"),
-	[BRB_KW_PTR]      = fromcstr("ptr"),
-	[BRB_KW_ADDR]     = fromcstr("addr"),
-	[BRB_KW_DBADDR]   = fromcstr("dbaddr"),
-	[BRB_KW_LD]       = fromcstr("ld"),
-	[BRB_KW_STR]      = fromcstr("str"),
-	[BRB_KW_SYS]      = fromcstr("sys"),
-	[BRB_KW_ADD]      = fromcstr("add"),
-	[BRB_KW_ADDI]     = fromcstr("add-i"),
-	[BRB_KW_ADDIAT8]  = fromcstr("add-i@8"),
-	[BRB_KW_ADDIAT16] = fromcstr("add-i@16"),
-	[BRB_KW_ADDIAT32] = fromcstr("add-i@32"),
-	[BRB_KW_ADDIATP]  = fromcstr("add-i@p"),
-	[BRB_KW_ADDIAT64] = fromcstr("add-i@64"),
-	[BRB_KW_SUB]      = fromcstr("sub"),
-	[BRB_KW_SUBI]     = fromcstr("sub-i"),
-	[BRB_KW_SUBIAT8]  = fromcstr("sub-i@8"),
-	[BRB_KW_SUBIAT16] = fromcstr("sub-i@16"),
-	[BRB_KW_SUBIAT32] = fromcstr("sub-i@32"),
-	[BRB_KW_SUBIATP]  = fromcstr("sub-i@p"),
-	[BRB_KW_SUBIAT64] = fromcstr("sub-i@64"),
-	[BRB_KW_DROP]     = fromcstr("drop"),
-	[BRB_KW_BUILTIN]  = fromcstr("builtin"),
-	[BRB_KW_DATA]     = fromcstr("data"),
-	[BRB_KW_BYTES]    = fromcstr("bytes"),
-	[BRB_KW_TEXT]     = fromcstr("text"),
-	[BRB_KW_ZERO]     = fromcstr("zero"),
-	[BRB_KW_VOID]     = fromcstr("void"),
-	[BRB_KW_ENTRY]    = fromcstr("entry"),
+	[BRB_KW_NOP]       = fromcstr("nop"),
+	[BRB_KW_END]       = fromcstr("end"),
+	[BRB_KW_I8]        = fromcstr("i8"),
+	[BRB_KW_I16]       = fromcstr("i16"),
+	[BRB_KW_I32]       = fromcstr("i32"),
+	[BRB_KW_PTR]       = fromcstr("ptr"),
+	[BRB_KW_I64]       = fromcstr("i64"),
+	[BRB_KW_ADDR]      = fromcstr("addr"),
+	[BRB_KW_DBADDR]    = fromcstr("dbaddr"),
+	[BRB_KW_LD]        = fromcstr("ld"),
+	[BRB_KW_STR]       = fromcstr("str"),
+	[BRB_KW_SYS]       = fromcstr("sys"),
+	[BRB_KW_ADD]       = fromcstr("add"),
+	[BRB_KW_ADDI]      = fromcstr("add-i"),
+	[BRB_KW_ADDIAT8]   = fromcstr("add-i@8"),
+	[BRB_KW_ADDIAT16]  = fromcstr("add-i@16"),
+	[BRB_KW_ADDIAT32]  = fromcstr("add-i@32"),
+	[BRB_KW_ADDIATP]   = fromcstr("add-i@p"),
+	[BRB_KW_ADDIAT64]  = fromcstr("add-i@64"),
+	[BRB_KW_SUB]       = fromcstr("sub"),
+	[BRB_KW_SUBI]      = fromcstr("sub-i"),
+	[BRB_KW_SUBIAT8]   = fromcstr("sub-i@8"),
+	[BRB_KW_SUBIAT16]  = fromcstr("sub-i@16"),
+	[BRB_KW_SUBIAT32]  = fromcstr("sub-i@32"),
+	[BRB_KW_SUBIATP]   = fromcstr("sub-i@p"),
+	[BRB_KW_SUBIAT64]  = fromcstr("sub-i@64"),
+	[BRB_KW_MUL]       = fromcstr("mul"),
+	[BRB_KW_MULI]      = fromcstr("mul-i"),
+	[BRB_KW_MULIAT8]   = fromcstr("mul-i@8"),
+	[BRB_KW_MULIAT16]  = fromcstr("mul-i@16"),
+	[BRB_KW_MULIAT32]  = fromcstr("mul-i@32"),
+	[BRB_KW_MULIATP]   = fromcstr("mul-i@p"),
+	[BRB_KW_MULIAT64]  = fromcstr("mul-i@64"),
+	[BRB_KW_DIV]       = fromcstr("div"),
+	[BRB_KW_DIVI]      = fromcstr("div-i"),
+	[BRB_KW_DIVIAT8]   = fromcstr("div-i@8"),
+	[BRB_KW_DIVIAT16]  = fromcstr("div-i@16"),
+	[BRB_KW_DIVIAT32]  = fromcstr("div-i@32"),
+	[BRB_KW_DIVIATP]   = fromcstr("div-i@p"),
+	[BRB_KW_DIVIAT64]  = fromcstr("div-i@64"),
+	[BRB_KW_DIVS]      = fromcstr("divs"),
+	[BRB_KW_DIVSI]     = fromcstr("divs-i"),
+	[BRB_KW_DIVSIAT8]  = fromcstr("divs-i@8"),
+	[BRB_KW_DIVSIAT16] = fromcstr("divs-i@16"),
+	[BRB_KW_DIVSIAT32] = fromcstr("divs-i@32"),
+	[BRB_KW_DIVSIATP]  = fromcstr("divs-i@p"),
+	[BRB_KW_DIVSIAT64] = fromcstr("divs-i@64"),
+	[BRB_KW_DROP]      = fromcstr("drop"),
+	[BRB_KW_BUILTIN]   = fromcstr("builtin"),
+	[BRB_KW_DATA]      = fromcstr("data"),
+	[BRB_KW_BYTES]     = fromcstr("bytes"),
+	[BRB_KW_TEXT]      = fromcstr("text"),
+	[BRB_KW_ZERO]      = fromcstr("zero"),
+	[BRB_KW_VOID]      = fromcstr("void"),
+	[BRB_KW_ENTRY]     = fromcstr("entry"),
 	(sbuf){0}
 };
-static_assert(BRB_N_OPS == 28, "not all operations have their names defined in the assembler");
+static_assert(BRB_N_OPS == 49, "not all operations have their names defined in the assembler");
 static_assert(BRB_N_DP_TYPES == 10, "not all data pieces have their names defined in the assemblr");
 
 
@@ -156,50 +198,18 @@ static BRB_Error getType(BRP* obj, BRB_Type* res_p)
 	return (BRB_Error){0};
 }
 
-static BRB_OpType kw_to_op[] = {
-	[BRB_KW_NOP]      = BRB_OP_NOP,
-	[BRB_KW_END]      = BRB_OP_END,
-	[BRB_KW_I8]       = BRB_OP_I8,
-	[BRB_KW_I16]      = BRB_OP_I16,
-	[BRB_KW_I32]      = BRB_OP_I32,
-	[BRB_KW_I64]      = BRB_OP_I64,
-	[BRB_KW_PTR]      = BRB_OP_PTR,
-	[BRB_KW_ADDR]     = BRB_OP_ADDR,
-	[BRB_KW_DBADDR]   = BRB_OP_DBADDR,
-	[BRB_KW_LD]       = BRB_OP_LD,
-	[BRB_KW_STR]      = BRB_OP_STR,
-	[BRB_KW_SYS]      = BRB_OP_SYS,
-	[BRB_KW_BUILTIN]  = BRB_OP_BUILTIN,
-	[BRB_KW_ADD]      = BRB_OP_ADD,
-	[BRB_KW_ADDI]     = BRB_OP_ADDI,
-	[BRB_KW_ADDIAT8]  = BRB_OP_ADDIAT8,
-	[BRB_KW_ADDIAT16] = BRB_OP_ADDIAT16,
-	[BRB_KW_ADDIAT32] = BRB_OP_ADDIAT32,
-	[BRB_KW_ADDIATP]  = BRB_OP_ADDIATP,
-	[BRB_KW_ADDIAT64] = BRB_OP_ADDIAT64,
-	[BRB_KW_SUB]      = BRB_OP_SUB,
-	[BRB_KW_SUBI]     = BRB_OP_SUBI,
-	[BRB_KW_SUBIAT8]  = BRB_OP_SUBIAT8,
-	[BRB_KW_SUBIAT16] = BRB_OP_SUBIAT16,
-	[BRB_KW_SUBIAT32] = BRB_OP_SUBIAT32,
-	[BRB_KW_SUBIATP]  = BRB_OP_SUBIATP,
-	[BRB_KW_SUBIAT64] = BRB_OP_SUBIAT64,
-	[BRB_KW_DROP]     = BRB_OP_DROP
-};
-static_assert(BRB_N_OPS == 28, "not all BRB operations are defined in the assembler");
-
 static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op* op)
 {
 	BRB_Error err;
 	BRP_Token token = BRP_fetchToken(obj);
 	if (token.type != TOKEN_KEYWORD || token.keyword_id >= BRB_N_OPS)
 		return addLoc((BRB_Error){.type = BRB_ERR_OP_NAME_EXPECTED}, token);
-		
-	op->type = kw_to_op[token.keyword_id];
-	switch (BRB_opFlags[op->type]) {
-		case 0:
+
+	op->type = (BRB_OpType)token.keyword_id;
+	switch (BRB_GET_OPERAND_TYPE(op->type)) {
+		case BRB_OPERAND_NONE:
 			break;
-		case BRB_OPF_OPERAND_SYSCALL_NAME: {
+		case BRB_OPERAND_SYSCALL_NAME: {
 			op->type = BRB_OP_SYS;
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_WORD)
 				return addLoc((BRB_Error){.type = BRB_ERR_SYSCALL_NAME_EXPECTED}, token);
@@ -214,18 +224,18 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 			}
 			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_SYSCALL_NAME_EXPECTED}, token);
 		} break;
-		case BRB_OPF_OPERAND_INT8:
-		case BRB_OPF_OPERAND_INT:
+		case BRB_OPERAND_INT8:
+		case BRB_OPERAND_INT:
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_INT)
 				return addLoc((BRB_Error){.type = BRB_ERR_INT_OPERAND_EXPECTED}, token);
 			op->operand_u = token.value;
 			break;
-		case BRB_OPF_OPERAND_VAR_NAME:
+		case BRB_OPERAND_VAR_NAME:
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_INT)
 				assert(false, "named stack items are not implemented yet");
 			op->operand_u = token.value;
 			break;
-		case BRB_OPF_OPERAND_DB_NAME:
+		case BRB_OPERAND_DB_NAME:
 			token = BRP_fetchToken(obj);
 			switch (token.type) {
 				case TOKEN_INT:
@@ -246,10 +256,10 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 					return addLoc((BRB_Error){.type = BRB_ERR_INT_OR_NAME_OPERAND_EXPECTED}, token);
 			}
 			break;
-		case BRB_OPF_OPERAND_TYPE:
+		case BRB_OPERAND_TYPE:
 			if ((err = getType(obj, &op->operand_type)).type) return err;
 			break;
-		case BRB_OPF_OPERAND_BUILTIN: {
+		case BRB_OPERAND_BUILTIN: {
 			if ((token = BRP_fetchToken(obj)).type != TOKEN_WORD)
 				return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_OPERAND_EXPECTED}, token);
 			op->operand_u = 0;
@@ -263,7 +273,6 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, uint32_t proc_id, B
 			}
 			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_OPERAND_EXPECTED}, token);
 		} break;
-		case BRB_N_KWS:
 		default:
 			return addLoc((BRB_Error){.type = BRB_ERR_OP_NAME_EXPECTED}, token);
 	}

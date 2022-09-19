@@ -184,16 +184,20 @@ static BRB_Error loadOp(BRB_ModuleLoader* loader, uint32_t proc_id)
 	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_OPCODE};
 	if (op.type >= BRB_N_OPS) return (BRB_Error){.type = BRB_ERR_INVALID_OPCODE, .opcode = op.type};
 // loading the operand, if needed
-	switch (BRB_opFlags[op.type] & BRB_OPF_HAS_OPERAND) {
-		case BRB_OPF_OPERAND_INT8:
+	switch (BRB_GET_OPERAND_TYPE(op.type)) {
+		case BRB_OPERAND_INT8:
 			op.operand_u = loadInt8(loader->src, &loader->n_fetched);
 			break;
-		case BRB_OPF_OPERAND_INT:
+		case BRB_OPERAND_INT:
+		case BRB_OPERAND_BUILTIN:
+		case BRB_OPERAND_VAR_NAME:
+		case BRB_OPERAND_DB_NAME:
+		case BRB_OPERAND_SYSCALL_NAME:
 			op.operand_u = loadInt(loader->src, &loader->n_fetched);
 			break;
-		case BRB_OPF_OPERAND_TYPE:
+		case BRB_OPERAND_TYPE:
 			op.operand_type = loadType(loader->src, &loader->n_fetched);
-		case 0:
+		case BRB_OPERAND_NONE:
 			break;
 		default:
 			assert(false, "invalid operation type info");

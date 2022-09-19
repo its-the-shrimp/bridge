@@ -50,6 +50,8 @@
 	Example:
 		str Bytes.builtin <<.(RStream& dst): ...
 
+- Implicit return variable, like `result` keyword in Nim
+
 - BRP: enhanced integer literals:
 	Specifying number of kilobytes:
 		malloc(5KB); // same as malloc(5 * 1024);
@@ -63,16 +65,11 @@
 	Syntax for function types is the following:
 		String <- (s64&) f; // defines `f` as a reference to a function that accepts a reference to a 64-bit integer and returns a `String` object
 
-- Interfaces
-	Example:
-		with [type T] interface Sized {
-			int64 size(T& self);
-		}
-
 - Exceptions
 	Theoretically, any type can be thrown as an exception
 	int64 div(int64 x, int64 y):
 		if (y == 0) throw MathError() else return x / y;
+- Traits and some kinda metaprogramming
 
 - Bytecode optimizations
 - x86-64 support

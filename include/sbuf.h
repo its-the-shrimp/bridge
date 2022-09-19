@@ -664,9 +664,9 @@ char fputcesc(FILE* fd, unsigned char obj, unsigned char format)
 		case '\\':
 			return fwrite("\\\\", 1, 2, fd);
 		case '\'':
-			return fwrite("\\'", 1, 2, fd);
+			return format & BYTEFMT_ESC_QUOTE ? fwrite("\\'", 1, 2, fd) : fputc('\'', fd) != EOF;
 		case '"':
-			return fwrite("\\\"", 1, 2, fd);
+			return format & BYTEFMT_ESC_DQUOTE ? fwrite("\\\"", 1, 2, fd) : fputc('"', fd) != EOF;
 		default:
 			if (obj > 0x1F && obj < 0x7F) {
 				return fputc(obj, fd) != EOF;

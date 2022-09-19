@@ -78,24 +78,24 @@ static long printDataPiece(BRB_DataPiece piece, const BRB_Module* module, FILE* 
 
 static long printOp(BRB_Op op, const BRB_Module* module, FILE* dst)
 {
-	switch (BRB_opFlags[op.type]) {
-		case BRB_OPF_OPERAND_INT8:
-		case BRB_OPF_OPERAND_INT:
-		case BRB_OPF_OPERAND_VAR_NAME:
+	switch (BRB_GET_OPERAND_TYPE(op.type)) {
+		case BRB_OPERAND_INT8:
+		case BRB_OPERAND_INT:
+		case BRB_OPERAND_VAR_NAME:
 			return fprintf(dst, "\t%.*s %llu\n", unpack(BRB_opNames[op.type]), op.operand_u);
-		case BRB_OPF_OPERAND_TYPE:
+		case BRB_OPERAND_TYPE:
 			return fprintf(dst, "\t%.*s ", unpack(BRB_opNames[op.type]))
 				+ BRB_printType(op.operand_type, dst)
 				+ fputstr(dst, "\n");
-		case BRB_OPF_OPERAND_DB_NAME:
+		case BRB_OPERAND_DB_NAME:
 			return fprintf(dst, "\t%.*s \"", unpack(BRB_opNames[op.type]))
 				+ fputstresc(dst, module->seg_data.data[op.operand_u].name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
 				+ fputstr(dst, "\"\n");
-		case BRB_OPF_OPERAND_SYSCALL_NAME:
+		case BRB_OPERAND_SYSCALL_NAME:
 			return fprintf(dst, "\t%.*s %.*s\n", unpack(BRB_opNames[op.type]), unpack(BRB_syscallNames[op.operand_u]));
-		case BRB_OPF_OPERAND_BUILTIN:
+		case BRB_OPERAND_BUILTIN:
 			return fprintf(dst, "\t%.*s %.*s\n", unpack(BRB_opNames[op.type]), unpack(BRB_builtinNames[op.operand_u]));
-		case 0:
+		case BRB_OPERAND_NONE:
 			return fprintf(dst, "\t%.*s\n", unpack(BRB_opNames[op.type]));
 		default:	
 			assert(false, "unknown operation type %u", op.type);
