@@ -484,7 +484,9 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 		case BRB_OP_SUB:
 		case BRB_OP_MUL:
 		case BRB_OP_DIV:
-		case BRB_OP_DIVS: {
+		case BRB_OP_DIVS:
+		case BRB_OP_MOD:
+		case BRB_OP_MODS: {
 			static const char* op_postfix[] = {
 				[1] = "b w",
 				[2] = "h w",
@@ -496,7 +498,11 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				[BRB_OP_SUB]  = "\tsub x9, x9, x10\n",
 				[BRB_OP_MUL]  = "\tmul x9, x9, x10\n",
 				[BRB_OP_DIV]  = "\tudiv x9, x9, x10\n",
-				[BRB_OP_DIVS] = "\tsdiv x9, x9, x10\n"
+				[BRB_OP_DIVS] = "\tsdiv x9, x9, x10\n",
+				[BRB_OP_MOD]  = "\tudiv x11, x9, x10\n"
+						"\tmsub x9, x11, x10, x9\n",
+				[BRB_OP_MODS] = "\tsdiv x11, x9, x10\n"
+						"\tmsub x9, x11, x10, x9\n"
 			};
 			size_t main_op_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0),
 				op2_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
@@ -569,13 +575,19 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 		case BRB_OP_SUBI:
 		case BRB_OP_MULI:
 		case BRB_OP_DIVI:
-		case BRB_OP_DIVSI: {
+		case BRB_OP_DIVSI:
+		case BRB_OP_MODI:
+		case BRB_OP_MODSI: {
 			static const char* native_op[] = {
 				[BRB_OP_ADDI]  = "\tadd  x8, x8, %s\n",
 				[BRB_OP_SUBI]  = "\tsub  x8, x8, %s\n",
 				[BRB_OP_MULI]  = "\tmul  x8, x8, %s\n",
 				[BRB_OP_DIVI]  = "\tudiv x8, x8, %s\n",
-				[BRB_OP_DIVSI] = "\tsdiv x8, x8, %s\n"
+				[BRB_OP_DIVSI] = "\tsdiv x8, x8, %s\n",
+				[BRB_OP_MODI]  = "\tudiv x11, x8, %s\n"
+						 "\tmsub x8,  x11, x10, x8\n",
+				[BRB_OP_MODSI] = "\tsdiv x11, x8, %s\n"
+						 "\tmsub x8,  x11, x10, x8\n"
 			};
 			static const char* op_postfix[] = {
 				[1] = "b w8",
@@ -588,7 +600,9 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				[BRB_OP_SUBI]  = LI_BASE,
 				[BRB_OP_MULI]  = LI_2REG,
 				[BRB_OP_DIVI]  = LI_2REG,
-				[BRB_OP_DIVSI] = LI_2REG
+				[BRB_OP_DIVSI] = LI_2REG,
+				[BRB_OP_MODI]  = LI_2REG,
+				[BRB_OP_MODSI] = LI_2REG
 			};
 			const size_t op_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0);
 			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
@@ -630,7 +644,17 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 		case BRB_OP_DIVSIAT16:
 		case BRB_OP_DIVSIAT32:
 		case BRB_OP_DIVSIATP:
-		case BRB_OP_DIVSIAT64: {
+		case BRB_OP_DIVSIAT64:
+		case BRB_OP_MODIAT8:
+		case BRB_OP_MODIAT16:
+		case BRB_OP_MODIAT32:
+		case BRB_OP_MODIATP:
+		case BRB_OP_MODIAT64:
+		case BRB_OP_MODSIAT8:
+		case BRB_OP_MODSIAT16:
+		case BRB_OP_MODSIAT32:
+		case BRB_OP_MODSIATP:
+		case BRB_OP_MODSIAT64: {
 			static const char* op_postfix[] = {
 				[BRB_ADDR_I8]  = "b w8",
 				[BRB_ADDR_I16] = "h w8",
@@ -643,14 +667,20 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				[BRB_OP_SUB]  = "\tsub  x8, x8, %s\n",
 				[BRB_OP_MUL]  = "\tmul  x8, x8, %s\n",
 				[BRB_OP_DIV]  = "\tsdiv x8, x8, %s\n",
-				[BRB_OP_DIVS] = "\tsdiv x8, x8, %s\n"
+				[BRB_OP_DIVS] = "\tsdiv x8, x8, %s\n",
+				[BRB_OP_MOD]  = "\tudiv x11, x8, %s\n"
+						"\tmsub x8,  x10, x11, x8\n",
+				[BRB_OP_MODS] = "\tsdiv x11, x8, %s\n"
+						"\tmsub x8,  x10, x11, x8\n"
 			};
 			static const arm64_LiteralIntent op2_placement[] = {
 				[BRB_OP_ADD]  = LI_BASE,
 				[BRB_OP_SUB]  = LI_BASE,
 				[BRB_OP_MUL]  = LI_2REG,
 				[BRB_OP_DIV]  = LI_2REG,
-				[BRB_OP_DIVS] = LI_2REG
+				[BRB_OP_DIVS] = LI_2REG,
+				[BRB_OP_MOD]  = LI_2REG,
+				[BRB_OP_MODS] = LI_2REG
 			};
 			offset = compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[BRB_GET_BASE_OP_TYPE(op->type)], &acc);
 			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {

@@ -123,6 +123,16 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_DIVSIAT32:
 			case BRB_OP_DIVSIATP:
 			case BRB_OP_DIVSIAT64:
+			case BRB_OP_MODIAT8:
+			case BRB_OP_MODIAT16:
+			case BRB_OP_MODIAT32:
+			case BRB_OP_MODIATP:
+			case BRB_OP_MODIAT64:
+			case BRB_OP_MODSIAT8:
+			case BRB_OP_MODSIAT16:
+			case BRB_OP_MODSIAT32:
+			case BRB_OP_MODSIATP:
+			case BRB_OP_MODSIAT64:
 				break;
 			case BRB_OP_ADDR:
 				op->operand_u = BRB_getStackItemRTOffset(builder, proc_id, op_id, op->operand_u);
@@ -144,12 +154,16 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_MUL:
 			case BRB_OP_DIV:
 			case BRB_OP_DIVS:
+			case BRB_OP_MOD:
+			case BRB_OP_MODS:
 				op->x_op2_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
 			case BRB_OP_ADDI:
 			case BRB_OP_SUBI:
 			case BRB_OP_MULI:
 			case BRB_OP_DIVI:
 			case BRB_OP_DIVSI:
+			case BRB_OP_MODI:
+			case BRB_OP_MODSI:
 			case BRB_OP_DROP:
 				op->x_op1_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0);
 				break;
@@ -596,6 +610,122 @@ bool BRB_execOp(BRB_ExecEnv* env)
 		case BRB_OP_DIVSIAT64: {
 			register int64_t* temp = *(int64_t**)env->stack_head;
 			*(int64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp /= op.operand_s);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MOD: {
+			uint64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(uint8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(uint16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(uint32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(uint64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)(env->stack_head + op.x_op2_size) = *(uint8_t *)env->stack_head % op2; break;
+				case 2: *(uint16_t*)(env->stack_head + op.x_op2_size) = *(uint16_t*)env->stack_head % op2; break;
+				case 4: *(uint32_t*)(env->stack_head + op.x_op2_size) = *(uint32_t*)env->stack_head % op2; break;
+				case 8: *(uint64_t*)(env->stack_head + op.x_op2_size) = *(uint64_t*)env->stack_head % op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODI:
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)env->stack_head %= op.operand_u; break;
+				case 2: *(uint16_t*)env->stack_head %= op.operand_u; break;
+				case 4: *(uint32_t*)env->stack_head %= op.operand_u; break;
+				case 8: *(uint64_t*)env->stack_head %= op.operand_u; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_MODIAT8: {
+			register uint8_t* temp = *(uint8_t**)env->stack_head;
+			*(uint8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp %= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODIAT16: {
+			register uint16_t* temp = *(uint16_t**)env->stack_head;
+			*(uint16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp %= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODIAT32: {
+			register uint32_t* temp = *(uint32_t**)env->stack_head;
+			*(uint32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp %= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODIATP: {
+			register uintptr_t* temp = *(uintptr_t**)env->stack_head;
+			*(uintptr_t*)env->stack_head = (*temp %= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODIAT64: {
+			register uint64_t* temp = *(uint64_t**)env->stack_head;
+			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp %= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODS: {
+			int64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(int8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(int16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(int32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(int64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(int8_t *)(env->stack_head + op.x_op2_size) = *(int8_t *)env->stack_head % op2; break;
+				case 2: *(int16_t*)(env->stack_head + op.x_op2_size) = *(int16_t*)env->stack_head % op2; break;
+				case 4: *(int32_t*)(env->stack_head + op.x_op2_size) = *(int32_t*)env->stack_head % op2; break;
+				case 8: *(int64_t*)(env->stack_head + op.x_op2_size) = *(int64_t*)env->stack_head % op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODSI:
+			switch (op.x_op1_size) {
+				case 1: *(int8_t *)env->stack_head %= op.operand_s; break;
+				case 2: *(int16_t*)env->stack_head %= op.operand_s; break;
+				case 4: *(int32_t*)env->stack_head %= op.operand_s; break;
+				case 8: *(int64_t*)env->stack_head %= op.operand_s; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_MODSIAT8: {
+			register int8_t* temp = *(int8_t**)env->stack_head;
+			*(int8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp %= op.operand_s);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODSIAT16: {
+			register int16_t* temp = *(int16_t**)env->stack_head;
+			*(int16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp %= op.operand_s);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODSIAT32: {
+			register int32_t* temp = *(int32_t**)env->stack_head;
+			*(int32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp %= op.operand_s);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODSIATP: {
+			register intptr_t* temp = *(intptr_t**)env->stack_head;
+			*(intptr_t*)env->stack_head = (*temp %= op.operand_s);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_MODSIAT64: {
+			register int64_t* temp = *(int64_t**)env->stack_head;
+			*(int64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp %= op.operand_s);
 			++env->exec_index;
 			return false;
 		}

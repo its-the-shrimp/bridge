@@ -56,6 +56,20 @@ typedef enum {
 	BRB_KW_DIVSIAT32,
 	BRB_KW_DIVSIATP,
 	BRB_KW_DIVSIAT64,
+	BRB_KW_MOD,
+	BRB_KW_MODI,
+	BRB_KW_MODIAT8,
+	BRB_KW_MODIAT16,
+	BRB_KW_MODIAT32,
+	BRB_KW_MODIATP,
+	BRB_KW_MODIAT64,
+	BRB_KW_MODS,
+	BRB_KW_MODSI,
+	BRB_KW_MODSIAT8,
+	BRB_KW_MODSIAT16,
+	BRB_KW_MODSIAT32,
+	BRB_KW_MODSIATP,
+	BRB_KW_MODSIAT64,
 	BRB_KW_DROP,
 	BRB_KW_DATA,
 	BRB_KW_BYTES,
@@ -113,6 +127,20 @@ static sbuf asm_kws[] = {
 	[BRB_KW_DIVSIAT32] = fromcstr("divs-i@32"),
 	[BRB_KW_DIVSIATP]  = fromcstr("divs-i@p"),
 	[BRB_KW_DIVSIAT64] = fromcstr("divs-i@64"),
+	[BRB_KW_MOD]       = fromcstr("mod"),
+	[BRB_KW_MODI]      = fromcstr("mod-i"),
+	[BRB_KW_MODIAT8]   = fromcstr("mod-i@8"),
+	[BRB_KW_MODIAT16]  = fromcstr("mod-i@16"),
+	[BRB_KW_MODIAT32]  = fromcstr("mod-i@32"),
+	[BRB_KW_MODIATP]   = fromcstr("mod-i@p"),
+	[BRB_KW_MODIAT64]  = fromcstr("mod-i@64"),
+	[BRB_KW_MODS]      = fromcstr("mods"),
+	[BRB_KW_MODSI]     = fromcstr("mods-i"),
+	[BRB_KW_MODSIAT8]  = fromcstr("mods-i@8"),
+	[BRB_KW_MODSIAT16] = fromcstr("mods-i@16"),
+	[BRB_KW_MODSIAT32] = fromcstr("mods-i@32"),
+	[BRB_KW_MODSIATP]  = fromcstr("mods-i@p"),
+	[BRB_KW_MODSIAT64] = fromcstr("mods-i@64"),
 	[BRB_KW_DROP]      = fromcstr("drop"),
 	[BRB_KW_BUILTIN]   = fromcstr("builtin"),
 	[BRB_KW_DATA]      = fromcstr("data"),
@@ -123,9 +151,8 @@ static sbuf asm_kws[] = {
 	[BRB_KW_ENTRY]     = fromcstr("entry"),
 	(sbuf){0}
 };
-static_assert(BRB_N_OPS == 49, "not all operations have their names defined in the assembler");
+static_assert(BRB_N_OPS == 63, "not all operations have their names defined in the assembler");
 static_assert(BRB_N_DP_TYPES == 10, "not all data pieces have their names defined in the assemblr");
-
 
 typedef enum {
 	BRB_SYM_BRACKET_L,
