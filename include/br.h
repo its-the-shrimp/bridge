@@ -71,8 +71,8 @@ sbuf fileBaseName_s(sbuf path);
 // assumes that sub_size > 0 and size > 0
 #define maxInt(a, b) ( a > b ? a : b )
 #define minInt(a, b) ( a < b ? a : b )
-#define absInt(x) (x<0?-x:x)
-#define absNegInt(x) (x<0?x:-x)
+#define absInt(x) (SIGN_BIT_SET(x) ? -x : x)
+#define absNegInt(x) (SIGN_BIT_SET(x) ? x : -x)
 #define swap(v1, v2, tmp_t) { tmp_t TEMPVAR = v1; v1 = v2; v2 = TEMPVAR; }
 #define byteMask(n_bytes, offset) ((1ULL << ((n_bytes) * 8)) - 1) << ((offset) * 8)
 

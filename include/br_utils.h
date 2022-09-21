@@ -54,9 +54,9 @@ int LOWEST_SET_BIT(uint64_t bitset);
 #define BIT_SET(bitset, n) (!BIT_CLEAR(bitset, n))
 #define SIGN_BIT_SET(x) ((int64_t)(x) < 0)
 
-#define FITS_IN_8BITS(x)  ((uint64_t)x <= UINT8_MAX)
-#define FITS_IN_16BITS(x) ((uint64_t)x <= UINT16_MAX)
-#define FITS_IN_32BITS(x) ((uint64_t)x <= UINT32_MAX)
+#define FITS_IN_8BITS(x)  (SIGN_BIT_SET(x) ? (int64_t)(x) >> 8  == -1 : (int64_t)(x) >> 8  == 0)
+#define FITS_IN_16BITS(x) (SIGN_BIT_SET(x) ? (int64_t)(x) >> 16 == -1 : (int64_t)(x) >> 16 == 0)
+#define FITS_IN_32BITS(x) (SIGN_BIT_SET(x) ? (int64_t)(x) >> 32 == -1 : (int64_t)(x) >> 32 == 0)
 
 // custom replacement for <assert.h>
 #define _assert(expr, file, line, f_name, ...) { \

@@ -53,19 +53,19 @@ static uint64_t loadInt64(FILE* fd, long* n_fetched)
 }
 
 
-static int64_t loadInt(FILE* fd, long* n_fetched)
+int64_t loadInt(FILE* fd, long* n_fetched)
 {
 	register uint8_t size = loadInt8(fd, n_fetched);
 	if (*n_fetched < 0) return 0;
 	switch (size) {
-		case 8: return loadInt8(fd, n_fetched);
-		case 9: return loadInt16(fd, n_fetched);
+		case 8:  return loadInt8(fd, n_fetched);
+		case 9:  return loadInt16(fd, n_fetched);
 		case 10: return loadInt32(fd, n_fetched);
 		case 11: return loadInt64(fd, n_fetched);
-		case 12: return -(int64_t)loadInt8(fd, n_fetched);
-		case 13: return -(int64_t)loadInt16(fd, n_fetched);
-		case 14: return -(int64_t)loadInt32(fd, n_fetched);
-		case 15: return -(int64_t)loadInt64(fd, n_fetched);
+		case 12: return -loadInt8(fd, n_fetched);
+		case 13: return -loadInt16(fd, n_fetched);
+		case 14: return -loadInt32(fd, n_fetched);
+		case 15: return -loadInt64(fd, n_fetched);
 		default: return size;
 	}
 }

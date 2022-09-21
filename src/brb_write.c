@@ -51,13 +51,13 @@ static long writeInt(FILE* fd, uint64_t x, uint8_t hb)
 			+ writeInt64(fd, absInt(x));
 }
 
-static long writeIntOnly(FILE* fd, uint64_t x)
+long writeIntOnly(FILE* fd, uint64_t x)
 {
-	if (FITS_IN_8BITS(x)) {
-		return inRange(x, 8, 16)
-			? writeInt8(fd, SIGN_BIT_SET(x) ? 12 : 8)
-				+ writeInt8(fd, absInt(x))
-			: writeInt8(fd, x);
+	if (inRange(x, 0, 8) || inRange(x, 16, 256)) {
+		return writeInt8(fd, x);
+	} else if (FITS_IN_8BITS(x)) {
+		return writeInt8(fd, SIGN_BIT_SET(x) ? 12 : 8)
+			+ writeInt8(fd, absInt(x));
 	} else if (FITS_IN_16BITS(x)) {
 		return writeInt8(fd, (SIGN_BIT_SET(x) ? 13 : 9))
 			+ writeInt16(fd, absInt(x));
