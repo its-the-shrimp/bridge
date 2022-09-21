@@ -133,6 +133,41 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_MODSIAT32:
 			case BRB_OP_MODSIATP:
 			case BRB_OP_MODSIAT64:
+			case BRB_OP_ANDIAT8:
+			case BRB_OP_ANDIAT16:
+			case BRB_OP_ANDIAT32:
+			case BRB_OP_ANDIATP:
+			case BRB_OP_ANDIAT64:
+			case BRB_OP_ORIAT8:
+			case BRB_OP_ORIAT16:
+			case BRB_OP_ORIAT32:
+			case BRB_OP_ORIATP:
+			case BRB_OP_ORIAT64:
+			case BRB_OP_XORIAT8:
+			case BRB_OP_XORIAT16:
+			case BRB_OP_XORIAT32:
+			case BRB_OP_XORIATP:
+			case BRB_OP_XORIAT64:
+			case BRB_OP_SHLIAT8:
+			case BRB_OP_SHLIAT16:
+			case BRB_OP_SHLIAT32:
+			case BRB_OP_SHLIATP:
+			case BRB_OP_SHLIAT64:
+			case BRB_OP_SHRIAT8:
+			case BRB_OP_SHRIAT16:
+			case BRB_OP_SHRIAT32:
+			case BRB_OP_SHRIATP:
+			case BRB_OP_SHRIAT64:
+			case BRB_OP_SHRSIAT8:
+			case BRB_OP_SHRSIAT16:
+			case BRB_OP_SHRSIAT32:
+			case BRB_OP_SHRSIATP:
+			case BRB_OP_SHRSIAT64:
+			case BRB_OP_NOTAT8:
+			case BRB_OP_NOTAT16:
+			case BRB_OP_NOTAT32:
+			case BRB_OP_NOTATP:
+			case BRB_OP_NOTAT64:
 				break;
 			case BRB_OP_ADDR:
 				op->operand_u = BRB_getStackItemRTOffset(builder, proc_id, op_id, op->operand_u);
@@ -156,6 +191,12 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_DIVS:
 			case BRB_OP_MOD:
 			case BRB_OP_MODS:
+			case BRB_OP_AND:
+			case BRB_OP_OR:
+			case BRB_OP_XOR:
+			case BRB_OP_SHL:
+			case BRB_OP_SHR:
+			case BRB_OP_SHRS:
 				op->x_op2_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
 			case BRB_OP_ADDI:
 			case BRB_OP_SUBI:
@@ -164,6 +205,13 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_DIVSI:
 			case BRB_OP_MODI:
 			case BRB_OP_MODSI:
+			case BRB_OP_ANDI:
+			case BRB_OP_ORI:
+			case BRB_OP_XORI:
+			case BRB_OP_SHLI:
+			case BRB_OP_SHRI:
+			case BRB_OP_SHRSI:
+			case BRB_OP_NOT:
 			case BRB_OP_DROP:
 				op->x_op1_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0);
 				break;
@@ -726,6 +774,393 @@ bool BRB_execOp(BRB_ExecEnv* env)
 		case BRB_OP_MODSIAT64: {
 			register int64_t* temp = *(int64_t**)env->stack_head;
 			*(int64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp %= op.operand_s);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_AND: {
+			uint64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(uint8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(uint16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(uint32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(uint64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)(env->stack_head + op.x_op2_size) = *(uint8_t *)env->stack_head & op2; break;
+				case 2: *(uint16_t*)(env->stack_head + op.x_op2_size) = *(uint16_t*)env->stack_head & op2; break;
+				case 4: *(uint32_t*)(env->stack_head + op.x_op2_size) = *(uint32_t*)env->stack_head & op2; break;
+				case 8: *(uint64_t*)(env->stack_head + op.x_op2_size) = *(uint64_t*)env->stack_head & op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ANDI:
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)env->stack_head &= op.operand_u; break;
+				case 2: *(uint16_t*)env->stack_head &= op.operand_u; break;
+				case 4: *(uint32_t*)env->stack_head &= op.operand_u; break;
+				case 8: *(uint64_t*)env->stack_head &= op.operand_u; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_ANDIAT8: {
+			register uint8_t* temp = *(uint8_t**)env->stack_head;
+			*(uint8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp &= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ANDIAT16: {
+			register uint16_t* temp = *(uint16_t**)env->stack_head;
+			*(uint16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp &= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ANDIAT32: {
+			register uint32_t* temp = *(uint32_t**)env->stack_head;
+			*(uint32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp &= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ANDIATP: {
+			register uintptr_t* temp = *(uintptr_t**)env->stack_head;
+			*(uintptr_t*)env->stack_head = (*temp &= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ANDIAT64: {
+			register uint64_t* temp = *(uint64_t**)env->stack_head;
+			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp &= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_OR: {
+			uint64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(uint8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(uint16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(uint32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(uint64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)(env->stack_head + op.x_op2_size) = *(uint8_t *)env->stack_head | op2; break;
+				case 2: *(uint16_t*)(env->stack_head + op.x_op2_size) = *(uint16_t*)env->stack_head | op2; break;
+				case 4: *(uint32_t*)(env->stack_head + op.x_op2_size) = *(uint32_t*)env->stack_head | op2; break;
+				case 8: *(uint64_t*)(env->stack_head + op.x_op2_size) = *(uint64_t*)env->stack_head | op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ORI:
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)env->stack_head |= op.operand_u; break;
+				case 2: *(uint16_t*)env->stack_head |= op.operand_u; break;
+				case 4: *(uint32_t*)env->stack_head |= op.operand_u; break;
+				case 8: *(uint64_t*)env->stack_head |= op.operand_u; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_ORIAT8: {
+			register uint8_t* temp = *(uint8_t**)env->stack_head;
+			*(uint8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp |= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ORIAT16: {
+			register uint16_t* temp = *(uint16_t**)env->stack_head;
+			*(uint16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp |= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ORIAT32: {
+			register uint32_t* temp = *(uint32_t**)env->stack_head;
+			*(uint32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp |= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ORIATP: {
+			register uintptr_t* temp = *(uintptr_t**)env->stack_head;
+			*(uintptr_t*)env->stack_head = (*temp |= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_ORIAT64: {
+			register uint64_t* temp = *(uint64_t**)env->stack_head;
+			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp |= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_XOR: {
+			uint64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(uint8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(uint16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(uint32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(uint64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)(env->stack_head + op.x_op2_size) = *(uint8_t *)env->stack_head ^ op2; break;
+				case 2: *(uint16_t*)(env->stack_head + op.x_op2_size) = *(uint16_t*)env->stack_head ^ op2; break;
+				case 4: *(uint32_t*)(env->stack_head + op.x_op2_size) = *(uint32_t*)env->stack_head ^ op2; break;
+				case 8: *(uint64_t*)(env->stack_head + op.x_op2_size) = *(uint64_t*)env->stack_head ^ op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_XORI:
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)env->stack_head ^= op.operand_u; break;
+				case 2: *(uint16_t*)env->stack_head ^= op.operand_u; break;
+				case 4: *(uint32_t*)env->stack_head ^= op.operand_u; break;
+				case 8: *(uint64_t*)env->stack_head ^= op.operand_u; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_XORIAT8: {
+			register uint8_t* temp = *(uint8_t**)env->stack_head;
+			*(uint8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp ^= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_XORIAT16: {
+			register uint16_t* temp = *(uint16_t**)env->stack_head;
+			*(uint16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp ^= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_XORIAT32: {
+			register uint32_t* temp = *(uint32_t**)env->stack_head;
+			*(uint32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp ^= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_XORIATP: {
+			register uintptr_t* temp = *(uintptr_t**)env->stack_head;
+			*(uintptr_t*)env->stack_head = (*temp ^= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_XORIAT64: {
+			register uint64_t* temp = *(uint64_t**)env->stack_head;
+			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp ^= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHL: {
+			uint64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(uint8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(uint16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(uint32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(uint64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)(env->stack_head + op.x_op2_size) = *(uint8_t *)env->stack_head << op2; break;
+				case 2: *(uint16_t*)(env->stack_head + op.x_op2_size) = *(uint16_t*)env->stack_head << op2; break;
+				case 4: *(uint32_t*)(env->stack_head + op.x_op2_size) = *(uint32_t*)env->stack_head << op2; break;
+				case 8: *(uint64_t*)(env->stack_head + op.x_op2_size) = *(uint64_t*)env->stack_head << op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHLI:
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)env->stack_head <<= op.operand_u; break;
+				case 2: *(uint16_t*)env->stack_head <<= op.operand_u; break;
+				case 4: *(uint32_t*)env->stack_head <<= op.operand_u; break;
+				case 8: *(uint64_t*)env->stack_head <<= op.operand_u; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_SHLIAT8: {
+			register uint8_t* temp = *(uint8_t**)env->stack_head;
+			*(uint8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp <<= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHLIAT16: {
+			register uint16_t* temp = *(uint16_t**)env->stack_head;
+			*(uint16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp <<= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHLIAT32: {
+			register uint32_t* temp = *(uint32_t**)env->stack_head;
+			*(uint32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp <<= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHLIATP: {
+			register uintptr_t* temp = *(uintptr_t**)env->stack_head;
+			*(uintptr_t*)env->stack_head = (*temp <<= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHLIAT64: {
+			register uint64_t* temp = *(uint64_t**)env->stack_head;
+			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp <<= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHR: {
+			uint64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(uint8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(uint16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(uint32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(uint64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)(env->stack_head + op.x_op2_size) = *(uint8_t *)env->stack_head >> op2; break;
+				case 2: *(uint16_t*)(env->stack_head + op.x_op2_size) = *(uint16_t*)env->stack_head >> op2; break;
+				case 4: *(uint32_t*)(env->stack_head + op.x_op2_size) = *(uint32_t*)env->stack_head >> op2; break;
+				case 8: *(uint64_t*)(env->stack_head + op.x_op2_size) = *(uint64_t*)env->stack_head >> op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRI:
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t *)env->stack_head >>= op.operand_u; break;
+				case 2: *(uint16_t*)env->stack_head >>= op.operand_u; break;
+				case 4: *(uint32_t*)env->stack_head >>= op.operand_u; break;
+				case 8: *(uint64_t*)env->stack_head >>= op.operand_u; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_SHRIAT8: {
+			register uint8_t* temp = *(uint8_t**)env->stack_head;
+			*(uint8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRIAT16: {
+			register uint16_t* temp = *(uint16_t**)env->stack_head;
+			*(uint16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRIAT32: {
+			register uint32_t* temp = *(uint32_t**)env->stack_head;
+			*(uint32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRIATP: {
+			register uintptr_t* temp = *(uintptr_t**)env->stack_head;
+			*(uintptr_t*)env->stack_head = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRIAT64: {
+			register uint64_t* temp = *(uint64_t**)env->stack_head;
+			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRS: {
+			int64_t op2;
+			switch (op.x_op2_size) {
+				case 1:  op2 = *(int8_t *)(env->stack_head + op.x_op1_size); break;
+				case 2:  op2 = *(int16_t*)(env->stack_head + op.x_op1_size); break;
+				case 4:  op2 = *(int32_t*)(env->stack_head + op.x_op1_size); break;
+				case 8:  op2 = *(int64_t*)(env->stack_head + op.x_op1_size); break;
+				default: assert(false, "unknown argument size");
+			}
+			switch (op.x_op1_size) {
+				case 1: *(int8_t *)(env->stack_head + op.x_op2_size) = *(int8_t *)env->stack_head >> op2; break;
+				case 2: *(int16_t*)(env->stack_head + op.x_op2_size) = *(int16_t*)env->stack_head >> op2; break;
+				case 4: *(int32_t*)(env->stack_head + op.x_op2_size) = *(int32_t*)env->stack_head >> op2; break;
+				case 8: *(int64_t*)(env->stack_head + op.x_op2_size) = *(int64_t*)env->stack_head >> op2; break;
+			}
+			env->stack_head += op.x_op2_size;
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRSI:
+			switch (op.x_op1_size) {
+				case 1: *(int8_t *)env->stack_head >>= op.operand_u; break;
+				case 2: *(int16_t*)env->stack_head >>= op.operand_u; break;
+				case 4: *(int32_t*)env->stack_head >>= op.operand_u; break;
+				case 8: *(int64_t*)env->stack_head >>= op.operand_u; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_SHRSIAT8: {
+			register int8_t* temp = *(int8_t**)env->stack_head;
+			*(int8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRSIAT16: {
+			register int16_t* temp = *(int16_t**)env->stack_head;
+			*(int16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRSIAT32: {
+			register int32_t* temp = *(int32_t**)env->stack_head;
+			*(int32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRSIATP: {
+			register intptr_t* temp = *(intptr_t**)env->stack_head;
+			*(intptr_t*)env->stack_head = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_SHRSIAT64: {
+			register int64_t* temp = *(int64_t**)env->stack_head;
+			*(int64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp >>= op.operand_u);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_NOT:
+			switch (op.x_op1_size) {
+				case 1: *(uint8_t*)env->stack_head = ~*(uint8_t*)env->stack_head; break;
+				case 2: *(uint16_t*)env->stack_head = ~*(uint16_t*)env->stack_head; break;
+				case 4: *(uint32_t*)env->stack_head = ~*(uint32_t*)env->stack_head; break;
+				case 8: *(uint64_t*)env->stack_head = ~*(uint64_t*)env->stack_head; break;
+			}
+			++env->exec_index;
+			return false;
+		case BRB_OP_NOTAT8: {
+			register uint8_t* temp = *(uint8_t**)env->stack_head;
+			*(uint8_t*)(env->stack_head += sizeof(void*) - 1) = (*temp = ~*temp);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_NOTAT16: {
+			register uint16_t* temp = *(uint16_t**)env->stack_head;
+			*(uint16_t*)(env->stack_head += sizeof(void*) - 2) = (*temp = ~*temp);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_NOTAT32: {
+			register uint32_t* temp = *(uint32_t**)env->stack_head;
+			*(uint32_t*)(env->stack_head += sizeof(void*) - 4) = (*temp = ~*temp);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_NOTATP: {
+			register uintptr_t* temp = *(uintptr_t**)env->stack_head;
+			*(uintptr_t*)env->stack_head = (*temp = ~*temp);
+			++env->exec_index;
+			return false;
+		}
+		case BRB_OP_NOTAT64: {
+			register uint64_t* temp = *(uint64_t**)env->stack_head;
+			*(uint64_t*)(env->stack_head += sizeof(void*) - 8) = (*temp = ~*temp);
 			++env->exec_index;
 			return false;
 		}

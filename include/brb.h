@@ -153,111 +153,109 @@ Data Types:
 	// replace an `ptr` at address A with the remainder of it divided by <n>, replaces A with the resulting value; like *(intptr_t*)A %= n; division is signed
 	BRB_OP_MODSIAT64, // [A:ptr] -> mods-i@64 <n> -> [i64]
 	// replace an `i64` at address A with the remainder of it divided by <n>, replaces A with the resulting value; like *(int64_t*)A %= n; division is signed
-/* TODO:
 
-	BRB_OP_AND,      // [A:int, B:int] -> and -> [int]
+	BRB_OP_AND,       // [A:int, B:int] -> and -> [typeof A]
 	// replace A and B with the result of bitwise AND operation on A and B
-	BRB_OP_ANDI,     // [A:int] -> and-i <n> -> [int]
+	BRB_OP_ANDI,      // [A:int] -> and-i <n> -> [typeof A]
 	// replace A with the result of bitwise AND operation on A and <n>
-	BRB_OP_ANDI@8,   // [A:ptr] -> and-i@8 <n> -> [A:ptr]
-	// replace an `i8` at address A with the result of bitwise AND operation on the value and <n>
-	BRB_OP_ANDI@16,  // [A:ptr] -> and-i@16 <n> -> [A:ptr]
-	// replace an `i16` at address A with the result of bitwise AND operation on the value and <n>
-	BRB_OP_ANDI@32,  // [A:ptr] -> and-i@32 <n> -> [A:ptr]
-	// replace an `i32` at address A with the result of bitwise AND operation on the value and <n>
-	BRB_OP_ANDI@P,   // [A:ptr] -> and-i@p <n> -> [A:ptr]
-	// replace an `ptr` at address A with the result of bitwise AND operation on the value and <n>
-	BRB_OP_ANDI@64,  // [A:ptr] -> and-i@64 <n> -> [A:ptr]
-	// replace an `i64` at address A with the result of bitwise AND operation on the value and <n>
+	BRB_OP_ANDIAT8,   // [A:ptr] -> and-i@8 <n> -> [i8]
+	// replace an `i8` at address A with the result of bitwise AND operation on the value and <n>, replace A with the resulting value; like *(uint8_t*)A &= n
+	BRB_OP_ANDIAT16,  // [A:ptr] -> and-i@16 <n> -> [i16]
+	// replace an `i16` at address A with the result of bitwise AND operation on the value and <n>, replace A with the resulting value; like *(uint16_t*)A &= n
+	BRB_OP_ANDIAT32,  // [A:ptr] -> and-i@32 <n> -> [i32]
+	// replace an `i32` at address A with the result of bitwise AND operation on the value and <n>, replace A with the resulting value; like *(uint32_t*)A &= n
+	BRB_OP_ANDIATP,   // [A:ptr] -> and-i@p <n> -> [ptr]
+	// replace an `ptr` at address A with the result of bitwise AND operation on the value and <n>, replace A with the resulting value; like *(uintptr_t*)A &= n
+	BRB_OP_ANDIAT64,  // [A:ptr] -> and-i@64 <n> -> [i64]
+	// replace an `i64` at address A with the result of bitwise AND operation on the value and <n>, replace A with the resulting value; like *(uint64_t*)A &= n
 
-	BRB_OP_OR,       // [A:int, B:int] -> or -> [int]
+	BRB_OP_OR,        // [A:int, B:int] -> or -> [typeof A]
 	// replace A and B with the result of bitwise OR operation on A and B
-	BRB_OP_ORI,      // [A:int] -> or-i <n> -> [int]
+	BRB_OP_ORI,       // [A:int] -> or-i <n> -> [typeof A]
 	// replace A with the result of bitwise OR operation on A and <n>
-	BRB_OP_ORI@8,    // [A:ptr] -> or-i@8 <n> -> [A:ptr]
-	// replace an `i8` at address A with the result of bitwise OR operation on the value and <n>
-	BRB_OP_ORI@16,   // [A:ptr] -> or-i@16 <n> -> [A:ptr]
-	// replace an `i16` at address A with the result of bitwise OR operation on the value and <n>
-	BRB_OP_ORI@32,   // [A:ptr] -> or-i@32 <n> -> [A:ptr]
-	// replace an `i32` at address A with the result of bitwise OR operation on the value and <n>
-	BRB_OP_ORI@P,    // [A:ptr] -> or-i@p <n> -> [A:ptr]
-	// replace an `ptr` at address A with the result of bitwise OR operation on the value and <n>
-	BRB_OP_ORI@64,   // [A:ptr] -> or-i@64 <n> -> [A:ptr]
-	// replace an `i64` at address A with the result of bitwise OR operation on the value and <n>
+	BRB_OP_ORIAT8,    // [A:ptr] -> or-i@8 <n> -> [i8]
+	// replace an `i8` at address A with the result of bitwise OR operation on the value and <n>, replace A with the resulting value; like *(uint8_t*)A |= n
+	BRB_OP_ORIAT16,   // [A:ptr] -> or-i@16 <n> -> [i16]
+	// replace an `i16` at address A with the result of bitwise OR operation on the value and <n>, replace A with the resulting value; like *(uint16_t*)A |= n
+	BRB_OP_ORIAT32,   // [A:ptr] -> or-i@32 <n> -> [i32]
+	// replace an `i32` at address A with the result of bitwise OR operation on the value and <n>, replace A with the resulting value; like *(uint32_t*)A |= n
+	BRB_OP_ORIATP,    // [A:ptr] -> or-i@p <n> -> [ptr]
+	// replace an `ptr` at address A with the result of bitwise OR operation on the value and <n>, replace A with the resulting value; like *(uintptr_t*)A |= n
+	BRB_OP_ORIAT64,   // [A:ptr] -> or-i@64 <n> -> [i64]
+	// replace an `i64` at address A with the result of bitwise OR operation on the value and <n>, replace A with the resulting value; like *(uint64_t*)A |= n
 
-	BRB_OP_XOR,      // [A:int, B:int] -> xor -> [int]
+	BRB_OP_XOR,       // [A:int, B:int] -> xor -> [typeof A]
 	// replace A and B with the result of bitwise XOR operation on A and B
-	BRB_OP_XORI,     // [A:int] -> xor-i <n> -> [int]
+	BRB_OP_XORI,      // [A:int] -> xor-i <n> -> [typeof A]
 	// replace A with the result of bitwise XOR operation on A and <n>
-	BRB_OP_XORI@8,   // [A:ptr] -> xor-i@8 <n> -> [A:ptr]
-	// replace an `i8` at address A with the result of bitwise XOR operation on the value and <n>
-	BRB_OP_XORI@16,  // [A:ptr] -> xor-i@16 <n> -> [A:ptr]
-	// replace an `i16` at address A with the result of bitwise XOR operation on the value and <n>
-	BRB_OP_XORI@32,  // [A:ptr] -> xor-i@32 <n> -> [A:ptr]
-	// replace an `i32` at address A with the result of bitwise XOR operation on the value and <n>
-	BRB_OP_XORI@P,   // [A:ptr] -> xor-i@p <n> -> [A:ptr]
-	// replace an `ptr` at address A with the result of bitwise XOR operation on the value and <n>
-	BRB_OP_XORI@64,  // [A:ptr] -> xor-i@64 <n> -> [A:ptr]
-	// replace an `i64` at address A with the result of bitwise XOR operation on the value and <n>
+	BRB_OP_XORIAT8,   // [A:ptr] -> xor-i@8 <n> -> [i8]
+	// replace an `i8` at address A with the result of bitwise XOR operation on the value and <n>, replace A with the resulting value; like *(uint8_t*)A ^= n
+	BRB_OP_XORIAT16,  // [A:ptr] -> xor-i@16 <n> -> [i16]
+	// replace an `i16` at address A with the result of bitwise XOR operation on the value and <n>, replace A with the resulting value; like *(uint16_t*)A ^= n
+	BRB_OP_XORIAT32,  // [A:ptr] -> xor-i@32 <n> -> [i32]
+	// replace an `i32` at address A with the result of bitwise XOR operation on the value and <n>, replace A with the resulting value; like *(uint32_t*)A ^= n
+	BRB_OP_XORIATP,   // [A:ptr] -> xor-i@p <n> -> [ptr]
+	// replace an `ptr` at address A with the result of bitwise XOR operation on the value and <n>, replace A with the resulting value; like *(uintptr_t*)A ^= n
+	BRB_OP_XORIAT64,  // [A:ptr] -> xor-i@64 <n> -> [i64]
+	// replace an `i64` at address A with the result of bitwise XOR operation on the value and <n>, replace A with the resulting value; like *(uint64_t*)A ^= n
 
-	BRB_OP_SHL,      // [A:int, B:int] -> shl -> [int]
+	BRB_OP_SHL,      // [A:int, B:int] -> shl -> [typeof A]
 	// replace A and B by A shifted by B bits to the left; B must be in range [0, 64)
-	BRB_OP_SHLI,     // [A:int] -> shl-i <n> -> [int]
+	BRB_OP_SHLI,     // [A:int] -> shl-i <n> -> [typeof A]
 	// shift A by <n> bits to the left; <n> must be in range [0, 64)
-	BRB_OP_SHLI@8,   // [A:ptr] -> shl-i@8 <n> -> [A:ptr]
-	// shift an `i8` at address A by <n> bits to the left; <n> must be in range [0, 64)
-	BRB_OP_SHLI@16,  // [A:ptr] -> shl-i@16 <n> -> [A:ptr]
-	// shift an `i16` at address A by <n> bits to the left; <n> must be in range [0, 64)
-	BRB_OP_SHLI@32,  // [A:ptr] -> shl-i@32 <n> -> [A:ptr]
-	// shift an `i32` at address A by <n> bits to the left; <n> must be in range [0, 64)
-	BRB_OP_SHLI@P,   // [A:ptr] -> shl-i@p <n> -> [A:ptr]
-	// shift an `ptr` at address A by <n> bits to the left; <n> must be in range [0, 64)
-	BRB_OP_SHLI@64,  // [A:ptr] -> shl-i@64 <n> -> [A:ptr]
-	// shift an `i64` at address A by <n> bits to the left; <n> must be in range [0, 64)
+	BRB_OP_SHLIAT8,   // [A:ptr] -> shl-i@8 <n> -> [i8]
+	// shift an `i8` at address A by <n> bits to the left, replace A with the resulting value; like *(uint8_t*)A <<= n; <n> must be in range [0, 64)
+	BRB_OP_SHLIAT16,  // [A:ptr] -> shl-i@16 <n> -> [i16]
+	// shift an `i16` at address A by <n> bits to the left, replace A with the resulting value; like *(uint16_t*)A <<= n; <n> must be in range [0, 64)
+	BRB_OP_SHLIAT32,  // [A:ptr] -> shl-i@32 <n> -> [i32]
+	// shift an `i32` at address A by <n> bits to the left, replace A with the resulting value; like *(uint32_t*)A <<= n; <n> must be in range [0, 64)
+	BRB_OP_SHLIATP,   // [A:ptr] -> shl-i@p <n> -> [ptr]
+	// shift an `ptr` at address A by <n> bits to the left, replace A with the resulting value; like *(uintptr_t*)A <<= n; <n> must be in range [0, 64)
+	BRB_OP_SHLIAT64,  // [A:ptr] -> shl-i@64 <n> -> [i64]
+	// shift an `i64` at address A by <n> bits to the left, replace A with the resulting value; like *(uint64_t*)A <<= n; <n> must be in range [0, 64)
 
-	BRB_OP_SHR,      // [A:int, B:int] -> shr -> [int]
+	BRB_OP_SHR,      // [A:int, B:int] -> shr -> [typeof A]
 	// replace A and B by A shifted by B bits to the right, shifting in zeros; B must be in range [0, 64)
-	BRB_OP_SHRI,     // [A:int] -> shr-i <n> -> [int]
+	BRB_OP_SHRI,     // [A:int] -> shr-i <n> -> [typeof A]
 	// shift A by <n> bits to the right, shifting in zeros; <n> must be in range [0, 64)
-	BRB_OP_SHRI@8,   // [A:ptr] -> shr-i@8 <n> -> [A:ptr]
-	// shift an `i8` at address A by <n> bits to the right, shifting in zeros; <n> must be in range [0, 64)
-	BRB_OP_SHRI@16,  // [A:ptr] -> shr-i@16 <n> -> [A:ptr]
-	// shift an `i16` at address A by <n> bits to the right, shifting in zeros; <n> must be in range [0, 64)
-	BRB_OP_SHRI@32,  // [A:ptr] -> shr-i@32 <n> -> [A:ptr]
-	// shift an `i32` at address A by <n> bits to the right, shifting in zeros; <n> must be in range [0, 64)
-	BRB_OP_SHRI@P,   // [A:ptr] -> shr-i@p <n> -> [A:ptr]
-	// shift an `ptr` at address A by <n> bits to the right, shifting in zeros; <n> must be in range [0, 64)
-	BRB_OP_SHRI@64,  // [A:ptr] -> shr-i@64 <n> -> [A:ptr]
-	// shift an `i64` at address A by <n> bits to the right, shifting in zeros; <n> must be in range [0, 64)
+	BRB_OP_SHRIAT8,   // [A:ptr] -> shr-i@8 <n> -> [i8]
+	// shift an `i8` at address A by <n> bits to the right, shifting in zeros, replace A with the result; like *(uint8_t*)A >>= n; <n> must be in range [0, 64)
+	BRB_OP_SHRIAT16,  // [A:ptr] -> shr-i@16 <n> -> [i16]
+	// shift an `i16` at address A by <n> bits to the right, shifting in zeros, replace A with the result; like *(uint16_t*)A >>= n; <n> must be in range [0, 64)
+	BRB_OP_SHRIAT32,  // [A:ptr] -> shr-i@32 <n> -> [i32]
+	// shift an `i32` at address A by <n> bits to the right, shifting in zeros, replace A with the result; like *(uint32_t*)A >>= n; <n> must be in range [0, 64)
+	BRB_OP_SHRIATP,   // [A:ptr] -> shr-i@p <n> -> [ptr]
+	// shift an `ptr` at address A by <n> bits to the right, shifting in zeros, replace A with the result; like *(uintptr_t*)A >>= n; <n> must be in range [0, 64)
+	BRB_OP_SHRIAT64,  // [A:ptr] -> shr-i@64 <n> -> [i64]
+	// shift an `i64` at address A by <n> bits to the right, shifting in zeros, replace A with the result; like *(uint64_t*)A >>= n; <n> must be in range [0, 64)
 
-	BRB_OP_SHRS,     // [A:int, B:int] -> shrs -> [int]
+	BRB_OP_SHRS,     // [A:int, B:int] -> shrs -> [typeof A]
 	// replace A and B by A shifted by B bits to the right, shifting in copies of the sign bit; B must be in range [0, 64)
-	BRB_OP_SHRSI,    // [A:int] -> shrs-i <n> -> [int]
+	BRB_OP_SHRSI,    // [A:int] -> shrs-i <n> -> [typeof A]
 	// shift A by <n> bits to the right, shifting in copies of the sign bit; <n> must be in range [0, 64)
-	BRB_OP_SHRSI@8,  // [A:ptr] -> shrs-i@8 <n> -> [A:ptr]
-	// shift an `i8` at address A by <n> bits to the right, shifting in copies of the sign bit; <n> must be in range [0, 64)
-	BRB_OP_SHRSI@16, // [A:ptr] -> shrs-i@16 <n> -> [A:ptr]
-	// shift an `i16` at address A by <n> bits to the right, shifting in copies of the sign bit; <n> must be in range [0, 64)
-	BRB_OP_SHRSI@32, // [A:ptr] -> shrs-i@32 <n> -> [A:ptr]
-	// shift an `i32` at address A by <n> bits to the right, shifting in copies of the sign bit; <n> must be in range [0, 64)
-	BRB_OP_SHRSI@P,  // [A:ptr] -> shrs-i@p <n> -> [A:ptr]
-	// shift an `ptr` at address A by <n> bits to the right, shifting in copies of the sign bit; <n> must be in range [0, 64)
-	BRB_OP_SHRSI@64, // [A:ptr] -> shrs-i@64 <n> -> [A:ptr]
-	// shift an `i64` at address A by <n> bits to the right, shifting in copies of the sign bit; <n> must be in range [0, 64)
+	BRB_OP_SHRSIAT8,  // [A:ptr] -> shrs-i@8 <n> -> [i8]
+	// shift an `i8` at address A by <n> bits to the right, shifting in copies of the sign bit, replace A with the result; like *(int8_t*)A >>= n; <n> must be in range [0, 64)
+	BRB_OP_SHRSIAT16, // [A:ptr] -> shrs-i@16 <n> -> [i16]
+	// shift an `i16` at address A by <n> bits to the right, shifting in copies of the sign bit, replace A with the result; like *(int16_t*)A >>= n; <n> must be in range [0, 64)
+	BRB_OP_SHRSIAT32, // [A:ptr] -> shrs-i@32 <n> -> [i32]
+	// shift an `i32` at address A by <n> bits to the right, shifting in copies of the sign bit, replace A with the result; like *(int32_t*)A >>= n; <n> must be in range [0, 64)
+	BRB_OP_SHRSIATP,  // [A:ptr] -> shrs-i@p <n> -> [ptr]
+	// shift an `ptr` at address A by <n> bits to the right, shifting in copies of the sign bit, replace A with the result; like *(intptr_t*)A >>= n; <n> must be in range [0, 64)
+	BRB_OP_SHRSIAT64, // [A:ptr] -> shrs-i@64 <n> -> [i64]
+	// shift an `i64` at address A by <n> bits to the right, shifting in copies of the sign bit, replace A with the result; like *(int64_t*)A >>= n; <n> must be in range [0, 64)
 
-	BRB_OP_NOT,      // [A:int] -> inv -> [int]
-	// invertsthe bits of A
-	BRB_OP_NOT@8,    // [A:ptr] -> inv-@8 -> [A:ptr]
-	// invertsthe bits of an `i8` at address A
-	BRB_OP_NOT@16,   // [A:ptr] -> inv-@16 -> [A:ptr]
-	// invertsthe bits of an `i16` at address A
-	BRB_OP_NOT@32,   // [A:ptr] -> inv-@32 -> [A:ptr]
-	// invertsthe bits of an `i32` at address A
-	BRB_OP_NOT@P,    // [A:ptr] -> inv-@p -> [A:ptr]
-	// invertsthe bits of an `ptr` at address A
-	BRB_OP_NOT@64,   // [A:ptr] -> inv-@64 -> [A:ptr]
-	// invertsthe bits of an `i64` at address A
-*/
+	BRB_OP_NOT,      // [A:int] -> not -> [typeof A]
+	// invert the bits of A
+	BRB_OP_NOTAT8,    // [A:ptr] -> not-@8 -> [i8]
+	// invert the bits of an `i8` at address A, replace A with the result; like *(uint8_t*)A = ~*(uint8_t*)A
+	BRB_OP_NOTAT16,   // [A:ptr] -> not-@16 -> [i16]
+	// invert the bits of an `i16` at address A, replace A with the result; like *(uint16_t*)A = ~*(uint16_t*)A
+	BRB_OP_NOTAT32,   // [A:ptr] -> not-@32 -> [i32]
+	// invert the bits of an `i32` at address A, replace A with the result; like *(uint32_t*)A = ~*(uint32_t*)A
+	BRB_OP_NOTATP,    // [A:ptr] -> not-@p -> [ptr]
+	// invert the bits of an `ptr` at address A, replace A with the result; like *(uintptr_t*)A = ~*(uintptr_t*)A
+	BRB_OP_NOTAT64,   // [A:ptr] -> not-@64 -> [i64]
+	// invert the bits of an `i64` at address A, replace A with the result; like *(uint64_t*)A = ~*(uint64_t*)A
 
 	BRB_OP_DROP,     // [A:any] -> drop -> []
 	// deletes A from the stack
@@ -265,8 +263,8 @@ Data Types:
 	BRB_OP_DROPN,    // [A:any * <n>] -> drop-n <n> -> []
 	// deletes <n> items from the top of the stack
 	BRB_OP_NEW,      // [] -> new <T> -> [<T>]
-	// create new item of type <T> on top of the stack; content of the item is undefined
-	BRB_OP_NEWZ,     // [] -> new-z <T> -> [<T>]
+	// create new item of type <T> on top of the stack; contents of the item is undefined
+	BRB_OP_ZERO,     // [] -> zero <T> -> [<T>]
 	// create new item of type <T> on top of the stack, with every byte initialized to 0
 	BRB_OP_DUP,      // [A:x...] -> dup <i> -> [A:x...A:x]
 	// duplicates stack item at index <i> on top of the stack

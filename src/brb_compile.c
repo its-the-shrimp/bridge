@@ -57,7 +57,8 @@ typedef enum {
 	LI_OFFSET,
 	LI_BASE,
 	LI_EXT,
-	LI_2REG
+	LI_2REG,
+	LI_NONE
 } arm64_LiteralIntent;
 
 static char* compileIntLiteral_arm64(FILE* dst, int64_t value, uint8_t reg_id, arm64_LiteralIntent intent, long* acc_p)
@@ -75,6 +76,7 @@ static char* compileIntLiteral_arm64(FILE* dst, int64_t value, uint8_t reg_id, a
 		[LI_2REG] = -42
 	};
 	static char retbuf[32];
+	if (intent == LI_NONE) return "";
 
 	if (inRange(value, min_bounds[intent], max_bounds[intent])) { // the condition is this one
 		snprintf(retbuf, sizeof(retbuf), "%lld", value);
@@ -123,6 +125,19 @@ static char* compileIntLiteral_arm64(FILE* dst, int64_t value, uint8_t reg_id, a
 #define ARM64_ADDR_OFFSET_MAX  255
 static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, size_t vframe_offset, size_t vframe_offset_before, FILE* dst)
 {
+	static const char* op_postfix[] = {
+		[BRB_ADDR_I8]  = "b w",
+		[BRB_ADDR_I16] = "h w",
+		[BRB_ADDR_I32] = "  w",
+		[BRB_ADDR_PTR] = "  x",
+		[BRB_ADDR_I64] = "  x",
+	};
+	static const char* rt_op_postfix[] = {
+		[1] = "b w",
+		[2] = "h w",
+		[4] = "  w",
+		[8] = "  x"
+	};
 	long acc = 0;
 	BRB_Op* op = &builder->module.seg_exec.data[proc_id].body.data[op_id];
 	char* offset;
@@ -475,7 +490,7 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 			};
 			acc += fprintf(dst, "\tbl %.*s\n", unpack(sys_to_proc_name[op->operand_u]));
 			if (op->operand_u != BRB_SYS_EXIT) {
-				offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+				offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_OFFSET, &acc);
 				acc += fprintf(dst, "\tstr x0, [sp, %s]\n", offset);
 			}
 			return acc;
@@ -486,13 +501,13 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 		case BRB_OP_DIV:
 		case BRB_OP_DIVS:
 		case BRB_OP_MOD:
-		case BRB_OP_MODS: {
-			static const char* op_postfix[] = {
-				[1] = "b w",
-				[2] = "h w",
-				[4] = "  w",
-				[8] = "  x"
-			};
+		case BRB_OP_MODS:
+		case BRB_OP_AND:
+		case BRB_OP_OR:
+		case BRB_OP_XOR:
+		case BRB_OP_SHL:
+		case BRB_OP_SHR:
+		case BRB_OP_SHRS: {
 			static const char* native_op[] = {
 				[BRB_OP_ADD]  = "\tadd x9, x9, x10\n",
 				[BRB_OP_SUB]  = "\tsub x9, x9, x10\n",
@@ -502,7 +517,13 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				[BRB_OP_MOD]  = "\tudiv x11, x9, x10\n"
 						"\tmsub x9, x11, x10, x9\n",
 				[BRB_OP_MODS] = "\tsdiv x11, x9, x10\n"
-						"\tmsub x9, x11, x10, x9\n"
+						"\tmsub x9, x11, x10, x9\n",
+				[BRB_OP_AND]  = "\tand  x9, x9, x10\n",
+				[BRB_OP_OR]   = "\torr  x9, x9, x10\n",
+				[BRB_OP_XOR]  = "\teor  x9, x9, x10\n",
+				[BRB_OP_SHL]  = "\tlsl  x9, x9, x10\n",
+				[BRB_OP_SHR]  = "\tlsr  x9, x9, x10\n",
+				[BRB_OP_SHRS] = "\tasr  x9, x9, x10\n"
 			};
 			size_t main_op_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0),
 				op2_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
@@ -515,7 +536,7 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 						"\tstr%s9, [sp, %s]\n",
 						vframe_offset_before,
 						native_op[op->type],
-						op_postfix[main_op_size], offset);
+						rt_op_postfix[main_op_size], offset);
 				} else {
 					compileIntLiteral_arm64(dst, vframe_offset, 8, LI_2REG, &acc);
 					return acc + fprintf(dst,
@@ -523,9 +544,8 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 						"%s"
 						"\tstr%s9, [x8]\n",
 						native_op[op->type],
-						op_postfix[main_op_size]);
+						rt_op_postfix[main_op_size]);
 				}
-
 			} else if (main_op_size == op2_size && op2_size == 4) {
 				if (vframe_offset_before <= ARM64_LDP32_OP2_MAX && vframe_offset_before % 4 == 0) {
 					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_OFFSET, &acc);
@@ -535,7 +555,7 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 						"\tstr%s9, [sp, %s]\n",
 						vframe_offset_before,
 						native_op[op->type],
-						op_postfix[main_op_size], offset);
+						rt_op_postfix[main_op_size], offset);
 				} else {
 					compileIntLiteral_arm64(dst, vframe_offset, 8, LI_2REG, &acc);
 					return acc + fprintf(dst,
@@ -543,7 +563,7 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 						"%s"
 						"\tstr%s9, [x8]\n",
 						native_op[op->type],
-						op_postfix[main_op_size]);
+						rt_op_postfix[main_op_size]);
 				}
 			} else {
 				if (vframe_offset_before + main_op_size <= ARM64_ADDR_OFFSET_MAX) {
@@ -552,10 +572,10 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 						"\tldr%s10, [sp, %zu]\n"
 						"%s"
 						"\tstr%s9, [sp, %zu]\n",
-						op_postfix[main_op_size], vframe_offset_before,
-						op_postfix[op2_size], vframe_offset_before + main_op_size,
+						rt_op_postfix[main_op_size], vframe_offset_before,
+						rt_op_postfix[op2_size], vframe_offset_before + main_op_size,
 						native_op[op->type],
-						op_postfix[main_op_size], vframe_offset);
+						rt_op_postfix[main_op_size], vframe_offset);
 				} else {
 					compileIntLiteral_arm64(dst, vframe_offset_before, 8, LI_2REG, &acc);
 					return acc + fprintf(dst,
@@ -563,10 +583,10 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 						"\tldr%s10, [x8], %zi\n"
 						"%s"
 						"\tstr%s9, [x8]\n",
-						op_postfix[main_op_size], main_op_size,
-						op_postfix[op2_size], op2_size - main_op_size,
+						rt_op_postfix[main_op_size], main_op_size,
+						rt_op_postfix[op2_size], op2_size - main_op_size,
 						native_op[op->type],
-						op_postfix[main_op_size]);
+						rt_op_postfix[main_op_size]);
 				}
 			}
 			return acc;
@@ -577,7 +597,14 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 		case BRB_OP_DIVI:
 		case BRB_OP_DIVSI:
 		case BRB_OP_MODI:
-		case BRB_OP_MODSI: {
+		case BRB_OP_MODSI:
+		case BRB_OP_ANDI:
+		case BRB_OP_ORI:
+		case BRB_OP_XORI:
+		case BRB_OP_SHLI:
+		case BRB_OP_SHRI:
+		case BRB_OP_SHRSI:
+		case BRB_OP_NOT: {
 			static const char* native_op[] = {
 				[BRB_OP_ADDI]  = "\tadd  x8, x8, %s\n",
 				[BRB_OP_SUBI]  = "\tsub  x8, x8, %s\n",
@@ -587,13 +614,14 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				[BRB_OP_MODI]  = "\tudiv x11, x8, %s\n"
 						 "\tmsub x8,  x11, x10, x8\n",
 				[BRB_OP_MODSI] = "\tsdiv x11, x8, %s\n"
-						 "\tmsub x8,  x11, x10, x8\n"
-			};
-			static const char* op_postfix[] = {
-				[1] = "b w8",
-				[2] = "h w8",
-				[4] = "  w8",
-				[8] = "  x8",
+						 "\tmsub x8,  x11, x10, x8\n",
+				[BRB_OP_ANDI]  = "\tand  x8, x8, %s\n",
+				[BRB_OP_ORI]   = "\torr  x8, x8, %s\n",
+				[BRB_OP_XORI]  = "\teor  x8, x8, %s\n",
+				[BRB_OP_SHLI]  = "\tlsl  x8, x8, %s\n",
+				[BRB_OP_SHRI]  = "\tlsr  x8, x8, %s\n",
+				[BRB_OP_SHRSI] = "\tasr  x8, x8, %s\n",
+				[BRB_OP_NOT]   = "\tmvn  x8, x8%s\n"
 			};
 			static const arm64_LiteralIntent op2_placement[] = {
 				[BRB_OP_ADDI]  = LI_BASE,
@@ -602,22 +630,29 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				[BRB_OP_DIVI]  = LI_2REG,
 				[BRB_OP_DIVSI] = LI_2REG,
 				[BRB_OP_MODI]  = LI_2REG,
-				[BRB_OP_MODSI] = LI_2REG
+				[BRB_OP_MODSI] = LI_2REG,
+				[BRB_OP_ANDI]  = LI_2REG,
+				[BRB_OP_ORI]   = LI_2REG,
+				[BRB_OP_XORI]  = LI_2REG,
+				[BRB_OP_SHLI]  = LI_BASE,
+				[BRB_OP_SHRI]  = LI_BASE,
+				[BRB_OP_SHRSI] = LI_BASE,
+				[BRB_OP_NOT]   = LI_NONE
 			};
 			const size_t op_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0);
 			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
 				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[op->type], &acc);
 				return acc
-					+ fprintf(dst, "\tldr%s, [sp, %zu]\n", op_postfix[op_size], vframe_offset)
+					+ fprintf(dst, "\tldr%s8, [sp, %zu]\n", rt_op_postfix[op_size], vframe_offset)
 					+ fprintf(dst, native_op[op->type], offset)
-					+ fprintf(dst, "\tstr%s, [sp, %zu]\n", op_postfix[op_size], vframe_offset);
+					+ fprintf(dst, "\tstr%s8, [sp, %zu]\n", rt_op_postfix[op_size], vframe_offset);
 			} else {
 				compileIntLiteral_arm64(dst, vframe_offset, 9, LI_2REG, &acc);
 				offset = compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[op->type], &acc);
 				return acc
-					+ fprintf(dst, "\tldr%s, [sp, x9]\n", op_postfix[op_size])
+					+ fprintf(dst, "\tldr%s8, [sp, x9]\n", rt_op_postfix[op_size])
 					+ fprintf(dst, native_op[op->type], offset)
-					+ fprintf(dst, "\tstr%s, [sp, x9]\n", op_postfix[op_size]);
+					+ fprintf(dst, "\tstr%s8, [sp, x9]\n", rt_op_postfix[op_size]);
 			}
 		}
 		case BRB_OP_ADDIAT8:
@@ -654,14 +689,42 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 		case BRB_OP_MODSIAT16:
 		case BRB_OP_MODSIAT32:
 		case BRB_OP_MODSIATP:
-		case BRB_OP_MODSIAT64: {
-			static const char* op_postfix[] = {
-				[BRB_ADDR_I8]  = "b w8",
-				[BRB_ADDR_I16] = "h w8",
-				[BRB_ADDR_I32] = "  w8",
-				[BRB_ADDR_PTR] = "  x8",
-				[BRB_ADDR_I64] = "  x8",
-			};
+		case BRB_OP_MODSIAT64:
+		case BRB_OP_ANDIAT8:
+		case BRB_OP_ANDIAT16:
+		case BRB_OP_ANDIAT32:
+		case BRB_OP_ANDIATP:
+		case BRB_OP_ANDIAT64:
+		case BRB_OP_ORIAT8:
+		case BRB_OP_ORIAT16:
+		case BRB_OP_ORIAT32:
+		case BRB_OP_ORIATP:
+		case BRB_OP_ORIAT64:
+		case BRB_OP_XORIAT8:
+		case BRB_OP_XORIAT16:
+		case BRB_OP_XORIAT32:
+		case BRB_OP_XORIATP:
+		case BRB_OP_XORIAT64:
+		case BRB_OP_SHLIAT8:
+		case BRB_OP_SHLIAT16:
+		case BRB_OP_SHLIAT32:
+		case BRB_OP_SHLIATP:
+		case BRB_OP_SHLIAT64:
+		case BRB_OP_SHRIAT8:
+		case BRB_OP_SHRIAT16:
+		case BRB_OP_SHRIAT32:
+		case BRB_OP_SHRIATP:
+		case BRB_OP_SHRIAT64:
+		case BRB_OP_SHRSIAT8:
+		case BRB_OP_SHRSIAT16:
+		case BRB_OP_SHRSIAT32:
+		case BRB_OP_SHRSIATP:
+		case BRB_OP_SHRSIAT64:
+		case BRB_OP_NOTAT8:
+		case BRB_OP_NOTAT16:
+		case BRB_OP_NOTAT32:
+		case BRB_OP_NOTATP:
+		case BRB_OP_NOTAT64: {
 			static const char* native_op[] = {
 				[BRB_OP_ADD]  = "\tadd  x8, x8, %s\n",
 				[BRB_OP_SUB]  = "\tsub  x8, x8, %s\n",
@@ -671,7 +734,14 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				[BRB_OP_MOD]  = "\tudiv x11, x8, %s\n"
 						"\tmsub x8,  x10, x11, x8\n",
 				[BRB_OP_MODS] = "\tsdiv x11, x8, %s\n"
-						"\tmsub x8,  x10, x11, x8\n"
+						"\tmsub x8,  x10, x11, x8\n",
+				[BRB_OP_AND]  = "\tand  x8, x8, %s\n",
+				[BRB_OP_OR]   = "\torr  x8, x8, %s\n",
+				[BRB_OP_XOR]  = "\teor  x8, x8, %s\n",
+				[BRB_OP_SHL]  = "\tlsl  x8, x8, %s\n",
+				[BRB_OP_SHR]  = "\tlsr  x8, x8, %s\n",
+				[BRB_OP_SHRS] = "\tasr  x8, x8, %s\n",
+				[BRB_OP_NOT]  = "\tmvn  x8, x8%s\n"
 			};
 			static const arm64_LiteralIntent op2_placement[] = {
 				[BRB_OP_ADD]  = LI_BASE,
@@ -680,16 +750,23 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				[BRB_OP_DIV]  = LI_2REG,
 				[BRB_OP_DIVS] = LI_2REG,
 				[BRB_OP_MOD]  = LI_2REG,
-				[BRB_OP_MODS] = LI_2REG
+				[BRB_OP_MODS] = LI_2REG,
+				[BRB_OP_AND]  = LI_2REG,
+				[BRB_OP_OR]   = LI_2REG,
+				[BRB_OP_XOR]  = LI_2REG,
+				[BRB_OP_SHL]  = LI_BASE,
+				[BRB_OP_SHR]  = LI_BASE,
+				[BRB_OP_SHRS] = LI_BASE,
+				[BRB_OP_NOT]  = LI_NONE
 			};
 			offset = compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[BRB_GET_BASE_OP_TYPE(op->type)], &acc);
 			if (vframe_offset <= ARM64_ADDR_OFFSET_MAX) {
 				return acc + fprintf(dst,
 						"\tldr  x8, [sp, %zu]\n"
-						"\tldr%s, [x8]\n",
+						"\tldr%s8, [x8]\n",
 						vframe_offset_before, op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)])
 					+ fprintf(dst, native_op[BRB_GET_BASE_OP_TYPE(op->type)], offset)
-					+ fprintf(dst, "\tstr%s, [sp, %zu]\n", op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)], vframe_offset);
+					+ fprintf(dst, "\tstr%s8, [sp, %zu]\n", op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)], vframe_offset);
 			} else {
 				static uint8_t native_offset[] = {
 					[BRB_ADDR_I8]  = 7,
@@ -701,10 +778,10 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, uint32_t proc_id,
 				compileIntLiteral_arm64(dst, vframe_offset_before, 9, LI_2REG, &acc);
 				return acc + fprintf(dst,
 						"\tldr  x8, [x9], %hhu\n"
-						"\tldr%s, [x8]\n",
+						"\tldr%s8, [x8]\n",
 						native_offset[BRB_GET_ADDR_OP_TYPE(op->type)], op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)])
 					+ fprintf(dst, native_op[BRB_GET_BASE_OP_TYPE(op->type)], offset)
-					+ fprintf(dst, "\tstr%s, [x9]\n", op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)]);
+					+ fprintf(dst, "\tstr%s8, [x9]\n", op_postfix[BRB_GET_ADDR_OP_TYPE(op->type)]);
 			}
 		}
 		case BRB_OP_DROP:
