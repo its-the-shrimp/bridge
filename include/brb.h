@@ -260,8 +260,6 @@ Data Types:
 	BRB_OP_DROP,     // [A:any] -> drop -> []
 	// deletes A from the stack
 /* TODO:
-	BRB_OP_DROPN,    // [A:any * <n>] -> drop-n <n> -> []
-	// deletes <n> items from the top of the stack
 	BRB_OP_NEW,      // [] -> new <T> -> [<T>]
 	// create new item of type <T> on top of the stack; contents of the item is undefined
 	BRB_OP_ZERO,     // [] -> zero <T> -> [<T>]
@@ -369,7 +367,8 @@ typedef enum {
 	BRB_ADDR_I64,
 } BRB_AddrOperandType;
 #define BRB_GET_ADDR_OP_TYPE(type) ((BRB_AddrOperandType)((BRB_opFlags[type] >> 3) & 7))
-#define BRB_GET_BASE_OP_TYPE(type) ((BRB_OpType)(BRB_opFlags[type] >> 6))
+#define BRB_OPERAND_ALLOCATED 64
+#define BRB_GET_BASE_OP_TYPE(type) ((BRB_OpType)(BRB_opFlags[type] >> 7))
 
 typedef enum {
 	BRB_TYPE_I8,
@@ -417,6 +416,7 @@ typedef struct {
 		uint64_t operand_u;	
 		int64_t operand_s;
 		BRB_Type operand_type;
+		void* operand_ptr;
 	};
 } BRB_Op;
 static_assert(sizeof(BRB_Op) <= 16, "`sizeof(BRB_Op) > 16`, that's no good, gotta save up on that precious memory");
@@ -455,38 +455,10 @@ typedef enum {
 extern const uintptr_t BRB_builtinValues[];
 extern const sbuf BRB_builtinNames[];
 
-typedef enum {
-	BRB_DP_NONE,
-	BRB_DP_BYTES, // span of bytes stored in the bytecode along with a size
-	BRB_DP_I16, // 16-bit integer
-	BRB_DP_I32, // 32-bit integer
-	BRB_DP_PTR, // pointer-sized integer
-	BRB_DP_I64, // 64-bit integer
-	BRB_DP_TEXT, // span of bytes stored in the bytecode as a null-terminated string; takes less space than `bytes` data piece, but cannot store a null byte
-	BRB_DP_DBADDR, // pointer to the contents of a data block
-	BRB_DP_ZERO, // span of null bytes of arbitrary size
-	BRB_DP_BUILTIN, // pointer-sized integer, storing a built-in constant
-	BRB_N_DP_TYPES
-} BRB_DataPieceType;
-// TODO: add pre-evaluation data pieces that would pre-evaluate a block of code and embed its output as a data piece
-
-extern const sbuf BRB_dataPieceNames[];
-
-typedef struct {
-	BRB_DataPieceType type;
-	union {
-		sbuf data; // for PIECE_BYTES or PIECE_TEXT
-		uint64_t content_u;
-		int64_t content_s;
-		BRB_Type content_type;
-	};
-} BRB_DataPiece;
-declArray(BRB_DataPiece);
-
 typedef struct {
 	const char* name;
 	union {
-		BRB_DataPieceArray pieces;
+		BRB_OpArray body;
 		sbuf data;
 	};
 	bool is_mutable;
@@ -514,18 +486,12 @@ typedef enum {
 	BRB_ERR_NO_OPERAND,
 	BRB_ERR_INVALID_NAME,
 	BRB_ERR_NAMES_NOT_RESOLVED,
-	BRB_ERR_INVALID_BUILTIN,
-	BRB_ERR_INVALID_SYSCALL,
 	BRB_ERR_STACK_UNDERFLOW,
-	BRB_ERR_OPERAND_TOO_LARGE,
 	BRB_ERR_OPERAND_OUT_OF_RANGE,
 	BRB_ERR_NO_PROC_RET_TYPE,
 	BRB_ERR_NO_PROC_NAME,
 	BRB_ERR_NO_PROC_ARG,
 	BRB_ERR_NO_PROC_BODY_SIZE,
-	BRB_ERR_NO_DP_TYPE,
-	BRB_ERR_INVALID_DP_TYPE,
-	BRB_ERR_NO_DP_CONTENT,
 	BRB_ERR_NO_DB_NAME,
 	BRB_ERR_NO_DB_BODY_SIZE,
 	BRB_ERR_NO_ENTRY,
@@ -536,9 +502,7 @@ typedef enum {
 	BRB_ERR_INT_OPERAND_EXPECTED,
 	BRB_ERR_INT_OR_NAME_OPERAND_EXPECTED,
 	BRB_ERR_BUILTIN_OPERAND_EXPECTED,
-	BRB_ERR_DP_NAME_EXPECTED,
 	BRB_ERR_TEXT_OPERAND_EXPECTED,
-	BRB_ERR_INVALID_TEXT_OPERAND,
 	BRB_ERR_INVALID_DECL,
 	BRB_ERR_ARGS_EXPECTED,
 	BRB_ERR_PROTOTYPE_MISMATCH,
@@ -546,6 +510,7 @@ typedef enum {
 	BRB_ERR_INVALID_ARRAY_SIZE_SPEC,
 	BRB_ERR_TYPE_MISMATCH,
 	BRB_ERR_DEL_ARGS,
+	BRB_ERR_MODULE_LOAD_INTERRUPT,
 	BRB_N_ERROR_TYPES
 } BRB_ErrorType;
 
@@ -584,6 +549,7 @@ declArray(BRB_StackNodeArray);
 typedef struct {
 	BRB_Module module;
 	BRB_StackNodeArrayArray procs;
+	BRB_StackNodeArrayArray data_blocks;
 	BRB_Error error;
 	Arena arena;
 } BRB_ModuleBuilder;
@@ -618,6 +584,9 @@ typedef struct {
 	uint32_t entry_point;
 } BRB_ExecEnv;
 
+typedef int64_t BRB_id_t; // an ID of either a procedure or a data block
+#define BRB_INVALID_ID INT64_MIN
+
 typedef const char** field;
 declArray(field);
 defArray(field);
@@ -632,24 +601,27 @@ BRB_Error  BRB_initModuleBuilder(BRB_ModuleBuilder* builder);
 BRB_Error  BRB_analyzeModule(const BRB_Module* module, BRB_ModuleBuilder* dst);
 BRB_Error  BRB_extractModule(BRB_ModuleBuilder builder, BRB_Module* dst);
 BRB_Error  BRB_setEntryPoint(BRB_ModuleBuilder* builder, size_t proc_id);
+BRB_Error  BRB_addOp(BRB_ModuleBuilder* builder, BRB_id_t proc_id, BRB_Op op);
 
-BRB_Error  BRB_preallocExecSegment(BRB_ModuleBuilder* builder, uint32_t n_procs_hint);
-BRB_Error  BRB_addProc(BRB_ModuleBuilder* builder, uint32_t* proc_id_p, const char* name, size_t n_args, BRB_Type* args, BRB_Type ret_type, uint32_t n_ops_hint);
-BRB_Error  BRB_addOp(BRB_ModuleBuilder* builder, uint32_t proc_id, BRB_Op op);
-size_t     BRB_getProcIdByName(BRB_Module* module, const char* name); // returns SIZE_MAX on error
+BRB_Error  BRB_preallocProcs(BRB_ModuleBuilder* builder, uint32_t n_procs_hint);
+void       BRB_deallocProcs(BRB_Module* module);
+BRB_Error  BRB_addProc(BRB_ModuleBuilder* builder, BRB_id_t* proc_id_p, const char* name, size_t n_args, BRB_Type* args, BRB_Type ret_type, uint32_t n_ops_hint);
+BRB_id_t   BRB_getProcIdByName(BRB_Module* module, const char* name); // returns BRB_INVALID_ID on error
 
-BRB_Error  BRB_preallocDataSegment(BRB_ModuleBuilder* builder, uint32_t n_dbs_hint);
-BRB_Error  BRB_addDataBlock(BRB_ModuleBuilder* builder, uint32_t* db_id_p, const char* name, bool is_mutable, uint32_t n_pieces_hint);
-BRB_Error  BRB_addDataPiece(BRB_ModuleBuilder* builder, uint32_t db_id, BRB_DataPiece piece);
-size_t     BRB_getDataBlockIdByName(BRB_Module* module, const char* name); // returns SIZE_MAX on error
+BRB_Error  BRB_preallocDataBlocks(BRB_ModuleBuilder* builder, uint32_t n_dbs_hint);
+void       BRB_deallocDataBlocks(BRB_Module* module);
+BRB_Error  BRB_addDataBlock(BRB_ModuleBuilder* builder, BRB_id_t* db_id_p, const char* name, bool is_mutable, uint32_t n_pieces_hint);
+BRB_id_t   BRB_getDataBlockIdByName(BRB_Module* module, const char* name); // returns BRB_INVALID_ID on error
 
-BRB_Error  BRB_labelStackItem(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id, const char* name);
-bool       BRB_getStackItemType(BRB_ModuleBuilder* builder, BRB_Type* dst, uint32_t proc_id, uint32_t op_id, uint32_t item_id);
-size_t     BRB_getStackItemRTOffset(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, size_t item_id); // if `item_id` is not SIZE_MAX, returns SIZE_MAX on error
-size_t     BRB_getStackRTSize(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id);
-size_t     BRB_getStackItemRTSize(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
-ssize_t    BRB_getStackRTSizeDiff(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id);
-size_t     BRB_getStackItemIdByName(BRB_ModuleBuilder* builder, uint32_t proc_id, uint32_t op_id, const char* name); // returns SIZE_MAX on error
+BRB_Op*    BRB_getOp(BRB_Module* module, BRB_id_t proc_id, uint32_t op_id);
+BRB_Error  BRB_labelStackItem(BRB_ModuleBuilder* builder, BRB_id_t proc_id, uint32_t op_id, uint32_t item_id, const char* name);
+bool       BRB_getStackItemType(BRB_ModuleBuilder* builder, BRB_Type* dst, BRB_id_t proc_id, uint32_t op_id, uint32_t item_id);
+size_t     BRB_getStackItemRTOffset(BRB_ModuleBuilder* builder, BRB_id_t proc_id, uint32_t op_id, size_t item_id); // if `item_id` is not SIZE_MAX, returns SIZE_MAX on error
+size_t     BRB_getStackRTSize(BRB_ModuleBuilder* builder, BRB_id_t proc_id, uint32_t op_id);
+size_t     BRB_getMaxStackRTSize(BRB_ModuleBuilder* builder, BRB_id_t proc_id);
+size_t     BRB_getStackItemRTSize(BRB_ModuleBuilder* builder, BRB_id_t proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
+ssize_t    BRB_getStackRTSizeDiff(BRB_ModuleBuilder* builder, BRB_id_t proc_id, uint32_t op_id);
+size_t     BRB_getStackItemIdByName(BRB_ModuleBuilder* builder, BRB_id_t proc_id, uint32_t op_id, const char* name); // returns SIZE_MAX on error
 size_t     BRB_getTypeRTSize(BRB_Type type);
 
 // implemented in `src/brb_write.c`
@@ -659,8 +631,7 @@ long       BRB_writeModule(BRB_Module src, FILE* dst);
 BRB_Error  BRB_loadModule(FILE* src, BRB_Module* dst);
 
 // implemented in `src/brb_exec.c`
-BRB_Error  BRB_initExecEnv(BRB_ExecEnv* env, BRB_Module module, size_t stack_size);
-void       BRB_execModule(BRB_ExecEnv* env, char* args[], const volatile bool* interruptor);
+BRB_Error  BRB_execModule(BRB_Module module, BRB_ExecEnv* env, char* args[], size_t stack_size, const volatile bool* interruptor);
 void       BRB_delExecEnv(BRB_ExecEnv* env);
 
 // implemented in `src/brb_asm.c`

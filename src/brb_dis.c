@@ -47,35 +47,6 @@ static long printProcDecl(BRB_Proc proc, FILE* dst)
 	return acc + fputstr(dst, ")");
 }
 
-static long printDataPiece(BRB_DataPiece piece, const BRB_Module* module, FILE* dst)
-{
-	switch (piece.type) {
-		case BRB_DP_BYTES:
-		case BRB_DP_TEXT:
-			return fprintf(dst, "\t%.*s \"", unpack(BRB_dataPieceNames[piece.type]))
-				+ fputsbufesc(dst, piece.data, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
-				+ fputstr(dst, "\"\n");
-		case BRB_DP_I16:
-		case BRB_DP_I32:
-		case BRB_DP_PTR:
-		case BRB_DP_I64:
-			return fprintf(dst, "\t%.*s %llu\n", unpack(BRB_dataPieceNames[piece.type]), piece.content_u);
-		case BRB_DP_DBADDR:
-			return fprintf(dst, "\t%.*s \"", unpack(BRB_dataPieceNames[piece.type]))
-				+ fputstresc(dst, module->seg_data.data[piece.content_u].name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
-				+ fputstr(dst, "\"\n");
-		case BRB_DP_ZERO:
-			return fprintf(dst, "\t%.*s ", unpack(BRB_dataPieceNames[piece.type]))
-				+ BRB_printType(piece.content_type, dst)
-				+ fputstr(dst, "\n");
-		case BRB_DP_BUILTIN:
-			return fprintf(dst, "\t%.*s %.*s", unpack(BRB_dataPieceNames[piece.type]), unpack(BRB_builtinNames[piece.content_u]));
-		case BRB_N_DP_TYPES:
-		case BRB_DP_NONE:
-			assert(false, "unknown data piece type %u", piece.type);
-	}
-}
-
 static long printOp(BRB_Op op, const BRB_Module* module, FILE* dst)
 {
 	switch (BRB_GET_OPERAND_TYPE(op.type)) {
@@ -89,7 +60,7 @@ static long printOp(BRB_Op op, const BRB_Module* module, FILE* dst)
 				+ fputstr(dst, "\n");
 		case BRB_OPERAND_DB_NAME:
 			return fprintf(dst, "\t%.*s \"", unpack(BRB_opNames[op.type]))
-				+ fputstresc(dst, module->seg_data.data[op.operand_u].name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
+				+ fputstresc(dst, module->seg_data.data[~op.operand_s].name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
 				+ fputstr(dst, "\"\n");
 		case BRB_OPERAND_SYSCALL_NAME:
 			return fprintf(dst, "\t%.*s %.*s\n", unpack(BRB_opNames[op.type]), unpack(BRB_syscallNames[op.operand_u]));
@@ -121,8 +92,8 @@ long BRB_disassembleModule(const BRB_Module* module, FILE* dst)
 	arrayForeach (BRB_DataBlock, block, module->seg_data) {
 		acc += printDataBlockDecl(*block, dst)
 			+ fputstr(dst, " {\n");
-		arrayForeach (BRB_DataPiece, piece, block->pieces) {
-			acc += printDataPiece(*piece, module, dst);
+		arrayForeach (BRB_Op, op, block->body) {
+			acc += printOp(*op, module, dst);
 		}
 		acc += fputstr(dst, "}\n");
 	}

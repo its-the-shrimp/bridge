@@ -4,91 +4,9 @@
 
 defArray(sbuf);
 
-static sbuf allocDataBlock(BRB_DataBlock block)
+static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB_id_t proc_id, uint32_t op_id)
 {
-	sbuf_size_t res = 0;
-	arrayForeach (BRB_DataPiece, piece, block.pieces) {
-		switch (piece->type) {
-			case BRB_DP_BYTES:
-			case BRB_DP_TEXT:
-				res += piece->data.length;
-				break;
-			case BRB_DP_I16:
-				res += 2;
-				break;
-			case BRB_DP_I32:
-				res += 4;
-				break;
-			case BRB_DP_PTR:
-			case BRB_DP_BUILTIN:
-			case BRB_DP_DBADDR:
-				res += sizeof(void*);
-				break;
-			case BRB_DP_I64:
-				res += 8;
-				break;
-			case BRB_DP_ZERO:
-				res += BRB_getTypeRTSize(piece->content_type);
-				break;
-			case BRB_DP_NONE:
-			case BRB_N_DP_TYPES:
-			default:
-				assert(false, "unknown data piece type %u\n", piece->type);
-		}
-	}
-	return smalloc(res);
-}
-
-static void assembleDataBlock(BRB_ExecEnv* env, BRB_DataBlock block, sbuf dst)
-{
-	sbuf_size_t offset = 0;
-	arrayForeach (BRB_DataPiece, piece, block.pieces) {
-		switch (piece->type) {
-			case BRB_DP_BYTES:
-			case BRB_DP_TEXT:
-				memcpy(dst.data + offset, piece->data.data, piece->data.length);
-				offset += piece->data.length;
-				break;
-			case BRB_DP_I16:
-				*(uint16_t*)(dst.data + offset) = piece->content_u;
-				offset += 2;
-				break;
-			case BRB_DP_I32:
-				*(uint32_t*)(dst.data + offset) = piece->content_u;
-				offset += 4;
-				break;
-			case BRB_DP_PTR:
-				*(uintptr_t*)(dst.data + offset) = piece->content_u;
-				offset += sizeof(void*);
-				break;
-			case BRB_DP_I64:
-				*(uint64_t*)(dst.data + offset) = piece->content_u;
-				offset += 8;
-				break;
-			case BRB_DP_DBADDR:
-				*(char**)(dst.data + offset) = env->seg_data.data[piece->content_u].data;
-				offset += sizeof(void*);
-				break;
-			case BRB_DP_ZERO: {
-				size_t n_zeroes = BRB_getTypeRTSize(piece->content_type);
-				memset(dst.data + offset, 0, n_zeroes);
-				offset += n_zeroes;
-			} break;
-			case BRB_DP_BUILTIN:
-				*(uintptr_t*)(dst.data + offset) = BRB_builtinValues[piece->content_u];
-				offset += sizeof(void*);
-				break;
-			case BRB_DP_NONE:
-			case BRB_N_DP_TYPES:
-			default:
-				assert(false, "unknown data piece type %u\n", piece->type);
-		}
-	}
-}
-
-static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB_ProcArray seg_exec, uint32_t proc_id, uint32_t op_id)
-{
-	BRB_Op *const op = &seg_exec.data[proc_id].body.data[op_id];
+	BRB_Op *const op = BRB_getOp(&builder->module, proc_id, op_id);
 	switch (op->type) {
 			case BRB_OP_NOP:
 			case BRB_OP_END:
@@ -173,7 +91,7 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 				op->operand_u = BRB_getStackItemRTOffset(builder, proc_id, op_id, op->operand_u);
 				break;
 			case BRB_OP_DBADDR:
-				op->operand_u = (uintptr_t)seg_data.data[op->operand_u].data;
+				op->operand_ptr = seg_data.data[~op->operand_s].data;
 				break;
 			case BRB_OP_LD:
 				op->operand_u = BRB_getTypeRTSize(op->operand_type) - sizeof(void*);
@@ -221,48 +139,6 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 	}
 }
 
-BRB_Error BRB_initExecEnv(BRB_ExecEnv* env, BRB_Module module, size_t stack_size)
-{
-	*env = (BRB_ExecEnv){0};
-	if (module.exec_entry_point >= module.seg_exec.length) return (BRB_Error){.type = BRB_ERR_INVALID_ENTRY};
-	const BRB_Proc* const proc = &module.seg_exec.data[module.exec_entry_point];
-	if (proc->ret_type.kind != BRB_TYPE_VOID || proc->args.length) return (BRB_Error){.type = BRB_ERR_INVALID_ENTRY_PROTOTYPE};
-	if (!(env->stack = smalloc(stack_size)).data) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
-	env->stack_head = env->stack.data + env->stack.length;
-
-	if (!sbufArray_incrlen(&env->seg_data, module.seg_data.length) && module.seg_data.length) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
-	arrayForeach (BRB_DataBlock, block, module.seg_data) {
-		env->seg_data.data[block - module.seg_data.data] = allocDataBlock(*block);
-		if (!env->seg_data.data[block - module.seg_data.data].data) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
-	}
-	arrayForeach (BRB_DataBlock, block, module.seg_data) {
-		assembleDataBlock(env, *block, env->seg_data.data[block - module.seg_data.data]);
-	}
-
-	BRB_ModuleBuilder builder;
-	BRB_Error err = BRB_initModuleBuilder(&builder);
-	if (err.type) return err;
-	builder.module.seg_data = module.seg_data;
-	uint32_t _;
-	arrayForeach (BRB_Proc, proc, module.seg_exec) {
-		BRB_addProc(&builder, &_, proc->name, proc->args.length, proc->args.data, proc->ret_type, proc->body.length);
-	}
-
-	arrayForeach (BRB_Proc, proc, module.seg_exec) {
-		arrayForeach (BRB_Op, op, proc->body) {
-			BRB_addOp(&builder, proc - module.seg_exec.data, *op);
-			prepareOpForExec(&builder, env->seg_data, builder.module.seg_exec, proc - module.seg_exec.data, op - proc->body.data);
-		}
-	}
-	BRB_addOp(&builder, module.exec_entry_point, (BRB_Op){.type = BRB_OP_END});
-	BRB_setEntryPoint(&builder, module.exec_entry_point);
-
-	if ((err = BRB_extractModule(builder, &module)).type) return err;
-	env->seg_exec = module.seg_exec;
-	env->entry_point = module.exec_entry_point;
-
-	return (BRB_Error){0};
-}
 /*
 void getSrcLoc(ExecEnv* env, const char** filename_p, size_t* line_p)
 {
@@ -1175,13 +1051,24 @@ bool BRB_execOp(BRB_ExecEnv* env)
 	}
 }
 
-void BRB_execModule(BRB_ExecEnv* env, char** args, const volatile bool* interruptor)
+static sbuf allocDataBlock(BRB_ModuleBuilder* builder, BRB_id_t db_id)
 {
-	env->stack_head = env->stack.data + env->stack.length;
-	env->exec_index = 0;
-	env->cur_proc = env->seg_exec.data[env->entry_point].body.data;
-	env->exec_status.type = BRB_EXC_CONTINUE;
+	return smalloc(BRB_getMaxStackRTSize(builder, db_id));
+}
 
+BRB_Error BRB_execModule(BRB_Module module, BRB_ExecEnv* env, char* args[], size_t stack_size, const volatile bool* interruptor)
+// TODO: avoid memory leaks during execution by adding an arena allocator field to `BRB_ExecEnv`
+{
+	BRB_ExecEnv env_l;
+	if (!env) env = &env_l;
+	*env = (BRB_ExecEnv){0};
+// validating the entry point
+	if (module.exec_entry_point >= module.seg_exec.length)
+		return (BRB_Error){.type = BRB_ERR_INVALID_ENTRY};
+	const BRB_Proc* const proc = &module.seg_exec.data[module.exec_entry_point];
+	if (proc->ret_type.kind != BRB_TYPE_VOID || proc->args.length)
+		return (BRB_Error){.type = BRB_ERR_INVALID_ENTRY_PROTOTYPE};
+// setting the arguments
 	env->exec_argc = 0;
 	if (*args) while (args[++env->exec_argc]);
 	env->exec_argv = malloc(env->exec_argc * sizeof(sbuf));
@@ -1189,10 +1076,60 @@ void BRB_execModule(BRB_ExecEnv* env, char** args, const volatile bool* interrup
 		env->exec_argv[i] = fromstr((char*)args[i]);
 		env->exec_argv[i].length += 1;
 	}
-
+// setting a default interruptor if the `interruptor` is NULL
 	bool stub_interruptor = false;
 	if (!interruptor) interruptor = &stub_interruptor;
-
+// pre-allocating the data blocks array
+	if (!sbufArray_incrlen(&env->seg_data, module.seg_data.length) && module.seg_data.length)
+		return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
+// initializing the module analyzer
+	BRB_ModuleBuilder builder;
+	BRB_Error err;
+	if ((err = BRB_analyzeModule(&module, &builder)).type) return err;
+// allocating the data blocks
+	arrayForeach (BRB_DataBlock, block, builder.module.seg_data) {
+		if (!(env->seg_data.data[block - builder.module.seg_data.data] = allocDataBlock(&builder, ~(block - builder.module.seg_data.data))).data)
+			return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
+	}
+// pre-evaluating the data blocks
+	arrayForeach (BRB_DataBlock, block, builder.module.seg_data) {
+		for (uint32_t op_id = 0; op_id < block->body.length; ++op_id) {
+			prepareOpForExec(&builder, env->seg_data, ~(block - builder.module.seg_data.data), op_id);
+		}
+		if ((err = BRB_addOp(&builder, ~(block - builder.module.seg_data.data), (BRB_Op){.type = BRB_OP_END})).type)
+			return err;
+		env->cur_proc = block->body.data;
+		env->exec_index = 0;
+		env->stack = env->seg_data.data[block - builder.module.seg_data.data];
+		env->stack_head = env->stack.data + env->stack.length;
+		while (true) {
+			if (*interruptor)
+				return (BRB_Error){.type = BRB_ERR_MODULE_LOAD_INTERRUPT};
+			if (BRB_execOp(env)) break;
+		}
+	}
+// TODO: add recursive pre-evaluation of data blocks when one block is referencing another; this probably has to be done after `call`s and `ret`urns are added
+// allocating the stack
+	if (!(env->stack = smalloc(stack_size)).data)
+		return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
+	env->stack_head = env->stack.data + env->stack.length;
+// pre-evaluating operands of the operations for faster execution
+	arrayForeach (BRB_Proc, proc, builder.module.seg_exec) {
+		for (uint32_t op_id = 0; op_id < proc->body.length; ++op_id) {
+			prepareOpForExec(&builder, env->seg_data, proc - builder.module.seg_exec.data, op_id);
+		}
+	}
+// setting up the entry point
+	BRB_addOp(&builder, module.exec_entry_point, (BRB_Op){.type = BRB_OP_END});
+	env->entry_point = module.exec_entry_point;
+	env->exec_index = 0;
+	BRB_setEntryPoint(&builder, module.exec_entry_point);
+// cleaning up the analyzer
+	if ((err = BRB_extractModule(builder, &module)).type) return err;
+	BRB_deallocDataBlocks(&module);
+	env->seg_exec = module.seg_exec;
+	env->cur_proc = env->seg_exec.data[env->entry_point].body.data;
+// main execution loop
 	while (true) {
 		if (*interruptor) {
 			env->exec_status.type = BRB_EXC_INTERRUPT;
@@ -1200,8 +1137,14 @@ void BRB_execModule(BRB_ExecEnv* env, char** args, const volatile bool* interrup
 		}
 		if (BRB_execOp(env)) break;
 	}
-
-	env->exec_argc = 0;
-	free(env->exec_argv);
+// cleanup
 	env->exec_argv = NULL;
+	free(env->exec_argv);
+	env->exec_argc = 0;
+	if (env == &env_l) BRB_delExecEnv(env);
+	return (BRB_Error){0};
 }
+
+void BRB_delExecEnv(BRB_ExecEnv* env)
+// TODO
+{}

@@ -119,49 +119,6 @@ static BRB_Type loadType(FILE* src, long* n_fetched)
 	};
 }
 
-static BRB_Error loadDataPiece(BRB_ModuleLoader* loader, uint32_t db_id)
-{
-	BRB_DataPiece piece;
-// loading the type
-	piece.type = loadInt8(loader->src, &loader->n_fetched);
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DP_TYPE};
-// loading the content
-	switch (piece.type) {
-		case BRB_DP_BYTES:
-			piece.data = smalloc(loadInt(loader->src, &loader->n_fetched));
-			if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DP_CONTENT};
-
-			if (!fread(piece.data.data, piece.data.length, 1, loader->src))
-				return (BRB_Error){.type = BRB_ERR_NO_DP_CONTENT};
-			loader->n_fetched += piece.data.length;
-			break;
-		case BRB_DP_TEXT:
-			piece.data = (sbuf){0};
-			if ((piece.data.length = getdelim(&piece.data.data, (size_t*)&piece.data.length, '\0', loader->src)) < 0)
-				return (BRB_Error){.type = BRB_ERR_NO_DP_CONTENT};
-			--piece.data.length;
-			break;
-		case BRB_DP_I16:
-		case BRB_DP_I32:
-		case BRB_DP_PTR:
-		case BRB_DP_I64:
-		case BRB_DP_DBADDR:
-		case BRB_DP_BUILTIN:
-			piece.content_u = loadInt(loader->src, &loader->n_fetched);
-			if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DP_CONTENT};
-			break;
-		case BRB_DP_ZERO:
-			piece.content_type = loadType(loader->src, &loader->n_fetched);
-			if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DP_CONTENT};
-			break;
-		case BRB_DP_NONE:
-		case BRB_N_DP_TYPES:
-		default:
-			return (BRB_Error){.type = BRB_ERR_INVALID_DP_TYPE};
-	}
-	return BRB_addDataPiece(&loader->builder, db_id, piece);
-}
-
 static BRB_Error loadDataBlockDecl(BRB_ModuleLoader* loader, uint32_t* n_pieces_p)
 {
 // loading the flags
@@ -170,13 +127,13 @@ static BRB_Error loadDataBlockDecl(BRB_ModuleLoader* loader, uint32_t* n_pieces_
 	const char* name = (const char*)loadInt(loader->src, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DB_NAME};
 // loading the body size
-	uint32_t db_id;
+	BRB_id_t db_id;
 	*n_pieces_p = loadInt(loader->src, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DB_BODY_SIZE};
 	return BRB_addDataBlock(&loader->builder, &db_id, name, is_mutable, *n_pieces_p);
 }
 
-static BRB_Error loadOp(BRB_ModuleLoader* loader, uint32_t proc_id)
+static BRB_Error loadOp(BRB_ModuleLoader* loader, BRB_id_t proc_id)
 {
 	BRB_Op op;
 // loading the type
@@ -191,9 +148,11 @@ static BRB_Error loadOp(BRB_ModuleLoader* loader, uint32_t proc_id)
 		case BRB_OPERAND_INT:
 		case BRB_OPERAND_BUILTIN:
 		case BRB_OPERAND_VAR_NAME:
-		case BRB_OPERAND_DB_NAME:
 		case BRB_OPERAND_SYSCALL_NAME:
 			op.operand_u = loadInt(loader->src, &loader->n_fetched);
+			break;
+		case BRB_OPERAND_DB_NAME:
+			op.operand_s = ~loadInt(loader->src, &loader->n_fetched);
 			break;
 		case BRB_OPERAND_TYPE:
 			op.operand_type = loadType(loader->src, &loader->n_fetched);
@@ -222,7 +181,7 @@ static BRB_Error loadProcDecl(BRB_ModuleLoader* loader, uint32_t* n_ops_p)
 		if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_ARG};
 	}
 // loading the body size
-	uint32_t proc_id;
+	BRB_id_t proc_id;
 	*n_ops_p = loadInt(loader->src, &loader->n_fetched);
 	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_BODY_SIZE};
 	return BRB_addProc(&loader->builder, &proc_id, (char*)proc_name, n_args, args, ret_type, *n_ops_p);
@@ -244,8 +203,8 @@ BRB_Error BRB_loadModule(FILE* src, BRB_Module* dst)
 // loading the amount of data blocks
 	uint32_t n_dbs = loadInt(src, &loader.n_fetched);
 	if (loader.n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DATA_SEG};
-	if ((err = BRB_preallocDataSegment(&loader.builder, n_dbs)).type) return err;
-// loading  the data block declarations
+	if ((err = BRB_preallocDataBlocks(&loader.builder, n_dbs)).type) return err;
+// loading the data block declarations
 	uint32_t n_pieces_per_db[n_dbs];
 	for (uint32_t i = 0; i < n_dbs; ++i) {
 		if ((err = loadDataBlockDecl(&loader, &n_pieces_per_db[i])).type) return err;
@@ -253,7 +212,7 @@ BRB_Error BRB_loadModule(FILE* src, BRB_Module* dst)
 // loading the amount of procedures
 	uint32_t n_procs = loadInt(src, &loader.n_fetched);
 	if (loader.n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_EXEC_SEG};
-	if ((err = BRB_preallocExecSegment(&loader.builder, n_procs)).type) return err;
+	if ((err = BRB_preallocProcs(&loader.builder, n_procs)).type) return err;
 // loading the procedure declarations
 	uint32_t n_ops_per_proc[n_procs];
 	for (uint32_t i = 0; i < n_procs; ++i) {
@@ -262,13 +221,13 @@ BRB_Error BRB_loadModule(FILE* src, BRB_Module* dst)
 // loading the execution entry point
 	loader.builder.module.exec_entry_point = loadInt(src, &loader.n_fetched);
 	if (loader.n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_ENTRY};
-// loading the data pieces
+// loading the operations for the data blocks
 	for (size_t i = 0; i < (size_t)n_dbs; ++i) {
 		repeat (n_pieces_per_db[i]) {
-			if ((err = loadDataPiece(&loader, i)).type) return err;
+			if ((err = loadOp(&loader, ~(BRB_id_t)i)).type) return err;
 		}
 	}
-// loading the operations
+// loading the operations for the procedures
 	for (size_t i = 0; i < (size_t)n_procs; ++i) {
 		repeat (n_ops_per_proc[i]) {
 			if ((err = loadOp(&loader, i)).type) return err;

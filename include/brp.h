@@ -786,7 +786,7 @@ BRP_Token BRP__fetchToken(BRP* const obj, BRP_InputCtx* const input, BRP_TokenAr
 	delim_id = sbufsplitv(&input->buffer, &new, obj->symbols);
 
 	if (new.length) {
-		for (int i = 0; obj->keywords[i].data; i++) {
+		for (uint32_t i = 0; obj->keywords[i].data; i++) {
 			if (sbufeq(obj->keywords[i], new)) {
 				res.type = TOKEN_KEYWORD;
 				res.keyword_id = i;
@@ -1086,7 +1086,7 @@ void BRP_printBRPError(BRP* obj)
 {
 	if (obj->error_code) {
 		BRP_fprintTokenLoc(stderr, obj->error_loc);
-		fputs("preprocessing error: ", stderr);
+		fputs(": preprocessing error: ", stderr);
 		BRP_printBRPErrorStr(stderr, obj);
 		fputc('\n', stderr);
 		exit(1);

@@ -2,7 +2,6 @@
 #include <brb.h>
 
 defArray(BRB_Op);
-defArray(BRB_DataPiece);
 defArray(BRB_DataBlock);
 
 typedef const char* str;
@@ -172,42 +171,12 @@ static uint32_t getNameId(BRB_ModuleWriter* writer, const char* name)
 	return writer->names.length - 1;
 }
 
-static long writeDataPiece(BRB_ModuleWriter* writer, BRB_DataPiece piece)
-{
-// writing the type
-	long acc = writeInt8(writer->dst, piece.type);
-// writing the operand
-	switch (piece.type) {
-		case BRB_DP_BYTES:
-			return acc
-				+ writeIntOnly(writer->dst, piece.data.length)
-				+ fputsbuf(writer->dst, piece.data);
-		case BRB_DP_TEXT:
-			return acc
-				+ fputsbuf(writer->dst, piece.data)
-				+ writeInt8(writer->dst, '\0');
-		case BRB_DP_I16:
-		case BRB_DP_I32:
-		case BRB_DP_PTR:
-		case BRB_DP_I64:
-		case BRB_DP_BUILTIN:
-		case BRB_DP_DBADDR:
-			return acc + writeIntOnly(writer->dst, piece.content_u);
-		case BRB_DP_ZERO:
-			return acc + writeType(writer->dst, piece.content_type);
-		case BRB_DP_NONE:
-		case BRB_N_DP_TYPES:
-		default:
-			assert(false, "invalid data piece type");
-	}
-}
-
 static long writeDataBlockDecl(BRB_ModuleWriter* writer, BRB_DataBlock block)
 {
 // writing the flags and the name ID
 	return writeInt(writer->dst, getNameId(writer, block.name), block.is_mutable)
 // writing the body size
-		+ writeIntOnly(writer->dst, block.pieces.length);
+		+ writeIntOnly(writer->dst, block.body.length);
 }
 
 static long writeOp(BRB_ModuleWriter* writer, BRB_Op op)
@@ -220,10 +189,11 @@ static long writeOp(BRB_ModuleWriter* writer, BRB_Op op)
 			return acc + writeInt8(writer->dst, op.operand_u);
 		case BRB_OPERAND_INT:
 		case BRB_OPERAND_VAR_NAME:
-		case BRB_OPERAND_DB_NAME:
 		case BRB_OPERAND_SYSCALL_NAME:
 		case BRB_OPERAND_BUILTIN:
 			return acc + writeIntOnly(writer->dst, op.operand_u);
+		case BRB_OPERAND_DB_NAME:
+			return acc + writeIntOnly(writer->dst, ~op.operand_s);
 		case BRB_OPERAND_TYPE:
 			return acc + writeType(writer->dst, op.operand_type);
 		case BRB_OPERAND_NONE:
@@ -269,13 +239,13 @@ long BRB_writeModule(BRB_Module src, FILE* dst)
 	}
 // writing the execution entry point
 	acc += writeIntOnly(dst, src.exec_entry_point);
-// writing the data pieces
+// writing the operations in the data blocks
 	arrayForeach (BRB_DataBlock, block, src.seg_data) {
-		arrayForeach (BRB_DataPiece, piece, block->pieces) {
-			acc += writeDataPiece(&writer, *piece);
+		arrayForeach (BRB_Op, op, block->body) {
+			acc += writeOp(&writer, *op);
 		}
 	}
-// writing the operations
+// writing the operations in the procedures
 	arrayForeach (BRB_Proc, proc, src.seg_exec) {
 		arrayForeach (BRB_Op, op, proc->body) {
 			acc += writeOp(&writer, *op);
