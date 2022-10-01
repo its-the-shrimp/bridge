@@ -119,9 +119,12 @@ typedef enum {
 	BRB_KW_NOTATP,
 	BRB_KW_NOTAT64,
 	BRB_KW_DROP,
+	BRB_KW_NEW,
+	BRB_KW_ZERO,
 	BRB_KW_DATA,
 	BRB_KW_VOID,
 	BRB_KW_ENTRY,
+	BRB_KW_STRUCT,
 	BRB_N_KWS
 } BRB_AsmKw;
 
@@ -237,12 +240,15 @@ static sbuf asm_kws[] = {
 	[BRB_KW_NOTATP]    = fromcstr("not-@p"),
 	[BRB_KW_NOTAT64]   = fromcstr("not-@64"),
 	[BRB_KW_DROP]      = fromcstr("drop"),
+	[BRB_KW_NEW]       = fromcstr("new"),
+	[BRB_KW_ZERO]      = fromcstr("zero"),
 	[BRB_KW_DATA]      = fromcstr("data"),
 	[BRB_KW_VOID]      = fromcstr("void"),
 	[BRB_KW_ENTRY]     = fromcstr("entry"),
+	[BRB_KW_STRUCT]    = fromcstr("struct"),
 	(sbuf){0}
 };
-static_assert(BRB_N_OPS == 111, "not all operations have their names defined in the assembler");
+static_assert(BRB_N_OPS == 113, "not all operations have their names defined in the assembler");
 
 typedef enum {
 	BRB_SYM_BRACKET_L,
@@ -253,6 +259,7 @@ typedef enum {
 	BRB_SYM_CBRACKET_R,
 	BRB_SYM_COMMA,
 	BRB_SYM_PLUS,
+	BRB_SYM_DOLLAR,
 	BRB_N_SYMS
 } BRB_AsmSymbol;
 
@@ -265,6 +272,7 @@ static sbuf asm_symbols[] = {
 	[BRB_SYM_CBRACKET_R] = fromcstr("}"),
 	[BRB_SYM_COMMA] = fromcstr(","),
 	[BRB_SYM_PLUS] = fromcstr("+"),
+	[BRB_SYM_DOLLAR] = fromcstr("$"),
 	BRP_HIDDEN_SYMBOL(" "),
 	BRP_HIDDEN_SYMBOL("\t"),
 	BRP_HIDDEN_SYMBOL("\n"),
@@ -277,7 +285,8 @@ static BRB_TypeKind kw_to_typekind[] = {
 	[BRB_KW_I32] = BRB_TYPE_I32,
 	[BRB_KW_PTR] = BRB_TYPE_PTR,
 	[BRB_KW_I64] = BRB_TYPE_I64,
-	[BRB_KW_VOID] = BRB_TYPE_VOID
+	[BRB_KW_VOID] = BRB_TYPE_VOID,
+	[BRB_KW_STRUCT] = BRB_TYPE_STRUCT
 };
 
 static BRB_Error addLoc(BRB_Error err, BRP_Token token)
@@ -289,6 +298,7 @@ static BRB_Error addLoc(BRB_Error err, BRP_Token token)
 static BRB_Error getName(BRP* obj, char** name_p)
 {
 	BRP_Token res = BRP_fetchToken(obj);
+	if ((*name_p = BRP_getTokenWord(obj, res))) return (BRB_Error){0};
 	if (res.type != TOKEN_STRING)
 		return addLoc((BRB_Error){.type = BRB_ERR_INVALID_NAME}, res);
 	if (memchr(res.string.data, '\0', res.string.length))
@@ -297,12 +307,33 @@ static BRB_Error getName(BRP* obj, char** name_p)
 	return (BRB_Error){0};
 }
 
-static BRB_Error getType(BRP* obj, BRB_Type* res_p)
+static BRB_Error getType(BRP* obj, BRB_Module* module, BRB_Type* res_p)
 {
+	*res_p = (BRB_Type){0};
+// fetching the type kind
 	BRP_Token token = BRP_fetchToken(obj);
 	if (token.type != TOKEN_KEYWORD)
 		return addLoc((BRB_Error){.type = BRB_ERR_TYPE_EXPECTED}, token);
 	res_p->kind = kw_to_typekind[token.keyword_id];
+// special handling for a struct type
+	if (res_p->kind == BRB_TYPE_STRUCT) {
+		token = BRP_peekToken(obj);
+		if (BRP_getTokenSymbolId(token) == BRB_SYM_DOLLAR) {
+			BRP_fetchToken(obj);
+			if ((token = BRP_fetchToken(obj)).type != TOKEN_INT)
+				return addLoc((BRB_Error){.type = BRB_ERR_STRUCT_ID_EXPECTED}, token);
+			res_p->struct_id = token.value;
+		} else {
+			char* struct_name;
+			BRB_Error err = getName(obj, &struct_name);
+			if (err.type) return err;
+			BRB_id struct_id = BRB_getStructIdByName(module, struct_name);
+			if (struct_id == BRB_INVALID_ID)
+				return addLoc((BRB_Error){.type = BRB_ERR_UNKNOWN_STRUCT, .name = struct_name}, token);
+			res_p->struct_id = struct_id;
+		}
+	}
+// fetching the amount of items
 	if (BRP_getTokenSymbolId(BRP_peekToken(obj)) == BRB_SYM_SQBRACKET_L) {
 		BRP_fetchToken(obj);
 		token = BRP_fetchToken(obj);
@@ -315,7 +346,7 @@ static BRB_Error getType(BRP* obj, BRB_Type* res_p)
 	return (BRB_Error){0};
 }
 
-static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, BRB_id_t proc_id, BRB_Op* op)
+static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op* op)
 {
 	BRB_Error err;
 	BRP_Token token = BRP_fetchToken(obj);
@@ -328,10 +359,10 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, BRB_id_t proc_id, B
 			break;
 		case BRB_OPERAND_SYSCALL_NAME: {
 			op->type = BRB_OP_SYS;
-			if ((token = BRP_fetchToken(obj)).type != TOKEN_WORD)
-				return addLoc((BRB_Error){.type = BRB_ERR_SYSCALL_NAME_EXPECTED}, token);
+			char* name_c;
+			if ((err = getName(obj, &name_c)).type) return (BRB_Error){.type = BRB_ERR_SYSCALL_NAME_EXPECTED, .loc = err.loc};
 			op->operand_u = 0;
-			sbuf name = fromstr(token.word);
+			sbuf name = fromstr(name_c);
 			repeat (BRB_N_SYSCALLS) {
 				if (sbufeq(name, BRB_syscallNames[op->operand_u])) {
 					name.data = NULL;
@@ -339,7 +370,7 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, BRB_id_t proc_id, B
 				}
 				++op->operand_u;
 			}
-			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_SYSCALL_NAME_EXPECTED}, token);
+			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_UNKNOWN_SYSCALL, .name = name_c}, token);
 		} break;
 		case BRB_OPERAND_INT8:
 		case BRB_OPERAND_INT:
@@ -353,34 +384,27 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, BRB_id_t proc_id, B
 			op->operand_u = token.value;
 			break;
 		case BRB_OPERAND_DB_NAME:
-			token = BRP_fetchToken(obj);
-			switch (token.type) {
-				case TOKEN_INT:
-					op->operand_u = token.value;
-					break;
-				case TOKEN_STRING: {
-					char* name;
-					BRP_unfetchToken(obj, token);
-					if ((err = getName(obj, &name)).type) return err;
-					op->operand_s = BRB_getDataBlockIdByName(&builder->module, name);
-					if (op->operand_s == BRB_INVALID_ID)
-						return addLoc((BRB_Error){.type = BRB_ERR_INT_OR_NAME_OPERAND_EXPECTED}, token);
-				} break;
-				case TOKEN_SYMBOL:
-				case TOKEN_KEYWORD:
-				case TOKEN_NONE:
-				default:
-					return addLoc((BRB_Error){.type = BRB_ERR_INT_OR_NAME_OPERAND_EXPECTED}, token);
+			token = BRP_peekToken(obj);
+			if (token.type == TOKEN_INT) {
+				op->operand_u = token.value;
+				BRP_fetchToken(obj);
+			} else {
+				char* name;
+				if ((err = getName(obj, &name)).type)
+					return addLoc((BRB_Error){.type = BRB_ERR_INT_OR_DB_NAME_EXPECTED}, token);
+				op->operand_s = BRB_getDataBlockIdByName(&builder->module, name);
+				if (op->operand_s == BRB_INVALID_ID)
+					return addLoc((BRB_Error){.type = BRB_ERR_UNKNOWN_DB, .name = name}, token);
 			}
 			break;
 		case BRB_OPERAND_TYPE:
-			if ((err = getType(obj, &op->operand_type)).type) return err;
+			if ((err = getType(obj, &builder->module, &op->operand_type)).type) return err;
 			break;
 		case BRB_OPERAND_BUILTIN: {
-			if ((token = BRP_fetchToken(obj)).type != TOKEN_WORD)
-				return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_OPERAND_EXPECTED}, token);
+			char* name_c;
+			if ((err = getName(obj, &name_c)).type) return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_NAME_EXPECTED}, token);
 			op->operand_u = 0;
-			sbuf name = fromstr(token.word);
+			sbuf name = fromstr(name_c);
 			repeat (BRB_N_BUILTINS) {
 				if (sbufeq(name, BRB_builtinNames[op->operand_u])) {
 					name.data = NULL;
@@ -388,7 +412,7 @@ static BRB_Error getOp(BRP* obj, BRB_ModuleBuilder* builder, BRB_id_t proc_id, B
 				}
 				++op->operand_u;
 			}
-			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_BUILTIN_OPERAND_EXPECTED}, token);
+			if (name.data) return addLoc((BRB_Error){.type = BRB_ERR_UNKNOWN_BUILTIN, .name = name_c}, token);
 		} break;
 		default:
 			return addLoc((BRB_Error){.type = BRB_ERR_OP_NAME_EXPECTED}, token);
@@ -413,18 +437,18 @@ BRB_Error BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* ds
 		if (token.type == TOKEN_NONE) break;
 		if (token.type != TOKEN_KEYWORD)
 			return addLoc((BRB_Error){.type = BRB_ERR_INVALID_DECL}, token);
-
 		switch (token.keyword_id) {
 			case BRB_KW_I8:
 			case BRB_KW_I16:
 			case BRB_KW_I32:
 			case BRB_KW_I64:
 			case BRB_KW_PTR:
-			case BRB_KW_VOID: {
+			case BRB_KW_VOID:
+			proc_decl: { // a label is set to jump to it from `case BRB_KW_STRUCT`
 				BRP_unfetchToken(&prep, token);
 // getting return type of the procedure
 				BRB_Type ret_type;
-				if ((err = getType(&prep, &ret_type)).type) return err;
+				if ((err = getType(&prep, &builder.module, &ret_type)).type) return err;
 // getting procedure name
 				char* proc_name;
 				if ((err = getName(&prep, &proc_name)).type) return err;
@@ -436,11 +460,11 @@ BRB_Error BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* ds
 				if (BRP_getTokenSymbolId(BRP_peekToken(&prep)) != BRB_SYM_BRACKET_R) {
 					do {
 						if (!BRB_TypeArray_incrlen(&args, 1)) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
-						if ((err = getType(&prep, arrayhead(args))).type) return err;
+						if ((err = getType(&prep, &builder.module, arrayhead(args))).type) return err;
 					} while (BRP_getTokenSymbolId(BRP_fetchToken(&prep)) != BRB_SYM_BRACKET_R);
 				} else BRP_fetchToken(&prep);
 // adding the declaration
-				BRB_id_t proc_id = BRB_getProcIdByName(&builder.module, proc_name);
+				BRB_id proc_id = BRB_getProcIdByName(&builder.module, proc_name);
 				if (proc_id == BRB_INVALID_ID) {
 					if ((err = BRB_addProc(&builder, &proc_id, proc_name, args.length, args.data, ret_type, 0)).type) return addLoc(err, token);
 				} else {
@@ -478,7 +502,7 @@ BRB_Error BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* ds
 				token = BRP_peekToken(&prep);
 				if ((err = getName(&prep, &db_name)).type) return err;
 // adding the declaration
-				BRB_id_t db_id = BRB_getDataBlockIdByName(&builder.module, db_name);
+				BRB_id db_id = BRB_getDataBlockIdByName(&builder.module, db_name);
 				if (db_id == BRB_INVALID_ID) {
 					if ((err = BRB_addDataBlock(&builder, &db_id, db_name, is_mutable, 0)).type) return addLoc(err, token);
 				}
@@ -491,6 +515,32 @@ BRB_Error BRB_assembleModule(FILE* input, const char* input_name, BRB_Module* ds
 					if ((err = BRB_addOp(&builder, db_id, op)).type) return addLoc(err, token);
 				}
 				BRP_fetchToken(&prep);
+			} break;
+			case BRB_KW_STRUCT: {
+// saving the `struct` keyword token to unfetch it when switching to parsing a procedure declaration
+				BRP_Token struct_kw = token;
+// fetching the struct name
+				char* name;
+				BRP_Token struct_name = BRP_peekToken(&prep);
+				if ((err = getName(&prep, &name)).type) return (BRB_Error){.type = BRB_ERR_STRUCT_NAME_EXPECTED, .loc = err.loc};
+// fetching the struct fields if the symbol after the struct name is a `{`, otherwise attempting to parse it as a procedure declaration
+				token = BRP_peekToken(&prep);
+				if (BRP_getTokenSymbolId(token) != BRB_SYM_CBRACKET_L) {
+					if (!BRP_unfetchToken(&prep, struct_name)
+						|| !BRP_unfetchToken(&prep, struct_kw))
+						return addLoc((BRB_Error){.type = BRB_ERR_NO_MEMORY}, token);
+					goto proc_decl;
+				}
+				BRP_fetchToken(&prep);
+				BRB_TypeArray fields = {0};
+				while (BRP_getTokenSymbolId(token = BRP_peekToken(&prep)) != BRB_SYM_CBRACKET_R) {
+					BRB_Type* field = BRB_TypeArray_incrlen(&fields, 1);
+					if ((err = getType(&prep, &builder.module, field)).type) return err;
+				}
+				token = BRP_fetchToken(&prep);
+				BRB_id struct_id;
+				if ((err = BRB_addStruct(&builder, &struct_id, name, fields.length, fields.data)).type) return addLoc(err, token);
+				BRB_TypeArray_clear(&fields);
 			} break;
 			default:
 				return addLoc((BRB_Error){.type = BRB_ERR_INVALID_DECL}, token);

@@ -4,7 +4,7 @@
 
 defArray(sbuf);
 
-static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB_id_t proc_id, uint32_t op_id)
+static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB_id proc_id, uint32_t op_id)
 {
 	BRB_Op *const op = BRB_getOp(&builder->module, proc_id, op_id);
 	switch (op->type) {
@@ -94,7 +94,7 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 				op->operand_ptr = seg_data.data[~op->operand_s].data;
 				break;
 			case BRB_OP_LD:
-				op->operand_u = BRB_getTypeRTSize(op->operand_type) - sizeof(void*);
+				op->operand_u = BRB_getTypeRTSize(&builder->module, op->operand_type) - sizeof(void*);
 				break;
 			case BRB_OP_STR:
 				op->operand_u = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
@@ -130,8 +130,14 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_SHRI:
 			case BRB_OP_SHRSI:
 			case BRB_OP_NOT:
-			case BRB_OP_DROP:
 				op->x_op1_size = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0);
+				break;
+			case BRB_OP_DROP:
+				op->operand_u = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 0);
+				break;
+			case BRB_OP_NEW:
+			case BRB_OP_ZERO:
+				op->operand_u = BRB_getTypeRTSize(&builder->module, op->operand_type);
 				break;
 			case BRB_N_OPS:
 			default:
@@ -241,8 +247,8 @@ bool BRB_execOp(BRB_ExecEnv* env)
 			++env->exec_index;
 			return false;
 		case BRB_OP_STR:
-			memmove(*((void**)(env->stack_head)++), env->stack_head, op.operand_u);
-			env->stack_head += op.operand_u;
+			memmove(((void**)env->stack_head)[0], env->stack_head + sizeof(void*), op.operand_u);
+			env->stack_head += op.operand_u + sizeof(void*);
 			++env->exec_index;
 			return false;
 		case BRB_OP_SYS:
@@ -1044,6 +1050,15 @@ bool BRB_execOp(BRB_ExecEnv* env)
 			env->stack_head += op.x_op1_size;
 			++env->exec_index;
 			return false;
+		case BRB_OP_NEW:
+			ALLOC_STACK_SPACE(op.operand_u);
+			++env->exec_index;
+			return false;
+		case BRB_OP_ZERO:
+			ALLOC_STACK_SPACE(op.operand_u);
+			memset(env->stack_head, 0, op.operand_u);
+			++env->exec_index;
+			return false;
 		case BRB_N_OPS:
 		default:
 			env->exec_status.type = BRB_EXC_UNKNOWN_OP;
@@ -1051,7 +1066,7 @@ bool BRB_execOp(BRB_ExecEnv* env)
 	}
 }
 
-static sbuf allocDataBlock(BRB_ModuleBuilder* builder, BRB_id_t db_id)
+static sbuf allocDataBlock(BRB_ModuleBuilder* builder, BRB_id db_id)
 {
 	return smalloc(BRB_getMaxStackRTSize(builder, db_id));
 }

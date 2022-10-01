@@ -1012,7 +1012,6 @@ char* BRP_getTokenWord(BRP* obj, BRP_Token token)
 {
 	switch (token.type) {
 		case TOKEN_WORD:
-		case TOKEN_STRING:
 			return token.word;
 		case TOKEN_KEYWORD:
 			return obj->keywords[token.keyword_id].data;

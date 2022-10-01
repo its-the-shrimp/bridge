@@ -159,7 +159,10 @@ static long write2Ints(FILE* fd, uint64_t x, uint64_t y)
 
 static long writeType(FILE* dst, BRB_Type type)
 {
-	return writeInt(dst, type.n_items, type.kind);
+	return writeInt(dst, type.n_items, type.kind)
+		+ (type.kind == BRB_TYPE_STRUCT
+			? writeIntOnly(dst, type.struct_id)
+			: 0);
 }
 
 static uint32_t getNameId(BRB_ModuleWriter* writer, const char* name)
@@ -217,6 +220,15 @@ static long writeProcDecl(BRB_ModuleWriter* writer, BRB_Proc proc)
 	return acc + writeIntOnly(writer->dst, proc.body.length);
 }
 
+static long writeStruct(BRB_ModuleWriter* writer, BRB_Struct obj)
+{
+	long acc = write2Ints(writer->dst, getNameId(writer, obj.name), obj.fields.length);
+	arrayForeach (BRB_Type, field, obj.fields) {
+		acc += writeType(writer->dst, *field);
+	}
+	return acc;
+}
+
 long BRB_writeModule(BRB_Module src, FILE* dst)
 {
 	BRB_ModuleWriter writer = {
@@ -225,14 +237,18 @@ long BRB_writeModule(BRB_Module src, FILE* dst)
 	};
 // writing the header
 	long acc = fputsbuf(dst, BRB_V1_HEADER)
-// writing the amount of data blocks
-		+ writeIntOnly(dst, src.seg_data.length);
+// writing the amount of structs
+		+ writeIntOnly(dst, src.seg_typeinfo.length)
+// writing the amount of data blocks and procedures
+		+ write2Ints(dst, src.seg_data.length, src.seg_exec.length);
+// writing the structs
+	arrayForeach (BRB_Struct, obj, src.seg_typeinfo) {
+		acc += writeStruct(&writer, *obj);
+	}
 // writing the data block declarations
 	arrayForeach (BRB_DataBlock, block, src.seg_data) {
 		acc += writeDataBlockDecl(&writer, *block);
 	}
-// writing the amount of procedures
-	acc += writeIntOnly(dst, src.seg_exec.length);
 // writing the procedure declarations
 	arrayForeach (BRB_Proc, proc, src.seg_exec) {
 		acc += writeProcDecl(&writer, *proc);
@@ -252,10 +268,11 @@ long BRB_writeModule(BRB_Module src, FILE* dst)
 		}
 	}
 // writing names
-	fieldArray names = BRB_getNameFields(&src);
-	arrayForeach (field, name, names) {
-		acc += fwrite(**name, 1, strlen(**name) + 1, dst);
+// TODO: don't save names of internal procedures and data blocks to reduce bytecode size
+// TODO: add an option to not save the names of structs
+	arrayForeach (str, name, writer.names) {
+		acc += fwrite(*name, 1, strlen(*name) + 1, dst);
 	}
-	fieldArray_clear(&names);
+	strArray_clear(&writer.names);
 	return acc;
 }

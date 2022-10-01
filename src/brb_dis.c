@@ -16,6 +16,9 @@ long BRB_printType(BRB_Type type, FILE* dst)
 			return fputsbuf(dst, fromcstr("__input"));
 		case 0:
 			return fputsbuf(dst, BRB_typeNames[type.kind])
+				+ (type.kind == BRB_TYPE_STRUCT
+					? fprintf(dst, " $%u", type.struct_id)
+					: 0)
 				+ (type.n_items > 1
 					? fprintf(dst, "[%u]", type.n_items)
 					: 0);
@@ -24,12 +27,18 @@ long BRB_printType(BRB_Type type, FILE* dst)
 	}
 }
 
+static long printStructDecl(BRB_Struct _struct, FILE* dst)
+{
+	return fputstr(dst, "struct ")
+		+ fputstresc(dst, _struct.name
+			? _struct.name
+			: "", BYTEFMT_DQUOTED | BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
+}
+
 static long printDataBlockDecl(BRB_DataBlock block, FILE* dst)
 {
-	return fprintf(dst, "data%s \"", block.is_mutable ? "+" : "")
-		+ fputstresc(dst, block.name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
-		+ fputstr(dst, "\"");
-
+	return fprintf(dst, "data%s ", block.is_mutable ? "+" : "")
+		+ fputstresc(dst, block.name, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE | BYTEFMT_DQUOTED);
 }
 
 static long printProcDecl(BRB_Proc proc, FILE* dst)
@@ -75,8 +84,20 @@ static long printOp(BRB_Op op, const BRB_Module* module, FILE* dst)
 
 long BRB_disassembleModule(const BRB_Module* module, FILE* dst)
 {
-// printing the data block declarations
 	long acc = 0;
+// printing the structs
+	arrayForeach (BRB_Struct, _struct, module->seg_typeinfo) {
+		acc += printStructDecl(*_struct, dst)
+			+ fputstr(dst, " {\n");
+		arrayForeach (BRB_Type, field, _struct->fields) {
+			acc += fputstr(dst, "\t")
+				+ BRB_printType(*field, dst)
+				+ fputstr(dst, "\n");
+		}
+		acc += fputstr(dst, "}\n");
+	}
+	acc += fputstr(dst, "\n");
+// printing the data block declarations
 	arrayForeach (BRB_DataBlock, block, module->seg_data) {
 		acc += printDataBlockDecl(*block, dst)
 			+ fputstr(dst, "\n");

@@ -83,7 +83,7 @@ static char* compileIntLiteral_arm64(FILE* dst, int64_t value, uint8_t reg_id, a
 #define ARM64_LDP32_OP2_MAX  252
 #define ARM64_ADDR_OFFSET_MIN -256
 #define ARM64_ADDR_OFFSET_MAX  255
-static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, BRB_id_t proc_id, uint32_t op_id, size_t vframe_offset, size_t vframe_offset_before, FILE* dst)
+static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, BRB_id proc_id, uint32_t op_id, size_t vframe_offset, size_t vframe_offset_before, FILE* dst)
 {
 	static const char* op_postfix[] = {
 		[BRB_ADDR_I8]  = "b\tw",
@@ -141,7 +141,7 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, BRB_id_t proc_id,
 			offset = compileIntLiteral_arm64(dst, vframe_offset, 9, LI_OFFSET, &acc);
 			return acc + fprintf(dst, "\tstr\tx8, [%s, %s]\n", sp, offset);
 		case BRB_OP_LD: {
-			size_t load_size = BRB_getTypeRTSize(op->operand_type);
+			size_t load_size = BRB_getTypeRTSize(&builder->module, op->operand_type);
 			offset = compileIntLiteral_arm64(dst, vframe_offset + load_size - sizeof(void*), 9, LI_OFFSET, &acc);
 			acc += fprintf(dst, "\tldr\tx%c, [%s, %s]\n", load_size > 16 ? '1' : '8', sp, offset);
 			switch (load_size) {
@@ -769,7 +769,191 @@ static long compileOp_darwin_arm64(BRB_ModuleBuilder* builder, BRB_id_t proc_id,
 			}
 		}
 		case BRB_OP_DROP:
+		case BRB_OP_NEW:
 			return acc;
+		case BRB_OP_ZERO: {
+			size_t span = BRB_getTypeRTSize(&builder->module, op->operand_type);
+			switch (span) {
+				case 1:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tstrb\twzr, [%s, %s]\n", sp, offset);
+				case 2:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tstrh\twzr, [%s, %s]\n", sp, offset);
+				case 3:
+					if (vframe_offset + 2 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstrh\twzr, [%s, %zu]\n"
+							"\tstrb\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 2);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstrh\twzr, [x8], 2\n"
+						"\tstrb\twzr, [x8]\n", sp, offset);
+				case 4:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tstr\twzr, [%s, %s]\n", sp, offset);
+				case 5:
+					if (vframe_offset + 4 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\twzr, [%s, %zu]\n"
+							"\tstrb\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 4);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\twzr, [x8], 4\n"
+						"\tstrb\twzr, [x8]\n", sp, offset);
+				case 6:
+					if (vframe_offset + 4 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\twzr, [%s, %zu]\n"
+							"\tstrh\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 4);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\twzr, [x8], 4\n"
+						"\tstrh\twzr, [x8]\n", sp, offset);
+				case 7:
+					if (vframe_offset + 6 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\twzr, [%s, %zu]\n"
+							"\tstrh\twzr, [%s, %zu]\n"
+							"\tstrb\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 4,
+							sp, vframe_offset + 6);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\twzr, [x8], 4\n"
+						"\tstrh\twzr, [x8], 2\n"
+						"\tstrb\twzr, [x8]\n", sp, offset);
+				case 8:
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_OFFSET, &acc);
+					return acc + fprintf(dst,
+						"\tstr\txzr, [%s, %s]\n", sp, offset);
+				case 9:
+					if (vframe_offset + 8 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\txzr, [%s, %zu]\n"
+							"\tstrb\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 8);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\txzr, [x8], 8\n"
+						"\tstrb\twzr, [x8]\n", sp, offset);
+				case 10:
+					if (vframe_offset + 8 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\txzr, [%s, %zu]\n"
+							"\tstrh\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 8);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\txzr, [x8], 8\n"
+						"\tstrh\twzr, [x8]\n", sp, offset);
+				case 11:
+					if (vframe_offset + 10 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\txzr, [%s, %zu]\n"
+							"\tstrh\twzr, [%s, %zu]\n"
+							"\tstrb\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 8,
+							sp, vframe_offset + 10);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\txzr, [x8], 8\n"
+						"\tstrh\twzr, [x8], 2\n"
+						"\tstrb\twzr, [x8]\n", sp, offset);
+				case 12:
+					if (vframe_offset + 8 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\txzr, [%s, %zu]\n"
+							"\tstr\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 8);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\txzr, [x8], 8\n"
+						"\tstr\twzr, [x8]\n", sp, offset);
+				case 13:
+					if (vframe_offset + 12 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\txzr, [%s, %zu]\n"
+							"\tstr\twzr, [%s, %zu]\n"
+							"\tstrb\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 8,
+							sp, vframe_offset + 12);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\txzr, [x8], 8\n"
+						"\tstr\twzr, [x8], 4\n"
+						"\tstrb\twzr, [x8]\n", sp, offset);
+				case 14:
+					if (vframe_offset + 12 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\txzr, [%s, %zu]\n"
+							"\tstr\twzr, [%s, %zu]\n"
+							"\tstrh\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 8,
+							sp, vframe_offset + 12);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\txzr, [x8], 8\n"
+						"\tstr\twzr, [x8], 4\n"
+						"\tstrh\twzr, [x8]\n", sp, offset);
+				case 15:
+					if (vframe_offset + 14 <= ARM64_ADDR_OFFSET_MAX)
+						return acc + fprintf(dst,
+							"\tstr\txzr, [%s, %zu]\n"
+							"\tstr\twzr, [%s, %zu]\n"
+							"\tstrh\twzr, [%s, %zu]\n"
+							"\tstrb\twzr, [%s, %zu]\n",
+							sp, vframe_offset,
+							sp, vframe_offset + 8,
+							sp, vframe_offset + 12,
+							sp, vframe_offset + 14);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 8, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tadd\tx8, %s, %s\n"
+						"\tstr\txzr, [x8], 8\n"
+						"\tstr\twzr, [x8], 4\n"
+						"\tstrh\twzr, [x8], 2\n"
+						"\tstrb\twzr, [x8]\n", sp, offset);
+				case 16:
+					if (vframe_offset <= ARM64_LDP64_OP2_MAX && vframe_offset % 8 == 0)
+						return acc + fprintf(dst, "\tstp\txzr, xzr, [%s, %zu]\n", sp, vframe_offset);
+					compileIntLiteral_arm64(dst, vframe_offset, 8, LI_2REG, &acc);
+					return acc + fprintf(dst, "\tstp\txzr, xzr, [%s, x8]\n", sp);
+				default:
+					compileIntLiteral_arm64(dst, span, 2, LI_2REG, &acc);
+					offset = compileIntLiteral_arm64(dst, vframe_offset, 0, LI_BASE, &acc);
+					return acc + fprintf(dst,
+						"\tmov\tx1, xzr\n"
+						"\tadd\tx0, %s, %s\n"
+						"\tbl\t_memset\n", sp, offset);
+			}
+		}
 		case BRB_N_OPS:
 		default:
 			assert(false, "invalid operation type %u", op->type);
