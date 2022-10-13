@@ -121,6 +121,8 @@ typedef enum {
 	BRB_KW_DROP,
 	BRB_KW_NEW,
 	BRB_KW_ZERO,
+	BRB_KW_COPY,
+	BRB_KW_COPYTO,
 	BRB_KW_DATA,
 	BRB_KW_VOID,
 	BRB_KW_ENTRY,
@@ -242,13 +244,15 @@ static sbuf asm_kws[] = {
 	[BRB_KW_DROP]      = fromcstr("drop"),
 	[BRB_KW_NEW]       = fromcstr("new"),
 	[BRB_KW_ZERO]      = fromcstr("zero"),
+	[BRB_KW_COPY]      = fromcstr("copy"),
+	[BRB_KW_COPYTO]    = fromcstr("copy-to"),
 	[BRB_KW_DATA]      = fromcstr("data"),
 	[BRB_KW_VOID]      = fromcstr("void"),
 	[BRB_KW_ENTRY]     = fromcstr("entry"),
 	[BRB_KW_STRUCT]    = fromcstr("struct"),
 	(sbuf){0}
 };
-static_assert(BRB_N_OPS == 113, "not all operations have their names defined in the assembler");
+static_assert(BRB_N_OPS == 115, "not all operations have their names defined in the assembler");
 
 typedef enum {
 	BRB_SYM_BRACKET_L,

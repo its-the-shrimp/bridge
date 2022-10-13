@@ -32,7 +32,7 @@ float endTimerAt(struct timespec* src);
 #define endTimer() endTimerAt(&TIME)
 
 typedef struct {
-	uint8_t exitcode;
+	u8 exitcode;
 	bool exited;
 	FILE* in;
 	FILE* out;
@@ -65,7 +65,7 @@ char* fileBaseName(const char* path);
 sbuf fileBaseName_s(sbuf path);
 
 #define isTempPath(path) sbufstartswith(path, fromcstr("/tmp")) 
-#define inRange(x, start, end) ((x) >= (start) && (x) < (end))
+#define inRange(x, start, end) ((int64_t)(x) >= (int64_t)(start) && (int64_t)(x) < (int64_t)(end))
 #define isSlice(sub_start, sub_size, start, size) \
 	((sub_start) >= (start) && (sub_start) + (sub_size) <= (start) + (size)) 
 // assumes that sub_size > 0 and size > 0

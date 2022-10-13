@@ -113,8 +113,9 @@ static void load2Ints(FILE* fd, uint64_t* x, uint64_t* y, long* n_fetched)
 
 static BRB_Type loadType(FILE* src, long* n_fetched)
 {
+	uint8_t hb = loadHalfByte(src, n_fetched);
 	BRB_Type res = {
-		.kind = loadHalfByte(src, n_fetched),
+		.kind = 1 << hb,
 		.n_items = loadInt(src, n_fetched),
 	};
 	if (res.kind == BRB_TYPE_STRUCT)

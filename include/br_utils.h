@@ -25,7 +25,18 @@
 #define IS_64BIT 0
 #endif
 
-void* reverseByteOrder(void* src, uint64_t length);
+typedef uint8_t   u8;
+typedef int8_t    s8;
+typedef uint16_t  u16;
+typedef int16_t   s16;
+typedef uint32_t  u32;
+typedef int32_t   s32;
+typedef uintptr_t uptr;
+typedef intptr_t  sptr;
+typedef uint64_t  u64;
+typedef int64_t   s64;
+
+void* reverseByteOrder(void* src, u64 length);
 #if IS_LITTLE_ENDIAN
 #define BRByteOrder(src, length) reverseByteOrder(src, length)
 #else
@@ -40,6 +51,9 @@ void* reverseByteOrder(void* src, uint64_t length);
 #define _CONCAT(x, y) x##y
 #define CONCAT(x, y) _CONCAT(x, y)
 #define TEMPVAR CONCAT(_lc, __LINE__)
+
+#define LAZY_AND(x, y) ((bool)(x) ? (bool)(y) : false)
+#define LAZY_OR(x, y) ((bool)(x) ? true : (bool)(y))
 
 // bit manipulation functions
 #define BIT(n) (1ULL << (n))

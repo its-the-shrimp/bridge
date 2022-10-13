@@ -137,7 +137,9 @@ const sbuf BRB_opNames[]   = {
 	[BRB_OP_NOTAT64]   = fromcstr("not-@64"),
 	[BRB_OP_DROP]      = fromcstr("drop"),
 	[BRB_OP_NEW]       = fromcstr("new"),
-	[BRB_OP_ZERO]      = fromcstr("zero")
+	[BRB_OP_ZERO]      = fromcstr("zero"),
+	[BRB_OP_COPY]      = fromcstr("copy"),
+	[BRB_OP_COPYTO]    = fromcstr("copy-to")
 };
 static_assert(sizeof(BRB_opNames) / sizeof(BRB_opNames[0]) == BRB_N_OPS, "not all BRB operations have their names defined");
 
@@ -257,7 +259,9 @@ const uint64_t BRB_opFlags[] = {
 	[BRB_OP_NOTAT64]   = SET_BASE_OP(NOT)     | SET_ADDR_OP_TYPE(I64),
 	[BRB_OP_DROP]      = SET_BASE_OP(DROP),
 	[BRB_OP_NEW]       = SET_BASE_OP(NEW)     | SET_OPERAND_TYPE(TYPE),
-	[BRB_OP_ZERO]      = SET_BASE_OP(ZERO)    | SET_OPERAND_TYPE(TYPE)
+	[BRB_OP_ZERO]      = SET_BASE_OP(ZERO)    | SET_OPERAND_TYPE(TYPE),
+	[BRB_OP_COPY]      = SET_BASE_OP(COPY)    | SET_OPERAND_TYPE(VAR_NAME),
+	[BRB_OP_COPYTO]    = SET_BASE_OP(COPY),
 };
 static_assert(sizeof(BRB_opFlags) / sizeof(BRB_opFlags[0]) == BRB_N_OPS, "not all BRB operations have their flags defined");
 
@@ -292,13 +296,16 @@ const size_t BRB_syscallNArgs[] = {
 static_assert(sizeof(BRB_syscallNArgs) / sizeof(BRB_syscallNArgs[0]) == BRB_N_SYSCALLS, "not all BRB syscalls have their prototype defined");
 
 const sbuf BRB_typeNames[] = {
-	[BRB_TYPE_I8] = fromcstr("i8"),
-	[BRB_TYPE_I16] = fromcstr("i16"),
-	[BRB_TYPE_I32] = fromcstr("i32"),
-	[BRB_TYPE_PTR] = fromcstr("ptr"),
-	[BRB_TYPE_I64] = fromcstr("i64"),
-	[BRB_TYPE_VOID] = fromcstr("void"),
-	[BRB_TYPE_STRUCT] = fromcstr("struct")
+	[BRB_TYPE_DYNAMIC] = fromcstr("__dynamic"),
+	[BRB_TYPE_I8]      = fromcstr("i8"),
+	[BRB_TYPE_I16]     = fromcstr("i16"),
+	[BRB_TYPE_I32]     = fromcstr("i32"),
+	[BRB_TYPE_PTR]     = fromcstr("ptr"),
+	[BRB_TYPE_I64]     = fromcstr("i64"),
+	[BRB_TYPE_VOID]    = fromcstr("void"),
+	[BRB_TYPE_STRUCT]  = fromcstr("struct"),
+	[BRB_TYPE_INT]     = fromcstr("__int"),
+	[BRB_TYPE_ANY]     = fromcstr("__any")
 };
 static_assert(sizeof(BRB_typeNames) / sizeof(BRB_typeNames[0]) == BRB_N_TYPE_KINDS, "not all BRB types have their names defined");
 
@@ -576,7 +583,7 @@ void BRB_printErrorMsg(FILE* dst, BRB_Error err, const char* prefix)
 			fprintf(dst, "unknown syscall \"%s\"\n", err.name);
 			break;
 		case BRB_ERR_TOO_MANY_STRUCTS:
-			fputs("amount of declared structs exceeded the limit of 16777215\n", dst); // 16777215 is the largest 24-bit unsigned integer
+			fprintf(dst, "amount of declared structs exceeded the limit of %zu\n", MAX_N_STRUCTS);
 			break;
 		case BRB_ERR_STRUCT_NAME_EXPECTED:
 			fputs("expected a word or a string as the struct name\n", dst);
@@ -600,6 +607,9 @@ void BRB_printErrorMsg(FILE* dst, BRB_Error err, const char* prefix)
 			break;
 		case BRB_ERR_INVALID_STRUCT_ID:
 			fprintf(dst, "number %llu is an invalid struct ID\n", err.operand);
+			break;
+		case BRB_ERR_INVALID_TYPE_KIND:
+			fprintf(dst, "invalid type kind: %llu\n", err.operand);
 			break;
 		case BRB_ERR_OK:
 		case BRB_N_ERROR_TYPES:
@@ -721,17 +731,14 @@ static size_t getStackLength(BRB_StackNode head)
 
 static bool compareTypes(BRB_Type field, BRB_Type entry)
 {
-	switch (field.internal_kind) {
-		case BRB_TYPE_ANY: return entry.kind != BRB_TYPE_VOID;
-		case BRB_TYPE_INT: return entry.kind != BRB_TYPE_VOID && entry.n_items == 1;
-		default: return entry.kind == field.kind
-			&& (field.kind == BRB_TYPE_STRUCT ? entry.struct_id == field.struct_id : entry.n_items == field.n_items);
-	}
+	return entry.kind & field.kind
+		&& (field.kind != BRB_TYPE_STRUCT || entry.struct_id == field.struct_id) && entry.n_items == field.n_items;
 }
 
 static BRB_Error validateType(BRB_Module* module, BRB_Type* type)
 {
-	type->internal_kind = 0;
+	if ((type->kind & (type->kind - 1)) != 0) // if `type->kind` is not a power of 2
+		return (BRB_Error){.type = BRB_ERR_INVALID_TYPE_KIND, .operand = type->kind};
 	if (type->kind == BRB_TYPE_STRUCT && type->struct_id >= module->seg_typeinfo.length)
 		return (BRB_Error){.type = BRB_ERR_INVALID_STRUCT_ID, .operand = type->struct_id};
 	return (BRB_Error){0};
@@ -778,15 +785,7 @@ static BRB_Error changeStack(BRB_StackNodeArray* stack, BRB_Op op, size_t n_in, 
 		if (!(node = arena_alloc(allocator, sizeof(struct BRB_stacknode_t)))) return (BRB_Error){.type = BRB_ERR_NO_MEMORY};
 		*node = (struct BRB_stacknode_t){0};
 		node->prev = prev;
-		switch (type->internal_kind) {
-			case BRB_TYPE_OF:
-				node->type = getNthStackNode(*arrayhead(*stack), type->n_items)->type; break;
-			case BRB_TYPE_INPUT:
-				node->type = op.operand_type; break;
-			default:
-				node->type = *type;
-		}
-		node->type.internal_kind = 0;
+		node->type = type->kind ? *type : type->ctor(op, *arrayhead(*stack));
 	}
 	return (BRB_Error){.type = BRB_StackNodeArray_append(stack, node) ? 0 : BRB_ERR_NO_MEMORY};
 }
@@ -832,6 +831,21 @@ BRB_Error BRB_addProc(BRB_ModuleBuilder* builder, BRB_id* proc_id_p, const char*
 	input->flags = BRB_SNF_STACKFRAME;
 	*proc_id_p = builder->module.seg_exec.length - 1;
 	return builder->error = (BRB_Error){.type = BRB_StackNodeArray_append(arrayhead(builder->procs), input) ? 0 : BRB_ERR_NO_MEMORY};
+}
+
+BRB_Type _tctor_inputType(BRB_Op op, BRB_StackNode stack) {
+	return op.operand_type;
+}
+BRB_Type _tctor_stackHeadType(BRB_Op op, BRB_StackNode stack) {
+	return stack->type;
+}
+
+BRB_Type _tctor_typeOfInputStackItem(BRB_Op op, BRB_StackNode stack) {
+	return getNthStackNode_nonInternal(stack, op.operand_u)->type;
+}
+
+BRB_Type _tctor_2ndStackItemType(BRB_Op op, BRB_StackNode stack) {
+	return stack->prev->type;
 }
 
 BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
@@ -950,7 +964,9 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_NOTAT64]   = 1,
 		[BRB_OP_DROP]      = 1,
 		[BRB_OP_NEW]       = 0,
-		[BRB_OP_ZERO]      = 0
+		[BRB_OP_ZERO]      = 0,
+		[BRB_OP_COPY]      = 0,
+		[BRB_OP_COPYTO]    = 2
 	};
 	static BRB_Type in_types[][3] = {
 		[BRB_OP_NOP]       = { BRB_VOID_TYPE },
@@ -963,111 +979,113 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_ADDR]      = { BRB_VOID_TYPE },
 		[BRB_OP_DBADDR]    = { BRB_VOID_TYPE },
 		[BRB_OP_LD]        = { BRB_PTR_TYPE(1) },
-		[BRB_OP_STR]       = { BRB_PTR_TYPE(1), BRB_ANY_TYPE },
+		[BRB_OP_STR]       = { BRB_PTR_TYPE(1), BRB_ANY_TYPE(1) },
 		[BRB_OP_SYS]       = { BRB_VOID_TYPE }, // needs to be set manually every time, depending on the system function in question
 		[BRB_OP_BUILTIN]   = { BRB_VOID_TYPE },
-		[BRB_OP_ADD]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_ADDI]      = { BRB_INT_TYPE },
+		[BRB_OP_ADD]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_ADDI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_ADDIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADDIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADDIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADDIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADDIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_SUB]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_SUBI]      = { BRB_INT_TYPE },
+		[BRB_OP_SUB]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_SUBI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_SUBIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SUBIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SUBIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SUBIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SUBIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_MUL]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_MULI]      = { BRB_INT_TYPE },
+		[BRB_OP_MUL]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_MULI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_MULIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MULIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MULIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MULIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MULIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_DIV]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_DIVI]      = { BRB_INT_TYPE },
+		[BRB_OP_DIV]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_DIVI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_DIVIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_DIVS]      = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_DIVSI]     = { BRB_INT_TYPE },
+		[BRB_OP_DIVS]      = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_DIVSI]     = { BRB_INT_TYPE(1) },
 		[BRB_OP_DIVSIAT8]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVSIAT16] = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVSIAT32] = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVSIATP]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVSIAT64] = { BRB_PTR_TYPE(1) },
-		[BRB_OP_MOD]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_MODI]      = { BRB_INT_TYPE },
+		[BRB_OP_MOD]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_MODI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_MODIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_MODS]      = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_MODSI]     = { BRB_INT_TYPE },
+		[BRB_OP_MODS]      = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_MODSI]     = { BRB_INT_TYPE(1) },
 		[BRB_OP_MODSIAT8]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODSIAT16] = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODSIAT32] = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODSIATP]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODSIAT64] = { BRB_PTR_TYPE(1) },
-		[BRB_OP_AND]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_ANDI]      = { BRB_INT_TYPE },
+		[BRB_OP_AND]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_ANDI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_ANDIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ANDIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ANDIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ANDIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ANDIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_OR]        = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_ORI]       = { BRB_INT_TYPE },
+		[BRB_OP_OR]        = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_ORI]       = { BRB_INT_TYPE(1) },
 		[BRB_OP_ORIAT8]    = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ORIAT16]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ORIAT32]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ORIATP]    = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ORIAT64]   = { BRB_PTR_TYPE(1) },
-		[BRB_OP_XOR]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_XORI]      = { BRB_INT_TYPE },
+		[BRB_OP_XOR]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_XORI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_XORIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_XORIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_XORIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_XORIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_XORIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_SHL]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_SHLI]      = { BRB_INT_TYPE },
+		[BRB_OP_SHL]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_SHLI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_SHLIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHLIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHLIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHLIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHLIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_SHR]       = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_SHRI]      = { BRB_INT_TYPE },
+		[BRB_OP_SHR]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_SHRI]      = { BRB_INT_TYPE(1) },
 		[BRB_OP_SHRIAT8]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRIAT16]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRIAT32]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRIAT64]  = { BRB_PTR_TYPE(1) },
-		[BRB_OP_SHRS]      = { BRB_INT_TYPE, BRB_INT_TYPE },
-		[BRB_OP_SHRSI]     = { BRB_INT_TYPE },
+		[BRB_OP_SHRS]      = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
+		[BRB_OP_SHRSI]     = { BRB_INT_TYPE(1) },
 		[BRB_OP_SHRSIAT8]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRSIAT16] = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRSIAT32] = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRSIATP]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRSIAT64] = { BRB_PTR_TYPE(1) },
-		[BRB_OP_NOT]       = { BRB_INT_TYPE },
+		[BRB_OP_NOT]       = { BRB_INT_TYPE(1) },
 		[BRB_OP_NOTAT8]    = { BRB_PTR_TYPE(1) },
 		[BRB_OP_NOTAT16]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_NOTAT32]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_NOTATP]    = { BRB_PTR_TYPE(1) },
 		[BRB_OP_NOTAT64]   = { BRB_PTR_TYPE(1) },
-		[BRB_OP_DROP]      = { BRB_ANY_TYPE },
+		[BRB_OP_DROP]      = { BRB_ANY_TYPE(1) },
 		[BRB_OP_NEW]       = { BRB_VOID_TYPE },
-		[BRB_OP_ZERO]      = { BRB_VOID_TYPE }
+		[BRB_OP_ZERO]      = { BRB_VOID_TYPE },
+		[BRB_OP_COPY]      = { BRB_VOID_TYPE },
+		[BRB_OP_COPYTO]    = { BRB_PTR_TYPE(1), BRB_ANY_TYPE(1) }
 	};
-	static_assert(BRB_N_OPS == 113, "not all BRB operations have their input types defined");
+	static_assert(BRB_N_OPS == 115, "not all BRB operations have their input types defined");
 	static uint8_t n_out[] = {
 		[BRB_OP_NOP]       = 0,
 		[BRB_OP_END]       = 0,
@@ -1181,7 +1199,9 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_NOTAT64]   = 1,
 		[BRB_OP_DROP]      = 0,
 		[BRB_OP_NEW]       = 1,
-		[BRB_OP_ZERO]      = 1
+		[BRB_OP_ZERO]      = 1,
+		[BRB_OP_COPY]      = 1,
+		[BRB_OP_COPYTO]    = 1
 	};
 	static BRB_Type out_types[][1] = {
 		[BRB_OP_NOP]       = { BRB_VOID_TYPE },
@@ -1193,112 +1213,114 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_I64]       = { BRB_I64_TYPE(1) },
 		[BRB_OP_ADDR]      = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DBADDR]    = { BRB_PTR_TYPE(1) },
-		[BRB_OP_LD]        = { BRB_INPUT_TYPE },
+		[BRB_OP_LD]        = { BRB_DYN_TYPE(_tctor_inputType) },
 		[BRB_OP_STR]       = { BRB_VOID_TYPE },
 		[BRB_OP_SYS]       = { BRB_PTR_TYPE(1) },
 		[BRB_OP_BUILTIN]   = { BRB_PTR_TYPE(1) },
-		[BRB_OP_ADD]       = { BRB_TYPEOF(0) },
-		[BRB_OP_ADDI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_ADD]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_ADDI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_ADDIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_ADDIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_ADDIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_ADDIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADDIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_SUB]       = { BRB_TYPEOF(0) },
-		[BRB_OP_SUBI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_SUB]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_SUBI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_SUBIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_SUBIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_SUBIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_SUBIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SUBIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_MUL]       = { BRB_TYPEOF(0) },
-		[BRB_OP_MULI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_MUL]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_MULI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_MULIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_MULIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_MULIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_MULIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MULIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_DIV]       = { BRB_TYPEOF(0) },
-		[BRB_OP_DIVI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_DIV]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_DIVI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_DIVIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_DIVIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_DIVIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_DIVIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_DIVS]      = { BRB_TYPEOF(0) },
-		[BRB_OP_DIVSI]     = { BRB_TYPEOF(0) },
+		[BRB_OP_DIVS]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_DIVSI]     = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_DIVSIAT8]  = { BRB_I8_TYPE(1) },
 		[BRB_OP_DIVSIAT16] = { BRB_I16_TYPE(1) },
 		[BRB_OP_DIVSIAT32] = { BRB_I32_TYPE(1) },
 		[BRB_OP_DIVSIATP]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DIVSIAT64] = { BRB_I64_TYPE(1) },
-		[BRB_OP_MOD]       = { BRB_TYPEOF(0) },
-		[BRB_OP_MODI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_MOD]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_MODI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_MODIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_MODIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_MODIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_MODIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_MODS]      = { BRB_TYPEOF(0) },
-		[BRB_OP_MODSI]     = { BRB_TYPEOF(0) },
+		[BRB_OP_MODS]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_MODSI]     = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_MODSIAT8]  = { BRB_I8_TYPE(1) },
 		[BRB_OP_MODSIAT16] = { BRB_I16_TYPE(1) },
 		[BRB_OP_MODSIAT32] = { BRB_I32_TYPE(1) },
 		[BRB_OP_MODSIATP]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_MODSIAT64] = { BRB_I64_TYPE(1) },
-		[BRB_OP_AND]       = { BRB_TYPEOF(0) },
-		[BRB_OP_ANDI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_AND]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_ANDI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_ANDIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_ANDIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_ANDIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_ANDIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ANDIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_OR]        = { BRB_TYPEOF(0) },
-		[BRB_OP_ORI]       = { BRB_TYPEOF(0) },
+		[BRB_OP_OR]        = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_ORI]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_ORIAT8]    = { BRB_I8_TYPE(1) },
 		[BRB_OP_ORIAT16]   = { BRB_I16_TYPE(1) },
 		[BRB_OP_ORIAT32]   = { BRB_I32_TYPE(1) },
 		[BRB_OP_ORIATP]    = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ORIAT64]   = { BRB_I64_TYPE(1) },
-		[BRB_OP_XOR]       = { BRB_TYPEOF(0) },
-		[BRB_OP_XORI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_XOR]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_XORI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_XORIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_XORIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_XORIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_XORIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_XORIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_SHL]       = { BRB_TYPEOF(0) },
-		[BRB_OP_SHLI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_SHL]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_SHLI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_SHLIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_SHLIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_SHLIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_SHLIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHLIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_SHR]       = { BRB_TYPEOF(0) },
-		[BRB_OP_SHRI]      = { BRB_TYPEOF(0) },
+		[BRB_OP_SHR]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_SHRI]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_SHRIAT8]   = { BRB_I8_TYPE(1) },
 		[BRB_OP_SHRIAT16]  = { BRB_I16_TYPE(1) },
 		[BRB_OP_SHRIAT32]  = { BRB_I32_TYPE(1) },
 		[BRB_OP_SHRIATP]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRIAT64]  = { BRB_I64_TYPE(1) },
-		[BRB_OP_SHRS]      = { BRB_TYPEOF(0) },
-		[BRB_OP_SHRSI]     = { BRB_TYPEOF(0) },
+		[BRB_OP_SHRS]      = { BRB_DYN_TYPE(_tctor_stackHeadType) },
+		[BRB_OP_SHRSI]     = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_SHRSIAT8]  = { BRB_I8_TYPE(1) },
 		[BRB_OP_SHRSIAT16] = { BRB_I16_TYPE(1) },
 		[BRB_OP_SHRSIAT32] = { BRB_I32_TYPE(1) },
 		[BRB_OP_SHRSIATP]  = { BRB_PTR_TYPE(1) },
 		[BRB_OP_SHRSIAT64] = { BRB_I64_TYPE(1) },
-		[BRB_OP_NOT]       = { BRB_TYPEOF(0) },
+		[BRB_OP_NOT]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
 		[BRB_OP_NOTAT8]    = { BRB_I8_TYPE(1) },
 		[BRB_OP_NOTAT16]   = { BRB_I16_TYPE(1) },
 		[BRB_OP_NOTAT32]   = { BRB_I32_TYPE(1) },
 		[BRB_OP_NOTATP]    = { BRB_PTR_TYPE(1) },
 		[BRB_OP_NOTAT64]   = { BRB_I64_TYPE(1) },
 		[BRB_OP_DROP]      = { BRB_VOID_TYPE },
-		[BRB_OP_NEW]       = { BRB_INPUT_TYPE },
-		[BRB_OP_ZERO]      = { BRB_INPUT_TYPE }
+		[BRB_OP_NEW]       = { BRB_DYN_TYPE(_tctor_inputType) },
+		[BRB_OP_ZERO]      = { BRB_DYN_TYPE(_tctor_inputType) },
+		[BRB_OP_COPY]      = { BRB_DYN_TYPE(_tctor_typeOfInputStackItem) },
+		[BRB_OP_COPYTO]    = { BRB_DYN_TYPE(_tctor_2ndStackItemType) }
 	};
-	static_assert(BRB_N_OPS == 113, "not all BRB operations have their output types defined");
+	static_assert(BRB_N_OPS == 115, "not all BRB operations have their output types defined");
 	static uint8_t sys_n_in[] = {
 		[BRB_SYS_EXIT] = 1,
 		[BRB_SYS_WRITE] = 3,
@@ -1326,25 +1348,25 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		if ((builder->error = validateType(&builder->module, &op.operand_type)).type) return builder->error;
 // adding the operation
 	if (!BRB_OpArray_append(body, op))
-		return (builder->error = (BRB_Error){.type = BRB_ERR_NO_MEMORY});
+		return builder->error = (BRB_Error){.type = BRB_ERR_NO_MEMORY};
 // checking the edge cases
-	if (op.type == BRB_OP_ADDR) {
+	if (BRB_GET_OPERAND_TYPE(op.type) == BRB_OPERAND_VAR_NAME) {
 		if (op.operand_u >= UINT32_MAX) {
 			--body->length;
-			return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = BRB_OP_ADDR, .operand = op.operand_u});
+			return builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = op.type, .operand = op.operand_u};
 		}
 		if (op.operand_u ? !getNthStackNode_nonInternal(*arrayhead(*vframe), op.operand_u) : false) {
 			--body->length;
-			return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = BRB_OP_ADDR, .operand = op.operand_u});
+			return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = op.type, .operand = op.operand_u});
 		}
-	} else if (op.type == BRB_OP_DBADDR) {
+	} else if (BRB_GET_OPERAND_TYPE(op.type) == BRB_OPERAND_DB_NAME) {
 		if (~op.operand_s >= UINT32_MAX) {
 			--body->length;
-			return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = BRB_OP_DBADDR, .operand = op.operand_u});
+			return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = op.type, .operand = op.operand_u});
 		}
 		if (~op.operand_s >= builder->module.seg_data.length) {
 			--body->length;
-			return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = BRB_OP_DBADDR, .operand = op.operand_u});
+			return (builder->error = (BRB_Error){.type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = op.type, .operand = op.operand_u});
 		}
 	} else if (op.type == BRB_OP_SYS) {
 		if (op.operand_u >= BRB_N_SYSCALLS) {
@@ -1460,6 +1482,7 @@ size_t BRB_getTypeRTSize(BRB_Module* module, BRB_Type type)
 		return type.struct_id >= module->seg_typeinfo.length
 			? SIZE_MAX
 			: module->seg_typeinfo.data[type.struct_id].size;
+	assert(!(type.kind & (type.kind - 1)), "invalid type kind %i", type.kind);
 	static size_t coeffs[] = {
 		[BRB_TYPE_I8] = 1,
 		[BRB_TYPE_I16] = 2,
@@ -1611,8 +1634,8 @@ void BRB_deallocDataBlocks(BRB_Module* module)
 BRB_Error BRB_addStruct(BRB_ModuleBuilder* builder, BRB_id* struct_id_p, const char* name, uint32_t n_fields, BRB_Type* fields)
 {
 	if (builder->error.type) return builder->error;
-// because the `struct_id` field of the `BRB_Type` type is limited to 24 bits, a module cannot have more than 16777216 structs
-	if (builder->module.seg_typeinfo.length == 1 << 24)
+// because the `struct_id` field of the `BRB_Type` type is limited to 25 bits, a module cannot have more than 33554432 structs
+	if (builder->module.seg_typeinfo.length == MAX_N_STRUCTS)
 		return builder->error = (BRB_Error){.type = BRB_ERR_TOO_MANY_STRUCTS};
 	*struct_id_p = builder->module.seg_typeinfo.length;
 	if (!BRB_StructArray_append(&builder->module.seg_typeinfo, (BRB_Struct){.name = name}))

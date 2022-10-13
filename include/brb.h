@@ -257,18 +257,30 @@ Data Types:
 	BRB_OP_NOTAT64,   // [A:ptr] -> not-@64 -> [i64]
 	// invert the bits of an `i64` at address A, replace A with the result; like *(uint64_t*)A = ~*(uint64_t*)A
 
-	BRB_OP_DROP,     // [A:any] -> drop -> []
+	BRB_OP_DROP,      // [A:any] -> drop -> []
 	// deletes A from the stack
-	BRB_OP_NEW,      // [] -> new <T> -> [<T>]
+	BRB_OP_NEW,       // [] -> new <T> -> [<T>]
 	// create new item of type <T> on top of the stack; contents of the item is undefined
-	BRB_OP_ZERO,     // [] -> zero <T> -> [<T>]
+	BRB_OP_ZERO,      // [] -> zero <T> -> [<T>]
 	// create new item of type <T> on top of the stack, with every byte initialized to 0
-/* TODO:
-	BRB_OP_DUP,      // [A:x...] -> dup <i> -> [A:x...A:x]
+	BRB_OP_COPY,      // [any[<i>], A:x] -> copy <i> -> [A:x, any[<i>], A:x]
 	// duplicates stack item at index <i> on top of the stack
-	BRB_OP_SWAP,     // [A:x...B:x] -> swap <i> -> [B:x...A:x]
-	// swaps the contents of A and B, A being the stack head and B being at index <i>
-	BRB_OP_ITEM,     // [A:any] -> item <n> -> [typeof A[<n>]]
+	BRB_OP_COPYTO,    // [A:ptr, B] -> copy-to -> [B]
+	// store B at address A, pop A from the stack; A must not overlap with the address of B; same as `*A = B`
+/* TODO:
+	BRB_OP_COPYFROM,  // [A:ptr] -> copy-from <T> -> [<T>]
+	// load an object of type <T> from address A, pop A from the stack; A must not overlap with its own address; same as `*(T*)A`
+	BRB_OP_COPYAT,    // [A:ptr, B:ptr] -> copy-at <T> -> [A:ptr]
+	// copy an object of type <T> from address B to address A, pop B from the stack, addresses must not overlap; same as `memcpy(A, B, sizeof(T))`
+	BRB_OP_MOVE,      // [A:x, any[<i> - 1], B:x] -> move <i> -> [A:x, any[<i> - 1], A:x]
+	// copy the value of A to B; <i> may not be 0
+	BRB_OP_MOVETO,    // [A:ptr, B] -> move-to -> [B]
+	// store B at address A, pop A from the stack; same as `*(typeof(B)*)memmove(A, &B, sizeof(B))`
+	BRB_OP_MOVEROM,   // [A:ptr] -> move-from <T> -> [B:<T>]
+	// load an object of type <T> from address A, pop A from the stack; same as `T B; *(T*)memmove(&B, A, sizeof(T))`
+	BRB_OP_MOVEAT,    // [A:ptr, B:ptr] -> move-@ <T> -> [A:ptr]
+	// copy an object of type <T> from address B to address A, pop B from the stack; same as `memmove(A, B, sizeof(T))`
+	BRB_OP_ITEM,      // [A:any] -> item <n> -> [typeof A[<n>]]
 	// replaces A with the item of A at index <n>
 
 	BRB_OP_EQU,      // [A:x, B:x] -> equ -> i8
@@ -370,58 +382,56 @@ typedef enum {
 #define BRB_GET_BASE_OP_TYPE(type) ((BRB_OpType)(BRB_opFlags[type] >> 7))
 
 typedef enum {
-	BRB_TYPE_I8,
-	BRB_TYPE_I16,	
-	BRB_TYPE_I32,
-	BRB_TYPE_PTR,
-	BRB_TYPE_I64,	
-	BRB_TYPE_VOID,
-	BRB_TYPE_STRUCT,
+	BRB_TYPE_DYNAMIC = 0,
+	BRB_TYPE_I8      = 1,
+	BRB_TYPE_I16     = 2,	
+	BRB_TYPE_I32     = 4,
+	BRB_TYPE_PTR     = 8,
+	BRB_TYPE_I64     = 16,
+	BRB_TYPE_VOID    = 32,
+	BRB_TYPE_STRUCT  = 64,
+	BRB_TYPE_INT     = BRB_TYPE_I8 | BRB_TYPE_I16 | BRB_TYPE_I32 | BRB_TYPE_I64 | BRB_TYPE_PTR,
+	BRB_TYPE_ANY     = BRB_TYPE_INT | BRB_TYPE_STRUCT,
 	BRB_N_TYPE_KINDS
 } BRB_TypeKind;
-
-#ifdef _BRB_INTERNAL
-#	define BRB_TYPE_ANY     1
-#	define BRB_TYPE_INT     2
-#	define BRB_TYPE_OF      3
-#	define BRB_TYPE_INPUT   4
-#	define BRB_TYPE_PADDING 5
-#	define BRB_ANY_TYPE  ((BRB_Type){.internal_kind = BRB_TYPE_ANY})
-#	define BRB_INT_TYPE  ((BRB_Type){.internal_kind = BRB_TYPE_INT})
-#	define BRB_TYPEOF(i) ((BRB_Type){.internal_kind = BRB_TYPE_OF, .n_items = i })
-#	define BRB_INPUT_TYPE ((BRB_Type){.internal_kind = BRB_TYPE_INPUT})
-// the `BRB_TYPE_OF` and `BRB_TYPE_INPUT` internal type kinds are only checked in the output types (those that are provided in `out_types`), in other cases they are ignored
-#endif // _BRB_INTERNAL
-
 extern const sbuf BRB_typeNames[];
 
+typedef union  BRB_Type BRB_Type;
+typedef struct BRB_Op BRB_Op;
+typedef struct BRB_stacknode_t* BRB_StackNode;
+union BRB_Type {
+	struct {
+		uint32_t n_items;
+		uint32_t struct_id:25;
+		BRB_TypeKind kind:7;
+	};
+	BRB_Type (*ctor)(BRB_Op, BRB_StackNode);
+};
+static_assert(sizeof(BRB_Type) <= sizeof(uint64_t), "just for compactness");
+declArray(BRB_Type);
+#define MAX_N_STRUCTS          (size_t)(1UL << 25)
 #define BRB_I8_TYPE(n)         ((BRB_Type){.kind = BRB_TYPE_I8,  .n_items = n})
 #define BRB_I16_TYPE(n)        ((BRB_Type){.kind = BRB_TYPE_I16, .n_items = n})
 #define BRB_I32_TYPE(n)        ((BRB_Type){.kind = BRB_TYPE_I32, .n_items = n})
 #define BRB_PTR_TYPE(n)        ((BRB_Type){.kind = BRB_TYPE_PTR, .n_items = n})
 #define BRB_I64_TYPE(n)        ((BRB_Type){.kind = BRB_TYPE_I64, .n_items = n})
+#define BRB_INT_TYPE(n)        ((BRB_Type){.kind = BRB_TYPE_INT, .n_items = n})
+#define BRB_ANY_TYPE(n)        ((BRB_Type){.kind = BRB_TYPE_ANY, .n_items = n})
 #define BRB_VOID_TYPE          ((BRB_Type){.kind = BRB_TYPE_VOID             })
 #define BRB_STRUCT_TYPE(id, n) ((BRB_Type){.kind = BRB_TYPE_STRUCT, .struct_id = id, .n_items = n})
-typedef struct {
-	BRB_TypeKind kind:4;
-	uint8_t internal_kind:4;
-	uint32_t struct_id:24;
-	uint32_t n_items;
-} BRB_Type;
-static_assert(sizeof(BRB_Type) <= sizeof(uint64_t), "just for compactness");
-declArray(BRB_Type);
+#define BRB_DYN_TYPE(_ctor)    ((BRB_Type){.ctor = _ctor})
 
-typedef struct {
+struct BRB_Op {
 	BRB_OpType type:8;
-	uint8_t x_op1_size; // only for the `add` operation and only during execution
 	uint8_t x_op2_size;
+	uint32_t x_op1_size; // only for the `add` operation and only during execution
 	union {
 		uint64_t operand_u;	
 		int64_t operand_s;
 		BRB_Type operand_type;
 		void* operand_ptr;
 	};
-} BRB_Op;
+};
 static_assert(sizeof(BRB_Op) <= 16, "`sizeof(BRB_Op) > 16`, that's no good, gotta save up on that precious memory");
 declArray(BRB_Op);
 
@@ -432,6 +442,7 @@ typedef struct {
 	BRB_TypeArray args;
 } BRB_Proc;
 declArray(BRB_Proc);
+#define BRB_MAX_N_PROCS UINT32_MAX
 
 // System Calls: crossplatform way to use system-dependent functionality
 typedef enum {
@@ -442,7 +453,6 @@ typedef enum {
 } BRB_Syscall;
 
 extern const sbuf BRB_syscallNames[];
-
 extern const size_t BRB_syscallNArgs[];
 
 // Built-ins: crossplatform way to get system-dependent constants
@@ -467,6 +477,7 @@ typedef struct {
 	bool is_mutable;
 } BRB_DataBlock;
 declArray(BRB_DataBlock);
+#define BRB_MAX_N_DBS UINT32_MAX
 
 typedef struct {
 	BRB_TypeArray fields;
@@ -533,6 +544,7 @@ typedef enum {
 	BRB_ERR_NO_STRUCT_FIELD,
 	BRB_ERR_STRUCT_ID_EXPECTED,
 	BRB_ERR_INVALID_STRUCT_ID,
+	BRB_ERR_INVALID_TYPE_KIND,
 	BRB_N_ERROR_TYPES
 } BRB_ErrorType;
 
@@ -560,7 +572,6 @@ typedef struct {
 	};
 } BRB_Error;
 
-typedef struct BRB_stacknode_t* BRB_StackNode;
 struct BRB_stacknode_t {
 	BRB_StackNode prev;
 	const char* name;

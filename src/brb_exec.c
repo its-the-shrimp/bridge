@@ -139,6 +139,13 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_ZERO:
 				op->operand_u = BRB_getTypeRTSize(&builder->module, op->operand_type);
 				break;
+			case BRB_OP_COPY:
+				op->x_op1_size = BRB_getStackItemRTSize(builder, proc_id, op_id, 0);
+				op->operand_u = BRB_getStackItemRTOffset(builder, proc_id, op_id - 1, op->operand_u) + op->x_op1_size;
+				break;
+			case BRB_OP_COPYTO:
+				op->operand_u = BRB_getStackItemRTSize(builder, proc_id, op_id, 0);
+				break;
 			case BRB_N_OPS:
 			default:
 				assert(false, "unknown operation type %u\n", op->type);
@@ -1057,6 +1064,15 @@ bool BRB_execOp(BRB_ExecEnv* env)
 		case BRB_OP_ZERO:
 			ALLOC_STACK_SPACE(op.operand_u);
 			memset(env->stack_head, 0, op.operand_u);
+			++env->exec_index;
+			return false;
+		case BRB_OP_COPY:
+			ALLOC_STACK_SPACE(op.x_op1_size);
+			memcpy(env->stack_head, env->stack_head + op.operand_u, op.x_op1_size);
+			++env->exec_index;
+			return false; 
+		case BRB_OP_COPYTO:
+			memcpy(*(void**)env->stack_head, env->stack_head += sizeof(void*), op.operand_u);
 			++env->exec_index;
 			return false;
 		case BRB_N_OPS:

@@ -159,7 +159,16 @@ static long write2Ints(FILE* fd, uint64_t x, uint64_t y)
 
 static long writeType(FILE* dst, BRB_Type type)
 {
-	return writeInt(dst, type.n_items, type.kind)
+	static uint8_t encoded[] = { // this is done to avoid calling `log2`
+		[1 << 0]  = 0,	
+		[1 << 1]  = 1,
+		[1 << 2]  = 2,
+		[1 << 3]  = 3,
+		[1 << 4]  = 4,
+		[1 << 5]  = 5,
+		[1 << 6]  = 6
+	};
+	return writeInt(dst, type.n_items, encoded[type.kind])
 		+ (type.kind == BRB_TYPE_STRUCT
 			? writeIntOnly(dst, type.struct_id)
 			: 0);
