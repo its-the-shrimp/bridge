@@ -22,7 +22,7 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 #define repeat(n) for(uint64_t TEMPVAR = (n); TEMPVAR > 0; --TEMPVAR)
 
 #define _str(T) #T
-#define ARRAY_GROWTH(x) (unsigned)ceilf((float)x / 2.0)
+#define ARRAY_GROWTH(x) (unsigned)ceilf((float)(x) / 2.0)
 
 #define arrayhead(array) ((array).data + (array).length - 1)
 #define declArray(T) \
@@ -80,7 +80,7 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 	} \
 	DS_DEF T* T##Array_extend(T##Array* array, T##Array sub) { \
 		if (array->cap < (array->length += sub.length)) \
-			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) { \
+			if (!T##Array_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) { \
 				array->length -= sub.length; \
 				return NULL; \
 			} \
@@ -136,7 +136,7 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		index = index >= 0 ? index : array->length + index; \
 		if ((uint64_t)index >= array->length) return false; \
 		if (array->cap < (array->length += sub.length - 1)) \
-			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) { \
+			if (!T##Array_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) { \
 				array->length -= sub.length - 1; \
 				return false; \
 			} \
@@ -150,7 +150,7 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 	} \
 	DS_DEF T* T##Array_incrlen(T##Array* array, uint32_t n) { \
 		if ((array->length += n) > array->cap) \
-			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) return NULL; \
+			if (!T##Array_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) return NULL; \
 		return &array->data[array->length - n]; \
 	} \
 	DS_DEF bool T##Array_clear(T##Array* array) { \

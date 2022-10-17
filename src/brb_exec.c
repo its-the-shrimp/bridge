@@ -93,12 +93,6 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_DBADDR:
 				op->operand_ptr = seg_data.data[~op->operand_s].data;
 				break;
-			case BRB_OP_LD:
-				op->operand_u = BRB_getTypeRTSize(&builder->module, op->operand_type) - sizeof(void*);
-				break;
-			case BRB_OP_STR:
-				op->operand_u = BRB_getStackItemRTSize(builder, proc_id, op_id - 1, 1);
-				break;
 			case BRB_OP_BUILTIN:
 				op->operand_u = BRB_builtinValues[op->operand_u];
 				break;
@@ -139,12 +133,16 @@ static void prepareOpForExec(BRB_ModuleBuilder* builder, sbufArray seg_data, BRB
 			case BRB_OP_ZERO:
 				op->operand_u = BRB_getTypeRTSize(&builder->module, op->operand_type);
 				break;
-			case BRB_OP_COPY:
+			case BRB_OP_GET:
 				op->x_op1_size = BRB_getStackItemRTSize(builder, proc_id, op_id, 0);
 				op->operand_u = BRB_getStackItemRTOffset(builder, proc_id, op_id - 1, op->operand_u) + op->x_op1_size;
 				break;
-			case BRB_OP_COPYTO:
+			case BRB_OP_SETAT:
 				op->operand_u = BRB_getStackItemRTSize(builder, proc_id, op_id, 0);
+				break;
+			case BRB_OP_GETFROM:
+			case BRB_OP_COPY:
+				op->operand_u = BRB_getTypeRTSize(&builder->module, op->operand_type);
 				break;
 			case BRB_N_OPS:
 			default:
@@ -246,16 +244,6 @@ bool BRB_execOp(BRB_ExecEnv* env)
 		case BRB_OP_ADDR:
 			ALLOC_STACK_SPACE(sizeof(void*));
 			*(void**)env->stack_head = env->stack_head + op.operand_u;
-			++env->exec_index;
-			return false;
-		case BRB_OP_LD:
-			ALLOC_STACK_SPACE(op.operand_u);
-			memmove(env->stack_head, *(void**)(env->stack_head + op.operand_u), op.operand_u + sizeof(void*));
-			++env->exec_index;
-			return false;
-		case BRB_OP_STR:
-			memmove(((void**)env->stack_head)[0], env->stack_head + sizeof(void*), op.operand_u);
-			env->stack_head += op.operand_u + sizeof(void*);
 			++env->exec_index;
 			return false;
 		case BRB_OP_SYS:
@@ -1066,13 +1054,24 @@ bool BRB_execOp(BRB_ExecEnv* env)
 			memset(env->stack_head, 0, op.operand_u);
 			++env->exec_index;
 			return false;
-		case BRB_OP_COPY:
+		case BRB_OP_GET:
 			ALLOC_STACK_SPACE(op.x_op1_size);
 			memcpy(env->stack_head, env->stack_head + op.operand_u, op.x_op1_size);
 			++env->exec_index;
 			return false; 
-		case BRB_OP_COPYTO:
+		case BRB_OP_SETAT:
 			memcpy(*(void**)env->stack_head, env->stack_head += sizeof(void*), op.operand_u);
+			++env->exec_index;
+			return false;
+		case BRB_OP_GETFROM:
+			ALLOC_STACK_SPACE(op.operand_u - sizeof(void*));
+			memcpy(env->stack_head, *(void**)(env->stack_head + op.operand_u - sizeof(void*)), op.operand_u);
+			++env->exec_index;
+			return false;
+		case BRB_OP_COPY:
+			memcpy(*(void**)env->stack_head, *(void**)(env->stack_head + sizeof(void*)), op.operand_u);
+			*(void**)(env->stack_head + sizeof(void*)) = *(void**)env->stack_head;
+			env->stack_head += sizeof(void*);
 			++env->exec_index;
 			return false;
 		case BRB_N_OPS:
@@ -1088,7 +1087,6 @@ static sbuf allocDataBlock(BRB_ModuleBuilder* builder, BRB_id db_id)
 }
 
 BRB_Error BRB_execModule(BRB_Module module, BRB_ExecEnv* env, char* args[], size_t stack_size, const volatile bool* interruptor)
-// TODO: avoid memory leaks during execution by adding an arena allocator field to `BRB_ExecEnv`
 {
 	BRB_ExecEnv env_l;
 	if (!env) env = &env_l;

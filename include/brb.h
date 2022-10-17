@@ -35,10 +35,6 @@ Data Types:
 	// push address of the stack item at index <i> onto the stack; <i> refers to the index on the stack after pushing the address
 	BRB_OP_DBADDR,    // [] -> dbaddr <i> -> [ptr]
 	// push address of data block at index <i> onto the stack
-	BRB_OP_LD,        // [A:ptr] -> ld <T> -> [<T>]
-	// replace address A with item of type <T> loaded from it
-	BRB_OP_STR,       // [A:ptr, B] -> str -> []
-	// store B at the address A; same as (void)(*A = B)
 	BRB_OP_SYS,
 	// execute system procedure <f> with arguments from the stack
 	/* System calls:
@@ -263,29 +259,27 @@ Data Types:
 	// create new item of type <T> on top of the stack; contents of the item is undefined
 	BRB_OP_ZERO,      // [] -> zero <T> -> [<T>]
 	// create new item of type <T> on top of the stack, with every byte initialized to 0
-	BRB_OP_COPY,      // [any[<i>], A:x] -> copy <i> -> [A:x, any[<i>], A:x]
+	BRB_OP_GET,       // [any[<i>], A:x] -> get <i> -> [A:x, any[<i>], A:x]
 	// duplicates stack item at index <i> on top of the stack
-	BRB_OP_COPYTO,    // [A:ptr, B] -> copy-to -> [B]
+	BRB_OP_SETAT,     // [A:ptr, B] -> set-at -> [B]
 	// store B at address A, pop A from the stack; A must not overlap with the address of B; same as `*A = B`
-/* TODO:
-	BRB_OP_COPYFROM,  // [A:ptr] -> copy-from <T> -> [<T>]
+	BRB_OP_GETFROM,   // [A:ptr] -> get-from <T> -> [<T>]
 	// load an object of type <T> from address A, pop A from the stack; A must not overlap with its own address; same as `*(T*)A`
-	BRB_OP_COPYAT,    // [A:ptr, B:ptr] -> copy-at <T> -> [A:ptr]
+	BRB_OP_COPY,      // [A:ptr, B:ptr] -> copy <T> -> [A:ptr]
 	// copy an object of type <T> from address B to address A, pop B from the stack, addresses must not overlap; same as `memcpy(A, B, sizeof(T))`
-	BRB_OP_MOVE,      // [A:x, any[<i> - 1], B:x] -> move <i> -> [A:x, any[<i> - 1], A:x]
-	// copy the value of A to B; <i> may not be 0
-	BRB_OP_MOVETO,    // [A:ptr, B] -> move-to -> [B]
-	// store B at address A, pop A from the stack; same as `*(typeof(B)*)memmove(A, &B, sizeof(B))`
-	BRB_OP_MOVEROM,   // [A:ptr] -> move-from <T> -> [B:<T>]
-	// load an object of type <T> from address A, pop A from the stack; same as `T B; *(T*)memmove(&B, A, sizeof(T))`
-	BRB_OP_MOVEAT,    // [A:ptr, B:ptr] -> move-@ <T> -> [A:ptr]
-	// copy an object of type <T> from address B to address A, pop B from the stack; same as `memmove(A, B, sizeof(T))`
-	BRB_OP_ITEM,      // [A:any] -> item <n> -> [typeof A[<n>]]
-	// replaces A with the item of A at index <n>
+/* TODO:
+	BRB_OP_SET,       // [A:x, any[<i> - 1], B:x] -> set -> [A:x, any[<i> - 1], A:x]
+	// set the contents of A to that of B; A and B must be of the same type; <i> must not be 0
+	BRB_OP_COPYO,     // [A:ptr, B:ptr] -> copy-o <T> -> [A:ptr]
+	// copy an object of type <T> from address B to address A, pop B from the stack, addresses may overlap; same as `memmove(A, B, sizeof(T))`
+	BRB_OP_GETITEM,   // [any[<i1>], [any[<i2>], A]] -> get-item <i1>[<i2>] -> [typeof A]
+	// copies an subitem <i2> of stack item <i1> on top of the stack
+	BRB_OP_SETITEM,   // [A:x, any[<i1> - 1], [any[<i2>], B:x]] -> set-item <i1>[<i2>] -> [A:x, any[<i1> - 1], [any[<i2>], A:x]]
+	
 
-	BRB_OP_EQU,      // [A:x, B:x] -> equ -> i8
+	BRB_OP_EQU,       // [A:x, B:x] -> equ -> i8
 	// compare A and B and replace them with a byte, the value of which will be 1 if they are equal, and 0 otherwise
-	BRB_OP_NEQ,      // [A:x, B:x] -> neq -> i8
+	BRB_OP_NEQ,       // [A:x, B:x] -> neq -> i8
 	// compare A and B and replace them with a byte, the value of which will be 1 if they are equal, and 0 otherwise
 	BRB_OP_LTU,      // [A:int, B:int] -> ltu -> i8
 	// compare A and B and replace them with a byte, the value of which will be 1 if A < B, and 0 otherwise; comparison is unsigned
@@ -326,10 +320,6 @@ Data Types:
 	// fill memory at address A with <n> copies of B, pop B from the stack
 	BRB_OP_FMV,      // [A:ptr, B, C:int] -> fm-v -> [A:ptr]
 	// fill memory at address A with C copies of B, pop B and C from the stack
-	BRB_OP_LDI,	 // [A:ptr, B:int] -> ld-i <T> -> [<T>]
-	// load item of type <T> from address A at index B
-	BRB_OP_STRI,	 // [A:ptr, B:int, C] -> str-i -> []
-	// write C to address A at index B
 
 	BRB_OP_CI8,      // [A:int] -> ci8 -> [A:i8]
 	// convert A to an `i8`
@@ -379,7 +369,6 @@ typedef enum {
 } BRB_AddrOperandType;
 #define BRB_GET_ADDR_OP_TYPE(type) ((BRB_AddrOperandType)((BRB_opFlags[type] >> 3) & 7))
 #define BRB_OPERAND_ALLOCATED 64
-#define BRB_GET_BASE_OP_TYPE(type) ((BRB_OpType)(BRB_opFlags[type] >> 7))
 
 typedef enum {
 	BRB_TYPE_DYNAMIC = 0,

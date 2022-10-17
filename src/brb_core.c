@@ -34,8 +34,6 @@ const sbuf BRB_opNames[]   = {
 	[BRB_OP_I64]       = fromcstr("i64"),
 	[BRB_OP_ADDR]      = fromcstr("addr"),
 	[BRB_OP_DBADDR]    = fromcstr("dbaddr"),
-	[BRB_OP_LD]        = fromcstr("ld"),
-	[BRB_OP_STR]       = fromcstr("str"),
 	[BRB_OP_SYS]       = fromcstr("sys"),
 	[BRB_OP_BUILTIN]   = fromcstr("builtin"),
 	[BRB_OP_ADD]       = fromcstr("add"),
@@ -138,130 +136,131 @@ const sbuf BRB_opNames[]   = {
 	[BRB_OP_DROP]      = fromcstr("drop"),
 	[BRB_OP_NEW]       = fromcstr("new"),
 	[BRB_OP_ZERO]      = fromcstr("zero"),
+	[BRB_OP_GET]       = fromcstr("get"),
+	[BRB_OP_SETAT]     = fromcstr("set-at"),
+	[BRB_OP_GETFROM]   = fromcstr("get-from"),
 	[BRB_OP_COPY]      = fromcstr("copy"),
-	[BRB_OP_COPYTO]    = fromcstr("copy-to")
 };
 static_assert(sizeof(BRB_opNames) / sizeof(BRB_opNames[0]) == BRB_N_OPS, "not all BRB operations have their names defined");
 
 #define SET_OPERAND_TYPE(type) (BRB_OPERAND_##type << 0)
 #define SET_ADDR_OP_TYPE(type) (BRB_ADDR_##type    << 3)
-#define SET_BASE_OP(type)      (BRB_OP_##type      << 7)
 const uint64_t BRB_opFlags[] = {
-	[BRB_OP_NOP]       = SET_BASE_OP(NOP),
-	[BRB_OP_END]       = SET_BASE_OP(END),
-	[BRB_OP_I8]        = SET_BASE_OP(I8)      | SET_OPERAND_TYPE(INT8),
-	[BRB_OP_I16]       = SET_BASE_OP(I16)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_I32]       = SET_BASE_OP(I32)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_PTR]       = SET_BASE_OP(PTR)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_I64]       = SET_BASE_OP(I64)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_ADDR]      = SET_BASE_OP(ADDR)    | SET_OPERAND_TYPE(VAR_NAME),
-	[BRB_OP_DBADDR]    = SET_BASE_OP(DBADDR)  | SET_OPERAND_TYPE(DB_NAME),
-	[BRB_OP_LD]        = SET_BASE_OP(LD)      | SET_OPERAND_TYPE(TYPE),
-	[BRB_OP_STR]       = SET_BASE_OP(STR),
-	[BRB_OP_SYS]       = SET_BASE_OP(SYS)     | SET_OPERAND_TYPE(SYSCALL_NAME),
-	[BRB_OP_BUILTIN]   = SET_BASE_OP(BUILTIN) | SET_OPERAND_TYPE(BUILTIN),
-	[BRB_OP_ADD]       = SET_BASE_OP(ADD),
-	[BRB_OP_ADDI]      = SET_BASE_OP(ADD)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_ADDIAT8]   = SET_BASE_OP(ADD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_ADDIAT16]  = SET_BASE_OP(ADD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_ADDIAT32]  = SET_BASE_OP(ADD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_ADDIATP]   = SET_BASE_OP(ADD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_ADDIAT64]  = SET_BASE_OP(ADD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_SUB]       = SET_BASE_OP(SUB),
-	[BRB_OP_SUBI]      = SET_BASE_OP(SUB)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_SUBIAT8]   = SET_BASE_OP(SUB)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_SUBIAT16]  = SET_BASE_OP(SUB)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_SUBIAT32]  = SET_BASE_OP(SUB)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_SUBIATP]   = SET_BASE_OP(SUB)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_SUBIAT64]  = SET_BASE_OP(SUB)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_MUL]       = SET_BASE_OP(MUL),
-	[BRB_OP_MULI]      = SET_BASE_OP(MUL)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_MULIAT8]   = SET_BASE_OP(MUL)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_MULIAT16]  = SET_BASE_OP(MUL)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_MULIAT32]  = SET_BASE_OP(MUL)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_MULIATP]   = SET_BASE_OP(MUL)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_MULIAT64]  = SET_BASE_OP(MUL)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_DIV]       = SET_BASE_OP(DIV),
-	[BRB_OP_DIVI]      = SET_BASE_OP(DIV)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_DIVIAT8]   = SET_BASE_OP(DIV)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_DIVIAT16]  = SET_BASE_OP(DIV)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_DIVIAT32]  = SET_BASE_OP(DIV)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_DIVIATP]   = SET_BASE_OP(DIV)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_DIVIAT64]  = SET_BASE_OP(DIV)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_DIVS]      = SET_BASE_OP(DIVS),
-	[BRB_OP_DIVSI]     = SET_BASE_OP(DIVS)    | SET_OPERAND_TYPE(INT),
-	[BRB_OP_DIVSIAT8]  = SET_BASE_OP(DIVS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_DIVSIAT16] = SET_BASE_OP(DIVS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_DIVSIAT32] = SET_BASE_OP(DIVS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_DIVSIATP]  = SET_BASE_OP(DIVS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_DIVSIAT64] = SET_BASE_OP(DIVS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_MOD]       = SET_BASE_OP(MOD),
-	[BRB_OP_MODI]      = SET_BASE_OP(MOD)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_MODIAT8]   = SET_BASE_OP(MOD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_MODIAT16]  = SET_BASE_OP(MOD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_MODIAT32]  = SET_BASE_OP(MOD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_MODIATP]   = SET_BASE_OP(MOD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_MODIAT64]  = SET_BASE_OP(MOD)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_MODS]      = SET_BASE_OP(MODS),
-	[BRB_OP_MODSI]     = SET_BASE_OP(MODS)    | SET_OPERAND_TYPE(INT),
-	[BRB_OP_MODSIAT8]  = SET_BASE_OP(MODS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_MODSIAT16] = SET_BASE_OP(MODS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_MODSIAT32] = SET_BASE_OP(MODS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_MODSIATP]  = SET_BASE_OP(MODS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_MODSIAT64] = SET_BASE_OP(MODS)    | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_AND]       = SET_BASE_OP(AND),
-	[BRB_OP_ANDI]      = SET_BASE_OP(AND)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_ANDIAT8]   = SET_BASE_OP(AND)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_ANDIAT16]  = SET_BASE_OP(AND)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_ANDIAT32]  = SET_BASE_OP(AND)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_ANDIATP]   = SET_BASE_OP(AND)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_ANDIAT64]  = SET_BASE_OP(AND)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_OR]        = SET_BASE_OP(OR),
-	[BRB_OP_ORI]       = SET_BASE_OP(OR)      | SET_OPERAND_TYPE(INT),
-	[BRB_OP_ORIAT8]    = SET_BASE_OP(OR)      | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_ORIAT16]   = SET_BASE_OP(OR)      | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_ORIAT32]   = SET_BASE_OP(OR)      | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_ORIATP]    = SET_BASE_OP(OR)      | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_ORIAT64]   = SET_BASE_OP(OR)      | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_XOR]       = SET_BASE_OP(XOR),
-	[BRB_OP_XORI]      = SET_BASE_OP(XOR)     | SET_OPERAND_TYPE(INT),
-	[BRB_OP_XORIAT8]   = SET_BASE_OP(XOR)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_XORIAT16]  = SET_BASE_OP(XOR)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_XORIAT32]  = SET_BASE_OP(XOR)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_XORIATP]   = SET_BASE_OP(XOR)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_XORIAT64]  = SET_BASE_OP(XOR)     | SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_SHL]       = SET_BASE_OP(SHL),
-	[BRB_OP_SHLI]      = SET_BASE_OP(SHL)     | SET_OPERAND_TYPE(INT8),
-	[BRB_OP_SHLIAT8]   = SET_BASE_OP(SHL)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_SHLIAT16]  = SET_BASE_OP(SHL)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_SHLIAT32]  = SET_BASE_OP(SHL)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_SHLIATP]   = SET_BASE_OP(SHL)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_SHLIAT64]  = SET_BASE_OP(SHL)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_SHR]       = SET_BASE_OP(SHR),
-	[BRB_OP_SHRI]      = SET_BASE_OP(SHR)     | SET_OPERAND_TYPE(INT8),
-	[BRB_OP_SHRIAT8]   = SET_BASE_OP(SHR)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_SHRIAT16]  = SET_BASE_OP(SHR)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_SHRIAT32]  = SET_BASE_OP(SHR)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_SHRIATP]   = SET_BASE_OP(SHR)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_SHRIAT64]  = SET_BASE_OP(SHR)     | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_SHRS]      = SET_BASE_OP(SHRS),
-	[BRB_OP_SHRSI]     = SET_BASE_OP(SHRS)    | SET_OPERAND_TYPE(INT8),
-	[BRB_OP_SHRSIAT8]  = SET_BASE_OP(SHRS)    | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_SHRSIAT16] = SET_BASE_OP(SHRS)    | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_SHRSIAT32] = SET_BASE_OP(SHRS)    | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_SHRSIATP]  = SET_BASE_OP(SHRS)    | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_SHRSIAT64] = SET_BASE_OP(SHRS)    | SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_NOT]       = SET_BASE_OP(NOT),
-	[BRB_OP_NOTAT8]    = SET_BASE_OP(NOT)     | SET_ADDR_OP_TYPE(I8),
-	[BRB_OP_NOTAT16]   = SET_BASE_OP(NOT)     | SET_ADDR_OP_TYPE(I16),
-	[BRB_OP_NOTAT32]   = SET_BASE_OP(NOT)     | SET_ADDR_OP_TYPE(I32),
-	[BRB_OP_NOTATP]    = SET_BASE_OP(NOT)     | SET_ADDR_OP_TYPE(PTR),
-	[BRB_OP_NOTAT64]   = SET_BASE_OP(NOT)     | SET_ADDR_OP_TYPE(I64),
-	[BRB_OP_DROP]      = SET_BASE_OP(DROP),
-	[BRB_OP_NEW]       = SET_BASE_OP(NEW)     | SET_OPERAND_TYPE(TYPE),
-	[BRB_OP_ZERO]      = SET_BASE_OP(ZERO)    | SET_OPERAND_TYPE(TYPE),
-	[BRB_OP_COPY]      = SET_BASE_OP(COPY)    | SET_OPERAND_TYPE(VAR_NAME),
-	[BRB_OP_COPYTO]    = SET_BASE_OP(COPY),
+	[BRB_OP_NOP]       = 0,
+	[BRB_OP_END]       = 0,
+	[BRB_OP_I8]        = SET_OPERAND_TYPE(INT8),
+	[BRB_OP_I16]       = SET_OPERAND_TYPE(INT),
+	[BRB_OP_I32]       = SET_OPERAND_TYPE(INT),
+	[BRB_OP_PTR]       = SET_OPERAND_TYPE(INT),
+	[BRB_OP_I64]       = SET_OPERAND_TYPE(INT),
+	[BRB_OP_ADDR]      = SET_OPERAND_TYPE(VAR_NAME),
+	[BRB_OP_DBADDR]    = SET_OPERAND_TYPE(DB_NAME),
+	[BRB_OP_SYS]       = SET_OPERAND_TYPE(SYSCALL_NAME),
+	[BRB_OP_BUILTIN]   = SET_OPERAND_TYPE(BUILTIN),
+	[BRB_OP_ADD]       = 0,
+	[BRB_OP_ADDI]      = SET_OPERAND_TYPE(INT),
+	[BRB_OP_ADDIAT8]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_ADDIAT16]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_ADDIAT32]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_ADDIATP]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_ADDIAT64]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_SUB]       = 0,
+	[BRB_OP_SUBI]      = SET_OPERAND_TYPE(INT),
+	[BRB_OP_SUBIAT8]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_SUBIAT16]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_SUBIAT32]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_SUBIATP]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_SUBIAT64]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_MUL]       = 0,
+	[BRB_OP_MULI]      = SET_OPERAND_TYPE(INT),
+	[BRB_OP_MULIAT8]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_MULIAT16]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_MULIAT32]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_MULIATP]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_MULIAT64]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_DIV]       = 0,
+	[BRB_OP_DIVI]      = SET_OPERAND_TYPE(INT),
+	[BRB_OP_DIVIAT8]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_DIVIAT16]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_DIVIAT32]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_DIVIATP]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_DIVIAT64]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_DIVS]      = 0,
+	[BRB_OP_DIVSI]     = SET_OPERAND_TYPE(INT),
+	[BRB_OP_DIVSIAT8]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_DIVSIAT16] = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_DIVSIAT32] = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_DIVSIATP]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_DIVSIAT64] = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_MOD]       = 0,
+	[BRB_OP_MODI]      = SET_OPERAND_TYPE(INT),
+	[BRB_OP_MODIAT8]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_MODIAT16]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_MODIAT32]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_MODIATP]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_MODIAT64]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_MODS]      = 0,
+	[BRB_OP_MODSI]     = SET_OPERAND_TYPE(INT),
+	[BRB_OP_MODSIAT8]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_MODSIAT16] = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_MODSIAT32] = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_MODSIATP]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_MODSIAT64] = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_AND]       = 0,
+	[BRB_OP_ANDI]      = SET_OPERAND_TYPE(INT),
+	[BRB_OP_ANDIAT8]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_ANDIAT16]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_ANDIAT32]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_ANDIATP]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_ANDIAT64]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_OR]        = 0,
+	[BRB_OP_ORI]       = SET_OPERAND_TYPE(INT),
+	[BRB_OP_ORIAT8]    = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_ORIAT16]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_ORIAT32]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_ORIATP]    = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_ORIAT64]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_XOR]       = 0,
+	[BRB_OP_XORI]      = SET_OPERAND_TYPE(INT),
+	[BRB_OP_XORIAT8]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_XORIAT16]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_XORIAT32]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_XORIATP]   = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_XORIAT64]  = SET_OPERAND_TYPE(INT) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_SHL]       = 0,
+	[BRB_OP_SHLI]      = SET_OPERAND_TYPE(INT8),
+	[BRB_OP_SHLIAT8]   = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_SHLIAT16]  = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_SHLIAT32]  = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_SHLIATP]   = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_SHLIAT64]  = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_SHR]       = 0,
+	[BRB_OP_SHRI]      = SET_OPERAND_TYPE(INT8),
+	[BRB_OP_SHRIAT8]   = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_SHRIAT16]  = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_SHRIAT32]  = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_SHRIATP]   = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_SHRIAT64]  = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_SHRS]      = 0,
+	[BRB_OP_SHRSI]     = SET_OPERAND_TYPE(INT8),
+	[BRB_OP_SHRSIAT8]  = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_SHRSIAT16] = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_SHRSIAT32] = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_SHRSIATP]  = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_SHRSIAT64] = SET_OPERAND_TYPE(INT8) | SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_NOT]       = 0,
+	[BRB_OP_NOTAT8]    = SET_ADDR_OP_TYPE(I8),
+	[BRB_OP_NOTAT16]   = SET_ADDR_OP_TYPE(I16),
+	[BRB_OP_NOTAT32]   = SET_ADDR_OP_TYPE(I32),
+	[BRB_OP_NOTATP]    = SET_ADDR_OP_TYPE(PTR),
+	[BRB_OP_NOTAT64]   = SET_ADDR_OP_TYPE(I64),
+	[BRB_OP_DROP]      = 0,
+	[BRB_OP_NEW]       = SET_OPERAND_TYPE(TYPE),
+	[BRB_OP_ZERO]      = SET_OPERAND_TYPE(TYPE),
+	[BRB_OP_GET]       = SET_OPERAND_TYPE(VAR_NAME),
+	[BRB_OP_SETAT]     = 0,
+	[BRB_OP_GETFROM]   = SET_OPERAND_TYPE(TYPE),
+	[BRB_OP_COPY]      = SET_OPERAND_TYPE(TYPE)
 };
 static_assert(sizeof(BRB_opFlags) / sizeof(BRB_opFlags[0]) == BRB_N_OPS, "not all BRB operations have their flags defined");
 
@@ -833,18 +832,19 @@ BRB_Error BRB_addProc(BRB_ModuleBuilder* builder, BRB_id* proc_id_p, const char*
 	return builder->error = (BRB_Error){.type = BRB_StackNodeArray_append(arrayhead(builder->procs), input) ? 0 : BRB_ERR_NO_MEMORY};
 }
 
-BRB_Type _tctor_inputType(BRB_Op op, BRB_StackNode stack) {
+static BRB_Type _tctor_inputType(BRB_Op op, BRB_StackNode stack) {
 	return op.operand_type;
 }
-BRB_Type _tctor_stackHeadType(BRB_Op op, BRB_StackNode stack) {
+
+static BRB_Type _tctor_stackHeadType(BRB_Op op, BRB_StackNode stack) {
 	return stack->type;
 }
 
-BRB_Type _tctor_typeOfInputStackItem(BRB_Op op, BRB_StackNode stack) {
+static BRB_Type _tctor_typeOfInputStackItem(BRB_Op op, BRB_StackNode stack) {
 	return getNthStackNode_nonInternal(stack, op.operand_u)->type;
 }
 
-BRB_Type _tctor_2ndStackItemType(BRB_Op op, BRB_StackNode stack) {
+static BRB_Type _tctor_2ndStackItemType(BRB_Op op, BRB_StackNode stack) {
 	return stack->prev->type;
 }
 
@@ -861,8 +861,6 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_I64]       = 0,
 		[BRB_OP_ADDR]      = 0,
 		[BRB_OP_DBADDR]    = 0,
-		[BRB_OP_LD]        = 1,
-		[BRB_OP_STR]       = 2,
 		[BRB_OP_SYS]       = 0, // needs to be set manually every time, depending on the system function in question
 		[BRB_OP_BUILTIN]   = 0,
 		[BRB_OP_ADD]       = 2,
@@ -965,8 +963,10 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_DROP]      = 1,
 		[BRB_OP_NEW]       = 0,
 		[BRB_OP_ZERO]      = 0,
-		[BRB_OP_COPY]      = 0,
-		[BRB_OP_COPYTO]    = 2
+		[BRB_OP_GET]       = 0,
+		[BRB_OP_SETAT]     = 2,
+		[BRB_OP_GETFROM]   = 1,
+		[BRB_OP_COPY]      = 2
 	};
 	static BRB_Type in_types[][3] = {
 		[BRB_OP_NOP]       = { BRB_VOID_TYPE },
@@ -978,8 +978,6 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_I64]       = { BRB_VOID_TYPE },
 		[BRB_OP_ADDR]      = { BRB_VOID_TYPE },
 		[BRB_OP_DBADDR]    = { BRB_VOID_TYPE },
-		[BRB_OP_LD]        = { BRB_PTR_TYPE(1) },
-		[BRB_OP_STR]       = { BRB_PTR_TYPE(1), BRB_ANY_TYPE(1) },
 		[BRB_OP_SYS]       = { BRB_VOID_TYPE }, // needs to be set manually every time, depending on the system function in question
 		[BRB_OP_BUILTIN]   = { BRB_VOID_TYPE },
 		[BRB_OP_ADD]       = { BRB_INT_TYPE(1), BRB_INT_TYPE(1) },
@@ -1082,8 +1080,10 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_DROP]      = { BRB_ANY_TYPE(1) },
 		[BRB_OP_NEW]       = { BRB_VOID_TYPE },
 		[BRB_OP_ZERO]      = { BRB_VOID_TYPE },
-		[BRB_OP_COPY]      = { BRB_VOID_TYPE },
-		[BRB_OP_COPYTO]    = { BRB_PTR_TYPE(1), BRB_ANY_TYPE(1) }
+		[BRB_OP_GET]       = { BRB_VOID_TYPE },
+		[BRB_OP_SETAT]     = { BRB_PTR_TYPE(1), BRB_ANY_TYPE(1) },
+		[BRB_OP_GETFROM]   = { BRB_PTR_TYPE(1) },
+		[BRB_OP_COPY]      = { BRB_PTR_TYPE(1), BRB_PTR_TYPE(1) }
 	};
 	static_assert(BRB_N_OPS == 115, "not all BRB operations have their input types defined");
 	static uint8_t n_out[] = {
@@ -1096,8 +1096,6 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_I64]       = 1,
 		[BRB_OP_ADDR]      = 1,
 		[BRB_OP_DBADDR]    = 1,
-		[BRB_OP_LD]        = 1,
-		[BRB_OP_STR]       = 0,
 		[BRB_OP_SYS]       = 1,
 		[BRB_OP_BUILTIN]   = 1,
 		[BRB_OP_ADD]       = 1,
@@ -1200,8 +1198,10 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_DROP]      = 0,
 		[BRB_OP_NEW]       = 1,
 		[BRB_OP_ZERO]      = 1,
-		[BRB_OP_COPY]      = 1,
-		[BRB_OP_COPYTO]    = 1
+		[BRB_OP_GET]       = 1,
+		[BRB_OP_SETAT]     = 1,
+		[BRB_OP_GETFROM]   = 1,
+		[BRB_OP_COPY]      = 1
 	};
 	static BRB_Type out_types[][1] = {
 		[BRB_OP_NOP]       = { BRB_VOID_TYPE },
@@ -1213,8 +1213,6 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_I64]       = { BRB_I64_TYPE(1) },
 		[BRB_OP_ADDR]      = { BRB_PTR_TYPE(1) },
 		[BRB_OP_DBADDR]    = { BRB_PTR_TYPE(1) },
-		[BRB_OP_LD]        = { BRB_DYN_TYPE(_tctor_inputType) },
-		[BRB_OP_STR]       = { BRB_VOID_TYPE },
 		[BRB_OP_SYS]       = { BRB_PTR_TYPE(1) },
 		[BRB_OP_BUILTIN]   = { BRB_PTR_TYPE(1) },
 		[BRB_OP_ADD]       = { BRB_DYN_TYPE(_tctor_stackHeadType) },
@@ -1317,21 +1315,69 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 		[BRB_OP_DROP]      = { BRB_VOID_TYPE },
 		[BRB_OP_NEW]       = { BRB_DYN_TYPE(_tctor_inputType) },
 		[BRB_OP_ZERO]      = { BRB_DYN_TYPE(_tctor_inputType) },
-		[BRB_OP_COPY]      = { BRB_DYN_TYPE(_tctor_typeOfInputStackItem) },
-		[BRB_OP_COPYTO]    = { BRB_DYN_TYPE(_tctor_2ndStackItemType) }
+		[BRB_OP_GET]       = { BRB_DYN_TYPE(_tctor_typeOfInputStackItem) },
+		[BRB_OP_SETAT]     = { BRB_DYN_TYPE(_tctor_2ndStackItemType) },
+		[BRB_OP_GETFROM]   = { BRB_DYN_TYPE(_tctor_inputType) },
+		[BRB_OP_COPY]      = { BRB_PTR_TYPE(1) }
 	};
 	static_assert(BRB_N_OPS == 115, "not all BRB operations have their output types defined");
 	static uint8_t sys_n_in[] = {
-		[BRB_SYS_EXIT] = 1,
+		[BRB_SYS_EXIT]  = 1,
 		[BRB_SYS_WRITE] = 3,
-		[BRB_SYS_READ] = 3
+		[BRB_SYS_READ]  = 3
 	};
 	static BRB_Type sys_in_types[][3] = {
-		[BRB_SYS_EXIT] = { BRB_PTR_TYPE(1) },
+		[BRB_SYS_EXIT]  = { BRB_PTR_TYPE(1) },
 		[BRB_SYS_WRITE] = { BRB_PTR_TYPE(1), BRB_PTR_TYPE(1), BRB_PTR_TYPE(1) },
-		[BRB_SYS_READ] = { BRB_PTR_TYPE(1), BRB_PTR_TYPE(1), BRB_PTR_TYPE(1) }
+		[BRB_SYS_READ]  = { BRB_PTR_TYPE(1), BRB_PTR_TYPE(1), BRB_PTR_TYPE(1) }
 	};
 	static_assert(BRB_N_SYSCALLS == 3, "not all BRB syscalls have their input types defined");
+	static const bool may_overflow_div[BRB_N_OPS] = {
+		[BRB_OP_DIVI]      = true,
+		[BRB_OP_DIVIAT8]   = true,
+		[BRB_OP_DIVIAT16]  = true,
+		[BRB_OP_DIVIAT32]  = true,
+		[BRB_OP_DIVIATP]   = true,
+		[BRB_OP_DIVIAT64]  = true,
+		[BRB_OP_DIVSI]     = true,
+		[BRB_OP_DIVSIAT8]  = true,
+		[BRB_OP_DIVSIAT16] = true,
+		[BRB_OP_DIVSIAT32] = true,
+		[BRB_OP_DIVSIATP]  = true,
+		[BRB_OP_DIVSIAT64] = true,
+		[BRB_OP_MODI]      = true,
+		[BRB_OP_MODIAT8]   = true,
+		[BRB_OP_MODIAT16]  = true,
+		[BRB_OP_MODIAT32]  = true,
+		[BRB_OP_MODIATP]   = true,
+		[BRB_OP_MODIAT64]  = true,
+		[BRB_OP_MODSI]     = true,
+		[BRB_OP_MODSIAT8]  = true,
+		[BRB_OP_MODSIAT16] = true,
+		[BRB_OP_MODSIAT32] = true,
+		[BRB_OP_MODSIATP]  = true,
+		[BRB_OP_MODSIAT64] = true
+	};
+	static const bool may_overflow_shift[BRB_N_OPS] = {
+		[BRB_OP_SHLI]      = true,
+		[BRB_OP_SHLIAT8]   = true,
+		[BRB_OP_SHLIAT16]  = true,
+		[BRB_OP_SHLIAT32]  = true,
+		[BRB_OP_SHLIATP]   = true,
+		[BRB_OP_SHLIAT64]  = true,
+		[BRB_OP_SHRI]      = true,
+		[BRB_OP_SHRIAT8]   = true,
+		[BRB_OP_SHRIAT16]  = true,
+		[BRB_OP_SHRIAT32]  = true,
+		[BRB_OP_SHRIATP]   = true,
+		[BRB_OP_SHRIAT64]  = true,
+		[BRB_OP_SHRSI]     = true,
+		[BRB_OP_SHRSIAT8]  = true,
+		[BRB_OP_SHRSIAT16] = true,
+		[BRB_OP_SHRSIAT32] = true,
+		[BRB_OP_SHRSIATP]  = true,
+		[BRB_OP_SHRSIAT64] = true
+	};
 // resolving where to add the operation
 	if (builder->error.type) return builder->error;
 	BRB_OpArray* body;
@@ -1378,23 +1424,10 @@ BRB_Error BRB_addOp(BRB_ModuleBuilder* builder, BRB_id proc_id, BRB_Op op)
 	} else if (op.type == BRB_OP_BUILTIN && op.operand_u >= BRB_N_BUILTINS) {
 		--body->length;
 		return builder->error = (BRB_Error){ .type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = BRB_OP_BUILTIN, .operand = op.operand_u };
-	} else if (
-			(BRB_GET_BASE_OP_TYPE(op.type) == BRB_OP_DIV
-			 || BRB_GET_BASE_OP_TYPE(op.type) == BRB_OP_DIVS
-			 || BRB_GET_BASE_OP_TYPE(op.type) == BRB_OP_MOD
-			 || BRB_GET_BASE_OP_TYPE(op.type) == BRB_OP_MODS)
-			&& BRB_GET_OPERAND_TYPE(op.type) == BRB_OPERAND_INT
-			&& op.operand_u == 0
-		  ) {
+	} else if (may_overflow_div[op.type] && op.operand_u == 0) {
 		--body->length;
 		return builder->error = (BRB_Error){ .type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = op.type, .operand = 0 };
-	} else if (
-			(BRB_GET_BASE_OP_TYPE(op.type) == BRB_OP_SHL
-			 || BRB_GET_BASE_OP_TYPE(op.type) == BRB_OP_SHR
-			 || BRB_GET_BASE_OP_TYPE(op.type) == BRB_OP_SHRS)
-			&& BRB_GET_OPERAND_TYPE(op.type) == BRB_OPERAND_INT8
-			&& op.operand_u >= 64
-		  ) {
+	} else if (may_overflow_shift[op.type] && op.operand_u >= 64) {
 		--body->length;
 		return builder->error = (BRB_Error){ .type = BRB_ERR_OPERAND_OUT_OF_RANGE, .opcode = op.type, .operand = op.operand_u };
 	} else if (op.type >= BRB_N_OPS) {
@@ -1644,7 +1677,7 @@ BRB_Error BRB_addStruct(BRB_ModuleBuilder* builder, BRB_id* struct_id_p, const c
 // copying the fields
 	if (!(obj->fields = BRB_TypeArray_copy((BRB_TypeArray){.length = n_fields, .data = fields})).data)
 		return builder->error = (BRB_Error){.type = BRB_ERR_NO_MEMORY};
-// validating that the type isn't recursive, as a struct that has a field of the same type as the struct itself has undefined size 
+// validating that the type isn't recursive, as a struct that has a field of the same type as the struct itself has undefined size
 // example in C: struct x { struct x field; };
 	arrayForeach (BRB_Type, field, obj->fields) {
 		builder->error = validateType(&builder->module, field);

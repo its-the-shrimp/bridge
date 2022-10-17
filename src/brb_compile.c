@@ -263,9 +263,6 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 				+ fputstr(ctx->dst, "@PAGEOFF\n")
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 9, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr\tx8, %s\n", offset_s);
-		case BRB_OP_LD:
-		case BRB_OP_STR:
-			assert(false, "deprecated operation, as in I don't care about it anymore");
 		case BRB_OP_SYS: {
 			static sbuf sys_to_proc_name[] = {
 				[BRB_SYS_EXIT] = fromcstr("\tbl\t_exit\n"),
@@ -424,23 +421,109 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 		case BRB_OP_NOTAT32:
 		case BRB_OP_NOTATP:
 		case BRB_OP_NOTAT64: {
+			static const BRB_OpType base_op[] = {
+				[BRB_OP_ADDI]      = BRB_OP_ADD,
+				[BRB_OP_SUBI]      = BRB_OP_SUB,
+				[BRB_OP_MULI]      = BRB_OP_MUL,
+				[BRB_OP_DIVI]      = BRB_OP_DIV,
+				[BRB_OP_DIVSI]     = BRB_OP_DIVS,
+				[BRB_OP_MODI]      = BRB_OP_MOD,
+				[BRB_OP_MODSI]     = BRB_OP_MODS,
+				[BRB_OP_ANDI]      = BRB_OP_AND,
+				[BRB_OP_ORI]       = BRB_OP_OR,
+				[BRB_OP_XORI]      = BRB_OP_XOR,
+				[BRB_OP_SHLI]      = BRB_OP_SHL,
+				[BRB_OP_SHRI]      = BRB_OP_SHR,
+				[BRB_OP_SHRSI]     = BRB_OP_SHRS,
+				[BRB_OP_NOT]       = BRB_OP_NOT,
+				[BRB_OP_ADDIAT8]   = BRB_OP_ADD,
+				[BRB_OP_ADDIAT16]  = BRB_OP_ADD,
+				[BRB_OP_ADDIAT32]  = BRB_OP_ADD,
+				[BRB_OP_ADDIATP]   = BRB_OP_ADD,
+				[BRB_OP_ADDIAT64]  = BRB_OP_ADD,
+				[BRB_OP_SUBIAT8]   = BRB_OP_SUB,
+				[BRB_OP_SUBIAT16]  = BRB_OP_SUB,
+				[BRB_OP_SUBIAT32]  = BRB_OP_SUB,
+				[BRB_OP_SUBIATP]   = BRB_OP_SUB,
+				[BRB_OP_SUBIAT64]  = BRB_OP_SUB,
+				[BRB_OP_MULIAT8]   = BRB_OP_MUL,
+				[BRB_OP_MULIAT16]  = BRB_OP_MUL,
+				[BRB_OP_MULIAT32]  = BRB_OP_MUL,
+				[BRB_OP_MULIATP]   = BRB_OP_MUL,
+				[BRB_OP_MULIAT64]  = BRB_OP_MUL,
+				[BRB_OP_DIVIAT8]   = BRB_OP_DIV,
+				[BRB_OP_DIVIAT16]  = BRB_OP_DIV,
+				[BRB_OP_DIVIAT32]  = BRB_OP_DIV,
+				[BRB_OP_DIVIATP]   = BRB_OP_DIV,
+				[BRB_OP_DIVIAT64]  = BRB_OP_DIV,
+				[BRB_OP_DIVSIAT8]  = BRB_OP_DIVS,
+				[BRB_OP_DIVSIAT16] = BRB_OP_DIVS,
+				[BRB_OP_DIVSIAT32] = BRB_OP_DIVS,
+				[BRB_OP_DIVSIATP]  = BRB_OP_DIVS,
+				[BRB_OP_DIVSIAT64] = BRB_OP_DIVS,
+				[BRB_OP_MODIAT8]   = BRB_OP_MOD,
+				[BRB_OP_MODIAT16]  = BRB_OP_MOD,
+				[BRB_OP_MODIAT32]  = BRB_OP_MOD,
+				[BRB_OP_MODIATP]   = BRB_OP_MOD,
+				[BRB_OP_MODIAT64]  = BRB_OP_MOD,
+				[BRB_OP_MODSIAT8]  = BRB_OP_MODS,
+				[BRB_OP_MODSIAT16] = BRB_OP_MODS,
+				[BRB_OP_MODSIAT32] = BRB_OP_MODS,
+				[BRB_OP_MODSIATP]  = BRB_OP_MODS,
+				[BRB_OP_MODSIAT64] = BRB_OP_MODS,
+				[BRB_OP_ANDIAT8]   = BRB_OP_AND,
+				[BRB_OP_ANDIAT16]  = BRB_OP_AND,
+				[BRB_OP_ANDIAT32]  = BRB_OP_AND,
+				[BRB_OP_ANDIATP]   = BRB_OP_AND,
+				[BRB_OP_ANDIAT64]  = BRB_OP_AND,
+				[BRB_OP_ORIAT8]    = BRB_OP_OR,
+				[BRB_OP_ORIAT16]   = BRB_OP_OR,
+				[BRB_OP_ORIAT32]   = BRB_OP_OR,
+				[BRB_OP_ORIATP]    = BRB_OP_OR,
+				[BRB_OP_ORIAT64]   = BRB_OP_OR,
+				[BRB_OP_XORIAT8]   = BRB_OP_XOR,
+				[BRB_OP_XORIAT16]  = BRB_OP_XOR,
+				[BRB_OP_XORIAT32]  = BRB_OP_XOR,
+				[BRB_OP_XORIATP]   = BRB_OP_XOR,
+				[BRB_OP_XORIAT64]  = BRB_OP_XOR,
+				[BRB_OP_SHLIAT8]   = BRB_OP_SHL,
+				[BRB_OP_SHLIAT16]  = BRB_OP_SHL,
+				[BRB_OP_SHLIAT32]  = BRB_OP_SHL,
+				[BRB_OP_SHLIATP]   = BRB_OP_SHL,
+				[BRB_OP_SHLIAT64]  = BRB_OP_SHL,
+				[BRB_OP_SHRIAT8]   = BRB_OP_SHR,
+				[BRB_OP_SHRIAT16]  = BRB_OP_SHR,
+				[BRB_OP_SHRIAT32]  = BRB_OP_SHR,
+				[BRB_OP_SHRIATP]   = BRB_OP_SHR,
+				[BRB_OP_SHRIAT64]  = BRB_OP_SHR,
+				[BRB_OP_SHRSIAT8]  = BRB_OP_SHRS,
+				[BRB_OP_SHRSIAT16] = BRB_OP_SHRS,
+				[BRB_OP_SHRSIAT32] = BRB_OP_SHRS,
+				[BRB_OP_SHRSIATP]  = BRB_OP_SHRS,
+				[BRB_OP_SHRSIAT64] = BRB_OP_SHRS,
+				[BRB_OP_NOTAT8]    = BRB_OP_NOT,
+				[BRB_OP_NOTAT16]   = BRB_OP_NOT,
+				[BRB_OP_NOTAT32]   = BRB_OP_NOT,
+				[BRB_OP_NOTATP]    = BRB_OP_NOT,
+				[BRB_OP_NOTAT64]   = BRB_OP_NOT
+			};
 			static const char* native_op[] = {
-				[BRB_OP_ADDI]  = "\tadd\tx8, x8, %s\n",
-				[BRB_OP_SUBI]  = "\tsub\tx8, x8, %s\n",
-				[BRB_OP_MULI]  = "\tmul\tx8, x8, %s\n",
-				[BRB_OP_DIVI]  = "\tudiv\tx8, x8, %s\n",
-				[BRB_OP_DIVSI] = "\tsdiv\tx8, x8, %s\n",
-				[BRB_OP_MODI]  = "\tudiv\tx11, x8, %s\n"
-						 "\tmsub\tx8, x11, x10, x8\n",
-				[BRB_OP_MODSI] = "\tsdiv\tx11, x8, %s\n"
-						 "\tmsub\tx8, x11, x10, x8\n",
-				[BRB_OP_ANDI]  = "\tand\tx8, x8, %s\n",
-				[BRB_OP_ORI]   = "\torr\tx8, x8, %s\n",
-				[BRB_OP_XORI]  = "\teor\tx8, x8, %s\n",
-				[BRB_OP_SHLI]  = "\tlsl\tx8, x8, %s\n",
-				[BRB_OP_SHRI]  = "\tlsr\tx8, x8, %s\n",
-				[BRB_OP_SHRSI] = "\tasr\tx8, x8, %s\n",
-				[BRB_OP_NOT]   = "\tmvn\tx8, x8%s\n"
+				[BRB_OP_ADD]  = "\tadd\tx8, x8, %s\n",
+				[BRB_OP_SUB]  = "\tsub\tx8, x8, %s\n",
+				[BRB_OP_MUL]  = "\tmul\tx8, x8, %s\n",
+				[BRB_OP_DIV]  = "\tudiv\tx8, x8, %s\n",
+				[BRB_OP_DIVS] = "\tsdiv\tx8, x8, %s\n",
+				[BRB_OP_MOD]  = "\tudiv\tx14, x8, %s\n"
+						"\tmsub\tx8, x14, x10, x8\n",
+				[BRB_OP_MODS] = "\tsdiv\tx14, x8, %s\n"
+						"\tmsub\tx8, x14, x10, x8\n",
+				[BRB_OP_AND]  = "\tand\tx8, x8, %s\n",
+				[BRB_OP_OR]   = "\torr\tx8, x8, %s\n",
+				[BRB_OP_XOR]  = "\teor\tx8, x8, %s\n",
+				[BRB_OP_SHL]  = "\tlsl\tx8, x8, %s\n",
+				[BRB_OP_SHR]  = "\tlsr\tx8, x8, %s\n",
+				[BRB_OP_SHRS] = "\tasr\tx8, x8, %s\n",
+				[BRB_OP_NOT]  = "\tmvn\tx8, x8%s\n"
 			};
 			static const arm64_ImmValueRule op2_placement[] = {
 				[BRB_OP_ADD]  = ARM64_ADDSUB_RULE,
@@ -464,12 +547,12 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 				+ getStackAddr_arm64(ctx, sp, vframe_offset_before, 9, &reg_ctx, addr_rules[op_size], sizeof(offset_s), offset_s)
 				+ (BRB_GET_ADDR_OP_TYPE(op->type) == 0 ? 0
 					: fprintf(ctx->dst, "\tldr\tx11, %s\n", offset_s))
-				+ fprintf(ctx->dst, "\tldr%s8, %s\n",
-					op_postfix[op_size], BRB_GET_ADDR_OP_TYPE(op->type) ? offset_s : "[x11]")
-				+ compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[BRB_GET_BASE_OP_TYPE(op->type)], sizeof(value_s), value_s)
-				+ fprintf(ctx->dst, native_op[op->type], value_s)
+				+ fprintf(ctx->dst, "\tldr%s8, %s\n", op_postfix[op_size], BRB_GET_ADDR_OP_TYPE(op->type) == 0 ? offset_s : "[x11]")
+				+ compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[base_op[op->type]], sizeof(value_s), value_s)
+				+ fprintf(ctx->dst, native_op[base_op[op->type]], value_s)
 				+ (BRB_GET_ADDR_OP_TYPE(op->type) == 0 ? 0
-					: getStackAddr_arm64(ctx, sp, vframe_offset, 9, &reg_ctx, addr_rules[op_size], sizeof(offset_s), offset_s))
+					: fprintf(ctx->dst, "\tstr%s8, [x11]\n", op_postfix[op_size]))
+				+ getStackAddr_arm64(ctx, sp, vframe_offset, 9, (reg_ctx.last_use = true, &reg_ctx), addr_rules[op_size], sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr%s8, %s\n", op_postfix[op_size], offset_s);
 		}
 		case BRB_OP_DROP:
@@ -504,156 +587,144 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 					+ fprintf(ctx->dst, "\tstrh\twzr, %s\n", offset_s);
 				span -= 2;
 			}
+			reg_ctx.last_use = true;
 			if (span)
 				acc += getStackAddr_arm64(ctx, sp, vframe_offset + (orig_span - span), 8, &reg_ctx, AOR_LDR8, sizeof(offset_s), offset_s)
 					+ fprintf(ctx->dst, "\tstrb\twzr, %s\n", offset_s);
-		}
-		case BRB_OP_COPY: {
-			size_t  span = vframe_offset_before - vframe_offset,
-				orig_span = span;
-			arm64_RegCtx reg_ctx = {0};
-			uint8_t n_regs = 0;
-			vframe_offset_before += BRB_getStackItemRTOffset(&ctx->builder, proc_id, op_id - 1, op->operand_u);
-			if (span > 511) // 511 bytes is the maximum size of the object that can be copied without using `memcpy`
-				return acc
-					+ compileIntLiteral_arm64(ctx->dst, vframe_offset, 0, ARM64_ADDSUB_RULE, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tadd\tx0, %s, %s\n", sp, offset_s)
-					+ compileIntLiteral_arm64(ctx->dst, vframe_offset_before, 1, ARM64_ADDSUB_RULE, sizeof(offset_s), offset_s) 
-					+ fprintf(ctx->dst, "\tadd\tx1, %s, %s\n", sp, offset_s)
-					+ compileIntLiteral_arm64(ctx->dst, span, 2, ARM64_REGONLY_RULE, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tbl\t_memcpy\n");
-			while (span >= 32) {
-				const uint8_t reg1 = n_regs++;
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDP128, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldp\tq%u, q%u, %s\n", reg1, n_regs++, offset_s);
-				span -= 32;
-			}
-			if (span >= 16) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR128, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldr\tq%u, %s\n", n_regs++, offset_s);
-				span -= 16;
-			}
-			if (span >= 8) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldr\td%u, %s\n", n_regs++, offset_s);
-				span -= 8;
-			}
-			if (span >= 4) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR32, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldr\tw9, %s\n", offset_s);
-				span -= 4;
-			}
-			if (span >= 2) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR16, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldrh\tw10, %s\n", offset_s);
-				span -= 2;
-			}
-			if (span) 
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR8, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldrb\tw11, %s\n", offset_s);
-			span = orig_span;
-			n_regs = 0;
-			while (span >= 32) {
-				uint8_t reg1 = n_regs++;
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDP128, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tstp\tq%u, q%u, %s\n", reg1, n_regs++, offset_s);
-				span -= 32;
-			}
-			if (span >= 16) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR128, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tstr\tq%u, %s\n", n_regs++, offset_s);
-				span -= 16;
-			}
-			if (span >= 8) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tstr\tq%u, %s\n", n_regs++, offset_s);
-				span -= 8;
-			}
-			if (span >= 4) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR32, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tstr\tw9, %s\n", offset_s);
-				span -= 4;
-			}
-			if (span >= 2) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR16, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tstrh\tw10, %s\n", offset_s);
-				span -= 2;
-			}
-			if (span) 
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR8, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tstrb\tw11, %s\n", offset_s);
 			return acc;
 		}
-		case BRB_OP_COPYTO: {
+		case BRB_OP_GET:
+		case BRB_OP_SETAT:
+		case BRB_OP_GETFROM:
+		case BRB_OP_COPY: {
+			static const bool output_to_stack[] = {
+				[BRB_OP_GET]     = true,
+				[BRB_OP_SETAT]   = false,
+				[BRB_OP_GETFROM] = true,
+				[BRB_OP_COPY]    = false
+			};
+			static const bool input_from_stack[] = {
+				[BRB_OP_GET]     = true,
+				[BRB_OP_SETAT]   = true,
+				[BRB_OP_GETFROM] = false,
+				[BRB_OP_COPY]    = false
+			};
 			size_t  span = BRB_getStackItemRTSize(&ctx->builder, proc_id, op_id, 0),
 				orig_span = span;
 			arm64_RegCtx reg_ctx = {0};
 			uint8_t n_regs = 0;
+			if (op->type != BRB_OP_GETFROM)
+				vframe_offset_before += op->type == BRB_OP_GET ? BRB_getStackItemRTOffset(&ctx->builder, proc_id, op_id - 1, op->operand_u) : 8;
 			if (span > 511) // 511 bytes is the maximum size of the object that can be copied without using `memcpy`
 				return acc
-					+ getStackAddr_arm64(ctx, sp, vframe_offset_before, 0, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldr\tx0, %s\n", offset_s)
-					+ compileIntLiteral_arm64(ctx->dst, vframe_offset, 1, ARM64_ADDSUB_RULE, sizeof(offset_s), offset_s) 
-					+ fprintf(ctx->dst, "\tadd\tx1, %s, %s\n", sp, offset_s)
+					+ (output_to_stack[op->type]
+						? compileIntLiteral_arm64(ctx->dst, vframe_offset, 0, ARM64_ADDSUB_RULE, sizeof(offset_s), offset_s)
+							+ fprintf(ctx->dst, "\tadd\tx0, %s, %s\n", sp, offset_s)
+						: getStackAddr_arm64(ctx, sp, vframe_offset_before, 0, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
+							+ fprintf(ctx->dst, "\tldr\tx0, %s\n", offset_s))
+					+ (input_from_stack[op->type]
+						? compileIntLiteral_arm64(ctx->dst, vframe_offset_before, 1, ARM64_ADDSUB_RULE, sizeof(offset_s), offset_s)
+							+ fprintf(ctx->dst, "\tadd\tx1, %s, %s\n", sp, offset_s)
+						: getStackAddr_arm64(ctx, sp, vframe_offset_before, 1, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
+							+ fprintf(ctx->dst, "\tldr\tx1, %s\n", offset_s))
 					+ compileIntLiteral_arm64(ctx->dst, span, 2, ARM64_REGONLY_RULE, sizeof(offset_s), offset_s)
 					+ fprintf(ctx->dst, "\tbl\t_memcpy\n");
+			if (!input_from_stack[op->type])
+				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before, 8, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
+					+ fprintf(ctx->dst, "\tldr\tx8, %s\n", offset_s);
 			while (span >= 32) {
 				const uint8_t reg1 = n_regs++;
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset + (orig_span - span), 8, &reg_ctx, AOR_LDP128, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldp\tq%u, q%u, %s\n", reg1, n_regs++, offset_s);
+				acc += input_from_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDP128, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tldp\tq%u, q%u, %s\n", reg1, n_regs++, offset_s)
+					: fprintf(ctx->dst, "\tldp\tq%u q%u, [x8], 32\n", reg1, n_regs++);
 				span -= 32;
 			}
 			if (span >= 16) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset + (orig_span - span), 8, &reg_ctx, AOR_LDR128, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldr\tq%u, %s\n", n_regs++, offset_s);
+				acc += input_from_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR128, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tldr\tq%u, %s\n", n_regs++, offset_s)
+					: fprintf(ctx->dst, "\tldr\tq%u, [x8], 16\n", n_regs++);
 				span -= 16;
 			}
 			if (span >= 8) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset + (orig_span - span), 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldr\td%u, %s\n", n_regs++, offset_s);
+				acc += input_from_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tldr\td%u, %s\n", n_regs++, offset_s)
+					: fprintf(ctx->dst, "\tldr\td%u, [x8], 8\n", n_regs++);
 				span -= 8;
 			}
 			if (span >= 4) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset + (orig_span - span), 8, &reg_ctx, AOR_LDR32, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldr\tw9, %s\n", offset_s);
+				acc += input_from_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR32, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tldr\tw9, %s\n", offset_s)
+					: fprintf(ctx->dst, "\tldr\tw9, [x8], 4\n");
 				span -= 4;
 			}
 			if (span >= 2) {
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset + (orig_span - span), 8, &reg_ctx, AOR_LDR16, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldrh\tw10, %s\n", offset_s);
+				acc += input_from_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR16, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tldrh\tw10, %s\n", offset_s)
+					: fprintf(ctx->dst, "\tldrh\tw10, [x8], 2\n");
 				span -= 2;
 			}
 			if (span) 
-				acc += getStackAddr_arm64(ctx, sp, vframe_offset + (orig_span - span), 8, &reg_ctx, AOR_LDR8, sizeof(offset_s), offset_s)
-					+ fprintf(ctx->dst, "\tldrb\tw11, %s\n", offset_s);
+				acc += input_from_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR8, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tldrb\tw11, %s\n", offset_s)
+					: fprintf(ctx->dst, "\tldrb\tw11, [x8]\n");
 			span = orig_span;
 			n_regs = 0;
-			reg_ctx.last_use = true;
-			acc += getStackAddr_arm64(ctx, sp, vframe_offset_before, 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
-				+ fprintf(ctx->dst, "\tldr\tx8, %s\n", offset_s);
+			if (!output_to_stack[op->type])
+				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before - 8, 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
+					+ fprintf(ctx->dst, "\tldr\tx8, %s\n", offset_s)
+					+ (op->type != BRB_OP_COPY ? 0
+						: fprintf(ctx->dst, "\tmov\tx14, x8\n"));
 			while (span >= 32) {
-				const uint8_t reg1 = n_regs++;
-				acc += fprintf(ctx->dst, "\tstp\tq%u, q%u, [x8], 32\n", reg1, n_regs++);
+				uint8_t reg1 = n_regs++;
+				acc += output_to_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDP128, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tstp\tq%u, q%u, %s\n", reg1, n_regs++, offset_s)
+					: fprintf(ctx->dst, "\tstp\tq%u, q%u, [x8], 32\n", reg1, n_regs++);
 				span -= 32;
 			}
 			if (span >= 16) {
-				acc += fprintf(ctx->dst, "\tstr\tq%u, [x8], 16\n", n_regs++);
+				acc += output_to_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR128, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tstr\tq%u, %s\n", n_regs++, offset_s)
+					: fprintf(ctx->dst, "\tstr\tq%u, [x8], 16\n", n_regs++);
 				span -= 16;
 			}
 			if (span >= 8) {
-				acc += fprintf(ctx->dst, "\tstr\tq%u, [x8], 8\n", n_regs++);
+				acc += output_to_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tstr\td%u, %s\n", n_regs++, offset_s)
+					: fprintf(ctx->dst, "\tstr\td%u, [x8], 8\n", n_regs++);
 				span -= 8;
 			}
 			if (span >= 4) {
-				acc += fprintf(ctx->dst, "\tstr\tw9, [x8], 4\n");
+				acc += output_to_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR32, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tstr\tw9, %s\n", offset_s)
+					: fprintf(ctx->dst, "\tstr\tw9, [x8], 4\n");
 				span -= 4;
 			}
 			if (span >= 2) {
-				acc += fprintf(ctx->dst, "\tstrh\tw10, [x8], 2\n");
+				acc += output_to_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR16, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tstrh\tw10, %s\n", offset_s)
+					: fprintf(ctx->dst, "\tstrh\tw10, [x8], 2\n");
 				span -= 2;
 			}
+			reg_ctx.last_use = true;
 			if (span) 
-				acc += fprintf(ctx->dst, "\tstrb\tw11, [x8]\n");
+				acc += output_to_stack[op->type]
+					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR8, sizeof(offset_s), offset_s)
+						+ fprintf(ctx->dst, "\tstrb\tw11, %s\n", offset_s)
+					: fprintf(ctx->dst, "\tstrb\tw11, [x8]\n");
+			if (op->type == BRB_OP_COPY)
+				acc += getStackAddr_arm64(ctx, sp, vframe_offset, 8, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
+					+ fprintf(ctx->dst, "\tldr\tx14, %s\n", offset_s);
 			return acc;
 		}
 		case BRB_N_OPS:
