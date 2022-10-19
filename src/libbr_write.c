@@ -1,17 +1,17 @@
 // implementation for writing BRB modules into `.brb` files
-#include <brb.h>
+#include <br.h>
 
-defArray(BRB_Op);
-defArray(BRB_DataBlock);
+defArray(BR_Op);
+defArray(BR_DataBlock);
 
 typedef const char* str;
 declArray(str);
 defArray(str);
 typedef struct {
-	BRB_Module* src;
+	BR_Module* src;
 	FILE* dst;
 	strArray names;
-} BRB_ModuleWriter;
+} BR_ModuleWriter;
 
 static inline int writeInt8(FILE* fd, uint8_t x)
 {
@@ -157,7 +157,7 @@ static long write2Ints(FILE* fd, uint64_t x, uint64_t y)
 			+ writeInt64(fd, absInt(y));
 }
 
-static long writeType(FILE* dst, BRB_Type type)
+static long writeType(FILE* dst, BR_Type type)
 {
 	static uint8_t encoded[] = { // this is done to avoid calling `log2`
 		[1 << 0]  = 0,	
@@ -169,12 +169,12 @@ static long writeType(FILE* dst, BRB_Type type)
 		[1 << 6]  = 6
 	};
 	return writeInt(dst, type.n_items, encoded[type.kind])
-		+ (type.kind == BRB_TYPE_STRUCT
+		+ (type.kind == BR_TYPE_STRUCT
 			? writeIntOnly(dst, type.struct_id)
 			: 0);
 }
 
-static uint32_t getNameId(BRB_ModuleWriter* writer, const char* name)
+static uint32_t getNameId(BR_ModuleWriter* writer, const char* name)
 {
 	arrayForeach (str, iter, writer->names) {
 		if (streq(name, *iter)) return iter - writer->names.data;
@@ -183,7 +183,7 @@ static uint32_t getNameId(BRB_ModuleWriter* writer, const char* name)
 	return writer->names.length - 1;
 }
 
-static long writeDataBlockDecl(BRB_ModuleWriter* writer, BRB_DataBlock block)
+static long writeDataBlockDecl(BR_ModuleWriter* writer, BR_DataBlock block)
 {
 // writing the flags and the name ID
 	return writeInt(writer->dst, getNameId(writer, block.name), block.is_mutable)
@@ -191,88 +191,88 @@ static long writeDataBlockDecl(BRB_ModuleWriter* writer, BRB_DataBlock block)
 		+ writeIntOnly(writer->dst, block.body.length);
 }
 
-static long writeOp(BRB_ModuleWriter* writer, BRB_Op op)
+static long writeOp(BR_ModuleWriter* writer, BR_Op op)
 {
 // writing the type
 	long acc = writeInt8(writer->dst, op.type);
 // writing the operand, if needed
-	switch (BRB_GET_OPERAND_TYPE(op.type)) {
-		case BRB_OPERAND_INT8:
+	switch (BR_GET_OPERAND_TYPE(op.type)) {
+		case BR_OPERAND_INT8:
 			return acc + writeInt8(writer->dst, op.operand_u);
-		case BRB_OPERAND_INT:
-		case BRB_OPERAND_VAR_NAME:
-		case BRB_OPERAND_SYSCALL_NAME:
-		case BRB_OPERAND_BUILTIN:
+		case BR_OPERAND_INT:
+		case BR_OPERAND_VAR_NAME:
+		case BR_OPERAND_SYSCALL_NAME:
+		case BR_OPERAND_BUILTIN:
 			return acc + writeIntOnly(writer->dst, op.operand_u);
-		case BRB_OPERAND_DB_NAME:
+		case BR_OPERAND_DB_NAME:
 			return acc + writeIntOnly(writer->dst, ~op.operand_s);
-		case BRB_OPERAND_TYPE:
+		case BR_OPERAND_TYPE:
 			return acc + writeType(writer->dst, op.operand_type);
-		case BRB_OPERAND_NONE:
+		case BR_OPERAND_NONE:
 			return acc;
 		default:
 			assert(false, "invlalid operation type info");
 	}
 }
 
-static long writeProcDecl(BRB_ModuleWriter* writer, BRB_Proc proc)
+static long writeProcDecl(BR_ModuleWriter* writer, BR_Proc proc)
 {
 // writing the return type
 	long acc = writeType(writer->dst, proc.ret_type)
 // writing the name ID and amount of arguments
 		+ write2Ints(writer->dst, getNameId(writer, proc.name), proc.args.length);
 // writing the arguments
-	arrayForeach (BRB_Type, arg, proc.args) {
+	arrayForeach (BR_Type, arg, proc.args) {
 		acc += writeType(writer->dst, *arg);
 	}
 // writing the body size
 	return acc + writeIntOnly(writer->dst, proc.body.length);
 }
 
-static long writeStruct(BRB_ModuleWriter* writer, BRB_Struct obj)
+static long writeStruct(BR_ModuleWriter* writer, BR_Struct obj)
 {
 	long acc = write2Ints(writer->dst, getNameId(writer, obj.name), obj.fields.length);
-	arrayForeach (BRB_Type, field, obj.fields) {
+	arrayForeach (BR_Type, field, obj.fields) {
 		acc += writeType(writer->dst, *field);
 	}
 	return acc;
 }
 
-long BRB_writeModule(BRB_Module src, FILE* dst)
+long BR_writeModule(BR_Module src, FILE* dst)
 {
-	BRB_ModuleWriter writer = {
+	BR_ModuleWriter writer = {
 		.src = &src,
 		.dst = dst
 	};
 // writing the header
-	long acc = fputsbuf(dst, BRB_V1_HEADER)
+	long acc = fputsbuf(dst, BR_V1_HEADER)
 // writing the amount of structs
 		+ writeIntOnly(dst, src.seg_typeinfo.length)
 // writing the amount of data blocks and procedures
 		+ write2Ints(dst, src.seg_data.length, src.seg_exec.length);
 // writing the structs
-	arrayForeach (BRB_Struct, obj, src.seg_typeinfo) {
+	arrayForeach (BR_Struct, obj, src.seg_typeinfo) {
 		acc += writeStruct(&writer, *obj);
 	}
 // writing the data block declarations
-	arrayForeach (BRB_DataBlock, block, src.seg_data) {
+	arrayForeach (BR_DataBlock, block, src.seg_data) {
 		acc += writeDataBlockDecl(&writer, *block);
 	}
 // writing the procedure declarations
-	arrayForeach (BRB_Proc, proc, src.seg_exec) {
+	arrayForeach (BR_Proc, proc, src.seg_exec) {
 		acc += writeProcDecl(&writer, *proc);
 	}
 // writing the execution entry point
 	acc += writeIntOnly(dst, src.exec_entry_point);
 // writing the operations in the data blocks
-	arrayForeach (BRB_DataBlock, block, src.seg_data) {
-		arrayForeach (BRB_Op, op, block->body) {
+	arrayForeach (BR_DataBlock, block, src.seg_data) {
+		arrayForeach (BR_Op, op, block->body) {
 			acc += writeOp(&writer, *op);
 		}
 	}
 // writing the operations in the procedures
-	arrayForeach (BRB_Proc, proc, src.seg_exec) {
-		arrayForeach (BRB_Op, op, proc->body) {
+	arrayForeach (BR_Proc, proc, src.seg_exec) {
+		arrayForeach (BR_Op, op, proc->body) {
 			acc += writeOp(&writer, *op);
 		}
 	}

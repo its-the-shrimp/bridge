@@ -47,7 +47,7 @@ CFLAGS: list[str] = [
 	"-Werror", "-Wfatal-errors",
 	"-O3"
 ]
-LFLAGS: list[str] = ["-L", LIB, "-lbrb"]
+LFLAGS: list[str] = ["-L", LIB, "-lbr"]
 if not is_release:
 	CFLAGS[-1] = "-O0"
 	CFLAGS.append("-g")
@@ -57,9 +57,9 @@ if not LIB.exists(): LIB.mkdir(parents=True)
 if not BIN.exists(): BIN.mkdir(parents=True)
 
 if is_outdated(LIB/"libbrb.dylib", *SRC.glob("brb_*"), *INCLUDE.glob("*")):
-	exec_cmd("cc", *CFLAGS, "-c", *SRC.glob("brb_*.c"))
-	exec_cmd("cc", *CFLAGS, "-shared", "-o", LIB/"libbrb.dylib", *PWD.glob("brb_*.o"))
-	for path in PWD.glob("brb_*.o"): path.unlink()
+	exec_cmd("cc", *CFLAGS, "-c", *SRC.glob("libbr_*.c"))
+	exec_cmd("cc", *CFLAGS, "-shared", "-o", LIB/"libbr.dylib", *PWD.glob("libbr_*.o"))
+	for path in PWD.glob("libbr_*.o"): path.unlink()
 
 # if is_outdated(BIN/"bridge", SRC/"brc.c", *INCLUDE.glob("*")):
 #	exec_cmd("cc", *CFLAGS, *LFLAGS, "-o", BIN/"bridge", SRC/"brc.c")

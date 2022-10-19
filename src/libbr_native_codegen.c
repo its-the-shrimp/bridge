@@ -1,5 +1,5 @@
 // implementation for AOT compilation of BRB modules to native assembly code
-#include <brb.h>
+#include <br.h>
 #include <errno.h>
 #include <math.h>
 
@@ -155,7 +155,7 @@ typedef struct { // contains specification of valid immediate values for an addr
 #define ARM64_N_GP_REGS 29
 // even though x29 and x30 are considered general-purpose registers by the arm64 specs, in practice they are used for calling procedures, thus needing special handling
 typedef struct {
-	BRB_ModuleBuilder builder;
+	BR_ModuleBuilder builder;
 	FILE* dst;
 } arm64_CodegenCtx;
 
@@ -198,7 +198,7 @@ getStackAddr_arm64(arm64_CodegenCtx* ctx, const char* sp, uptr offset, u8 reg_id
 		+ 0 * snprintf(retbuf, retbuf_size, "[x%hhu]", reg_id);
 }
 
-static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32_t op_id, size_t vframe_offset, size_t vframe_offset_before, FILE* dst)
+static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BR_id proc_id, uint32_t op_id, size_t vframe_offset, size_t vframe_offset_before, FILE* dst)
 {
 	static arm64_AddrOffsetRule addr_rules[] = {
 		[1] = AOR_LDR8,
@@ -214,48 +214,48 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 		[16] = "\tq"
 	};
 	long acc = 0;
-	const BRB_Op* op = BRB_getOp(&ctx->builder.module, proc_id, op_id);
+	const BR_Op* op = BR_getOp(&ctx->builder.module, proc_id, op_id);
 	const char *sp = proc_id < 0 ? "x12" : "sp";
 	char offset_s[32], value_s[32];
 	switch (op->type) {
-		case BRB_OP_NOP:
+		case BR_OP_NOP:
 			return acc + fputstr(dst, "\tnop\n");
-		case BRB_OP_END:
+		case BR_OP_END:
 			return acc + fputstr(dst,
 				"\tmov\tx0,\t0\n"
 				"\tmov\tx16,\t1\n"
 				"\tsvc\t0\n");
-		case BRB_OP_I8:
-		case BRB_OP_I16:
-		case BRB_OP_I32:
-		case BRB_OP_PTR:
-		case BRB_OP_I64: {
+		case BR_OP_I8:
+		case BR_OP_I16:
+		case BR_OP_I32:
+		case BR_OP_PTR:
+		case BR_OP_I64: {
 			static arm64_AddrOffsetRule rules[] = {
-				[BRB_OP_I8]  = AOR_LDR8,
-				[BRB_OP_I16] = AOR_LDR16,
-				[BRB_OP_I32] = AOR_LDR32,
-				[BRB_OP_PTR] = AOR_LDR64,
-				[BRB_OP_I64] = AOR_LDR64,
+				[BR_OP_I8]  = AOR_LDR8,
+				[BR_OP_I16] = AOR_LDR16,
+				[BR_OP_I32] = AOR_LDR32,
+				[BR_OP_PTR] = AOR_LDR64,
+				[BR_OP_I64] = AOR_LDR64,
 			};
 			static char* suffixes[] = {
-				[BRB_OP_I8] = "b\tw",
-				[BRB_OP_I16] = "h\tw",
-				[BRB_OP_I32] = "\tw",
-				[BRB_OP_PTR] = "\tx",
-				[BRB_OP_I64] = "\tx"
+				[BR_OP_I8] = "b\tw",
+				[BR_OP_I16] = "h\tw",
+				[BR_OP_I32] = "\tw",
+				[BR_OP_PTR] = "\tx",
+				[BR_OP_I64] = "\tx"
 			};
 			return compileIntLiteral_arm64(ctx->dst, op->operand_s, 8, ARM64_REGONLY_RULE, sizeof(value_s), value_s)
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 9, NULL, rules[op->type], sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr%s%s, %s\n", suffixes[op->type], &value_s[1], offset_s);
 		}
-		case BRB_OP_ADDR: {
-			ssize_t offset = BRB_getStackItemRTOffset(&ctx->builder, proc_id, op_id, op->operand_u);
+		case BR_OP_ADDR: {
+			ssize_t offset = BR_getStackItemRTOffset(&ctx->builder, proc_id, op_id, op->operand_u);
 			return compileIntLiteral_arm64(ctx->dst, vframe_offset + offset, 8, ARM64_ADDSUB_RULE, sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tadd\tx8, %s, %s\n", sp, offset_s)
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 9, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr\tx8, %s\n", offset_s);
 		}
-		case BRB_OP_DBADDR: // TODO: utilize arm64 `adr` instruction for data blocks that are put into the `text` segment
+		case BR_OP_DBADDR: // TODO: utilize arm64 `adr` instruction for data blocks that are put into the `text` segment
 			return fputstr(ctx->dst, "\tadrp\tx8, ")
 				+ printLabel(ctx->dst, ctx->builder.module.seg_data.data[~op->operand_s].name, "_")
 				+ fputstr(ctx->dst, "@PAGE\n\tadd\tx8, x8, ")
@@ -263,61 +263,61 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 				+ fputstr(ctx->dst, "@PAGEOFF\n")
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 9, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr\tx8, %s\n", offset_s);
-		case BRB_OP_SYS: {
+		case BR_OP_SYS: {
 			static sbuf sys_to_proc_name[] = {
-				[BRB_SYS_EXIT] = fromcstr("\tbl\t_exit\n"),
-				[BRB_SYS_WRITE] = fromcstr("\tbl\t_write\n"),
-				[BRB_SYS_READ] = fromcstr("\tbl\t_read\n")
+				[BR_SYS_EXIT] = fromcstr("\tbl\t_exit\n"),
+				[BR_SYS_WRITE] = fromcstr("\tbl\t_write\n"),
+				[BR_SYS_READ] = fromcstr("\tbl\t_read\n")
 			};
 			arm64_RegCtx reg_ctx = {0};
-			for (uint8_t i = 0; i < BRB_syscallNArgs[op->operand_u]; ++i) {
+			for (uint8_t i = 0; i < BR_syscallNArgs[op->operand_u]; ++i) {
 				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before + i * sizeof(uintptr_t), 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
 					+ fprintf(dst, "\tldr\tx%hhu, %s\n", i, offset_s);
 			}
 			return acc
 				+ fputsbuf(dst, sys_to_proc_name[op->operand_u])
-				+ (op->operand_u == BRB_SYS_EXIT ? 0
+				+ (op->operand_u == BR_SYS_EXIT ? 0
 					: getStackAddr_arm64(ctx, sp, vframe_offset, 8, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
 						+ fprintf(dst, "\tstr\tx0, %s\n", offset_s));
 		}
-		case BRB_OP_BUILTIN:
+		case BR_OP_BUILTIN:
 			return acc
-				+ compileIntLiteral_arm64(dst, BRB_builtinValues[op->operand_u], 8, ARM64_REGONLY_RULE, sizeof(value_s), value_s)
+				+ compileIntLiteral_arm64(dst, BR_builtinValues[op->operand_u], 8, ARM64_REGONLY_RULE, sizeof(value_s), value_s)
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 9, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
 				+ fprintf(dst, "\tstr\t%s, %s\n", value_s, offset_s);
-		case BRB_OP_ADD:
-		case BRB_OP_SUB:
-		case BRB_OP_MUL:
-		case BRB_OP_DIV:
-		case BRB_OP_DIVS:
-		case BRB_OP_MOD:
-		case BRB_OP_MODS:
-		case BRB_OP_AND:
-		case BRB_OP_OR:
-		case BRB_OP_XOR:
-		case BRB_OP_SHL:
-		case BRB_OP_SHR:
-		case BRB_OP_SHRS: {
+		case BR_OP_ADD:
+		case BR_OP_SUB:
+		case BR_OP_MUL:
+		case BR_OP_DIV:
+		case BR_OP_DIVS:
+		case BR_OP_MOD:
+		case BR_OP_MODS:
+		case BR_OP_AND:
+		case BR_OP_OR:
+		case BR_OP_XOR:
+		case BR_OP_SHL:
+		case BR_OP_SHR:
+		case BR_OP_SHRS: {
 			static const sbuf native_op[] = {
-				[BRB_OP_ADD]  = fromcstr("\tadd\tx9, x9, x10\n"),
-				[BRB_OP_SUB]  = fromcstr("\tsub\tx9, x9, x10\n"),
-				[BRB_OP_MUL]  = fromcstr("\tmul\tx9, x9, x10\n"),
-				[BRB_OP_DIV]  = fromcstr("\tudiv\tx9, x9, x10\n"),
-				[BRB_OP_DIVS] = fromcstr("\tsdiv\tx9, x9, x10\n"),
-				[BRB_OP_MOD]  = fromcstr("\tudiv\tx11, x9, x10\n"
+				[BR_OP_ADD]  = fromcstr("\tadd\tx9, x9, x10\n"),
+				[BR_OP_SUB]  = fromcstr("\tsub\tx9, x9, x10\n"),
+				[BR_OP_MUL]  = fromcstr("\tmul\tx9, x9, x10\n"),
+				[BR_OP_DIV]  = fromcstr("\tudiv\tx9, x9, x10\n"),
+				[BR_OP_DIVS] = fromcstr("\tsdiv\tx9, x9, x10\n"),
+				[BR_OP_MOD]  = fromcstr("\tudiv\tx11, x9, x10\n"
 							 "\tmsub\tx9, x11, x10, x9\n"),
-				[BRB_OP_MODS] = fromcstr("\tsdiv\tx11, x9, x10\n"
+				[BR_OP_MODS] = fromcstr("\tsdiv\tx11, x9, x10\n"
 							 "\tmsub\tx9, x11, x10, x9\n"),
-				[BRB_OP_AND]  = fromcstr("\tand\tx9, x9, x10\n"),
-				[BRB_OP_OR]   = fromcstr("\torr\tx9, x9, x10\n"),
-				[BRB_OP_XOR]  = fromcstr("\teor\tx9, x9, x10\n"),
-				[BRB_OP_SHL]  = fromcstr("\tlsl\tx9, x9, x10\n"),
-				[BRB_OP_SHR]  = fromcstr("\tlsr\tx9, x9, x10\n"),
-				[BRB_OP_SHRS] = fromcstr("\tasr\tx9, x9, x10\n")
+				[BR_OP_AND]  = fromcstr("\tand\tx9, x9, x10\n"),
+				[BR_OP_OR]   = fromcstr("\torr\tx9, x9, x10\n"),
+				[BR_OP_XOR]  = fromcstr("\teor\tx9, x9, x10\n"),
+				[BR_OP_SHL]  = fromcstr("\tlsl\tx9, x9, x10\n"),
+				[BR_OP_SHR]  = fromcstr("\tlsr\tx9, x9, x10\n"),
+				[BR_OP_SHRS] = fromcstr("\tasr\tx9, x9, x10\n")
 			};
 			arm64_RegCtx reg_ctx = {0};
-			size_t  main_op_size = BRB_getStackItemRTSize(&ctx->builder, proc_id, op_id - 1, 0),
-			        op2_size     = BRB_getStackItemRTSize(&ctx->builder, proc_id, op_id - 1, 1);
+			size_t  main_op_size = BR_getStackItemRTSize(&ctx->builder, proc_id, op_id - 1, 0),
+			        op2_size     = BR_getStackItemRTSize(&ctx->builder, proc_id, op_id - 1, 1);
 			if (main_op_size == op2_size) {
 				char reg_type = op2_size == 8 ? 'x' : 'w';
 				arm64_AddrOffsetRule rule = op2_size == 4 ? AOR_LDP32 : AOR_LDP64;
@@ -337,230 +337,230 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 8, &reg_ctx, addr_rules[main_op_size], sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr%s9, %s\n", op_postfix[main_op_size], offset_s);
 		}
-		case BRB_OP_ADDI:
-		case BRB_OP_SUBI:
-		case BRB_OP_MULI:
-		case BRB_OP_DIVI:
-		case BRB_OP_DIVSI:
-		case BRB_OP_MODI:
-		case BRB_OP_MODSI:
-		case BRB_OP_ANDI:
-		case BRB_OP_ORI:
-		case BRB_OP_XORI:
-		case BRB_OP_SHLI:
-		case BRB_OP_SHRI:
-		case BRB_OP_SHRSI:
-		case BRB_OP_NOT:
-		case BRB_OP_ADDIAT8:
-		case BRB_OP_ADDIAT16:
-		case BRB_OP_ADDIAT32:
-		case BRB_OP_ADDIATP:
-		case BRB_OP_ADDIAT64:
-		case BRB_OP_SUBIAT8:
-		case BRB_OP_SUBIAT16:
-		case BRB_OP_SUBIAT32:
-		case BRB_OP_SUBIATP:
-		case BRB_OP_SUBIAT64:
-		case BRB_OP_MULIAT8:
-		case BRB_OP_MULIAT16:
-		case BRB_OP_MULIAT32:
-		case BRB_OP_MULIATP:
-		case BRB_OP_MULIAT64:
-		case BRB_OP_DIVIAT8:
-		case BRB_OP_DIVIAT16:
-		case BRB_OP_DIVIAT32:
-		case BRB_OP_DIVIATP:
-		case BRB_OP_DIVIAT64:
-		case BRB_OP_DIVSIAT8:
-		case BRB_OP_DIVSIAT16:
-		case BRB_OP_DIVSIAT32:
-		case BRB_OP_DIVSIATP:
-		case BRB_OP_DIVSIAT64:
-		case BRB_OP_MODIAT8:
-		case BRB_OP_MODIAT16:
-		case BRB_OP_MODIAT32:
-		case BRB_OP_MODIATP:
-		case BRB_OP_MODIAT64:
-		case BRB_OP_MODSIAT8:
-		case BRB_OP_MODSIAT16:
-		case BRB_OP_MODSIAT32:
-		case BRB_OP_MODSIATP:
-		case BRB_OP_MODSIAT64:
-		case BRB_OP_ANDIAT8:
-		case BRB_OP_ANDIAT16:
-		case BRB_OP_ANDIAT32:
-		case BRB_OP_ANDIATP:
-		case BRB_OP_ANDIAT64:
-		case BRB_OP_ORIAT8:
-		case BRB_OP_ORIAT16:
-		case BRB_OP_ORIAT32:
-		case BRB_OP_ORIATP:
-		case BRB_OP_ORIAT64:
-		case BRB_OP_XORIAT8:
-		case BRB_OP_XORIAT16:
-		case BRB_OP_XORIAT32:
-		case BRB_OP_XORIATP:
-		case BRB_OP_XORIAT64:
-		case BRB_OP_SHLIAT8:
-		case BRB_OP_SHLIAT16:
-		case BRB_OP_SHLIAT32:
-		case BRB_OP_SHLIATP:
-		case BRB_OP_SHLIAT64:
-		case BRB_OP_SHRIAT8:
-		case BRB_OP_SHRIAT16:
-		case BRB_OP_SHRIAT32:
-		case BRB_OP_SHRIATP:
-		case BRB_OP_SHRIAT64:
-		case BRB_OP_SHRSIAT8:
-		case BRB_OP_SHRSIAT16:
-		case BRB_OP_SHRSIAT32:
-		case BRB_OP_SHRSIATP:
-		case BRB_OP_SHRSIAT64:
-		case BRB_OP_NOTAT8:
-		case BRB_OP_NOTAT16:
-		case BRB_OP_NOTAT32:
-		case BRB_OP_NOTATP:
-		case BRB_OP_NOTAT64: {
-			static const BRB_OpType base_op[] = {
-				[BRB_OP_ADDI]      = BRB_OP_ADD,
-				[BRB_OP_SUBI]      = BRB_OP_SUB,
-				[BRB_OP_MULI]      = BRB_OP_MUL,
-				[BRB_OP_DIVI]      = BRB_OP_DIV,
-				[BRB_OP_DIVSI]     = BRB_OP_DIVS,
-				[BRB_OP_MODI]      = BRB_OP_MOD,
-				[BRB_OP_MODSI]     = BRB_OP_MODS,
-				[BRB_OP_ANDI]      = BRB_OP_AND,
-				[BRB_OP_ORI]       = BRB_OP_OR,
-				[BRB_OP_XORI]      = BRB_OP_XOR,
-				[BRB_OP_SHLI]      = BRB_OP_SHL,
-				[BRB_OP_SHRI]      = BRB_OP_SHR,
-				[BRB_OP_SHRSI]     = BRB_OP_SHRS,
-				[BRB_OP_NOT]       = BRB_OP_NOT,
-				[BRB_OP_ADDIAT8]   = BRB_OP_ADD,
-				[BRB_OP_ADDIAT16]  = BRB_OP_ADD,
-				[BRB_OP_ADDIAT32]  = BRB_OP_ADD,
-				[BRB_OP_ADDIATP]   = BRB_OP_ADD,
-				[BRB_OP_ADDIAT64]  = BRB_OP_ADD,
-				[BRB_OP_SUBIAT8]   = BRB_OP_SUB,
-				[BRB_OP_SUBIAT16]  = BRB_OP_SUB,
-				[BRB_OP_SUBIAT32]  = BRB_OP_SUB,
-				[BRB_OP_SUBIATP]   = BRB_OP_SUB,
-				[BRB_OP_SUBIAT64]  = BRB_OP_SUB,
-				[BRB_OP_MULIAT8]   = BRB_OP_MUL,
-				[BRB_OP_MULIAT16]  = BRB_OP_MUL,
-				[BRB_OP_MULIAT32]  = BRB_OP_MUL,
-				[BRB_OP_MULIATP]   = BRB_OP_MUL,
-				[BRB_OP_MULIAT64]  = BRB_OP_MUL,
-				[BRB_OP_DIVIAT8]   = BRB_OP_DIV,
-				[BRB_OP_DIVIAT16]  = BRB_OP_DIV,
-				[BRB_OP_DIVIAT32]  = BRB_OP_DIV,
-				[BRB_OP_DIVIATP]   = BRB_OP_DIV,
-				[BRB_OP_DIVIAT64]  = BRB_OP_DIV,
-				[BRB_OP_DIVSIAT8]  = BRB_OP_DIVS,
-				[BRB_OP_DIVSIAT16] = BRB_OP_DIVS,
-				[BRB_OP_DIVSIAT32] = BRB_OP_DIVS,
-				[BRB_OP_DIVSIATP]  = BRB_OP_DIVS,
-				[BRB_OP_DIVSIAT64] = BRB_OP_DIVS,
-				[BRB_OP_MODIAT8]   = BRB_OP_MOD,
-				[BRB_OP_MODIAT16]  = BRB_OP_MOD,
-				[BRB_OP_MODIAT32]  = BRB_OP_MOD,
-				[BRB_OP_MODIATP]   = BRB_OP_MOD,
-				[BRB_OP_MODIAT64]  = BRB_OP_MOD,
-				[BRB_OP_MODSIAT8]  = BRB_OP_MODS,
-				[BRB_OP_MODSIAT16] = BRB_OP_MODS,
-				[BRB_OP_MODSIAT32] = BRB_OP_MODS,
-				[BRB_OP_MODSIATP]  = BRB_OP_MODS,
-				[BRB_OP_MODSIAT64] = BRB_OP_MODS,
-				[BRB_OP_ANDIAT8]   = BRB_OP_AND,
-				[BRB_OP_ANDIAT16]  = BRB_OP_AND,
-				[BRB_OP_ANDIAT32]  = BRB_OP_AND,
-				[BRB_OP_ANDIATP]   = BRB_OP_AND,
-				[BRB_OP_ANDIAT64]  = BRB_OP_AND,
-				[BRB_OP_ORIAT8]    = BRB_OP_OR,
-				[BRB_OP_ORIAT16]   = BRB_OP_OR,
-				[BRB_OP_ORIAT32]   = BRB_OP_OR,
-				[BRB_OP_ORIATP]    = BRB_OP_OR,
-				[BRB_OP_ORIAT64]   = BRB_OP_OR,
-				[BRB_OP_XORIAT8]   = BRB_OP_XOR,
-				[BRB_OP_XORIAT16]  = BRB_OP_XOR,
-				[BRB_OP_XORIAT32]  = BRB_OP_XOR,
-				[BRB_OP_XORIATP]   = BRB_OP_XOR,
-				[BRB_OP_XORIAT64]  = BRB_OP_XOR,
-				[BRB_OP_SHLIAT8]   = BRB_OP_SHL,
-				[BRB_OP_SHLIAT16]  = BRB_OP_SHL,
-				[BRB_OP_SHLIAT32]  = BRB_OP_SHL,
-				[BRB_OP_SHLIATP]   = BRB_OP_SHL,
-				[BRB_OP_SHLIAT64]  = BRB_OP_SHL,
-				[BRB_OP_SHRIAT8]   = BRB_OP_SHR,
-				[BRB_OP_SHRIAT16]  = BRB_OP_SHR,
-				[BRB_OP_SHRIAT32]  = BRB_OP_SHR,
-				[BRB_OP_SHRIATP]   = BRB_OP_SHR,
-				[BRB_OP_SHRIAT64]  = BRB_OP_SHR,
-				[BRB_OP_SHRSIAT8]  = BRB_OP_SHRS,
-				[BRB_OP_SHRSIAT16] = BRB_OP_SHRS,
-				[BRB_OP_SHRSIAT32] = BRB_OP_SHRS,
-				[BRB_OP_SHRSIATP]  = BRB_OP_SHRS,
-				[BRB_OP_SHRSIAT64] = BRB_OP_SHRS,
-				[BRB_OP_NOTAT8]    = BRB_OP_NOT,
-				[BRB_OP_NOTAT16]   = BRB_OP_NOT,
-				[BRB_OP_NOTAT32]   = BRB_OP_NOT,
-				[BRB_OP_NOTATP]    = BRB_OP_NOT,
-				[BRB_OP_NOTAT64]   = BRB_OP_NOT
+		case BR_OP_ADDI:
+		case BR_OP_SUBI:
+		case BR_OP_MULI:
+		case BR_OP_DIVI:
+		case BR_OP_DIVSI:
+		case BR_OP_MODI:
+		case BR_OP_MODSI:
+		case BR_OP_ANDI:
+		case BR_OP_ORI:
+		case BR_OP_XORI:
+		case BR_OP_SHLI:
+		case BR_OP_SHRI:
+		case BR_OP_SHRSI:
+		case BR_OP_NOT:
+		case BR_OP_ADDIAT8:
+		case BR_OP_ADDIAT16:
+		case BR_OP_ADDIAT32:
+		case BR_OP_ADDIATP:
+		case BR_OP_ADDIAT64:
+		case BR_OP_SUBIAT8:
+		case BR_OP_SUBIAT16:
+		case BR_OP_SUBIAT32:
+		case BR_OP_SUBIATP:
+		case BR_OP_SUBIAT64:
+		case BR_OP_MULIAT8:
+		case BR_OP_MULIAT16:
+		case BR_OP_MULIAT32:
+		case BR_OP_MULIATP:
+		case BR_OP_MULIAT64:
+		case BR_OP_DIVIAT8:
+		case BR_OP_DIVIAT16:
+		case BR_OP_DIVIAT32:
+		case BR_OP_DIVIATP:
+		case BR_OP_DIVIAT64:
+		case BR_OP_DIVSIAT8:
+		case BR_OP_DIVSIAT16:
+		case BR_OP_DIVSIAT32:
+		case BR_OP_DIVSIATP:
+		case BR_OP_DIVSIAT64:
+		case BR_OP_MODIAT8:
+		case BR_OP_MODIAT16:
+		case BR_OP_MODIAT32:
+		case BR_OP_MODIATP:
+		case BR_OP_MODIAT64:
+		case BR_OP_MODSIAT8:
+		case BR_OP_MODSIAT16:
+		case BR_OP_MODSIAT32:
+		case BR_OP_MODSIATP:
+		case BR_OP_MODSIAT64:
+		case BR_OP_ANDIAT8:
+		case BR_OP_ANDIAT16:
+		case BR_OP_ANDIAT32:
+		case BR_OP_ANDIATP:
+		case BR_OP_ANDIAT64:
+		case BR_OP_ORIAT8:
+		case BR_OP_ORIAT16:
+		case BR_OP_ORIAT32:
+		case BR_OP_ORIATP:
+		case BR_OP_ORIAT64:
+		case BR_OP_XORIAT8:
+		case BR_OP_XORIAT16:
+		case BR_OP_XORIAT32:
+		case BR_OP_XORIATP:
+		case BR_OP_XORIAT64:
+		case BR_OP_SHLIAT8:
+		case BR_OP_SHLIAT16:
+		case BR_OP_SHLIAT32:
+		case BR_OP_SHLIATP:
+		case BR_OP_SHLIAT64:
+		case BR_OP_SHRIAT8:
+		case BR_OP_SHRIAT16:
+		case BR_OP_SHRIAT32:
+		case BR_OP_SHRIATP:
+		case BR_OP_SHRIAT64:
+		case BR_OP_SHRSIAT8:
+		case BR_OP_SHRSIAT16:
+		case BR_OP_SHRSIAT32:
+		case BR_OP_SHRSIATP:
+		case BR_OP_SHRSIAT64:
+		case BR_OP_NOTAT8:
+		case BR_OP_NOTAT16:
+		case BR_OP_NOTAT32:
+		case BR_OP_NOTATP:
+		case BR_OP_NOTAT64: {
+			static const BR_OpType base_op[] = {
+				[BR_OP_ADDI]      = BR_OP_ADD,
+				[BR_OP_SUBI]      = BR_OP_SUB,
+				[BR_OP_MULI]      = BR_OP_MUL,
+				[BR_OP_DIVI]      = BR_OP_DIV,
+				[BR_OP_DIVSI]     = BR_OP_DIVS,
+				[BR_OP_MODI]      = BR_OP_MOD,
+				[BR_OP_MODSI]     = BR_OP_MODS,
+				[BR_OP_ANDI]      = BR_OP_AND,
+				[BR_OP_ORI]       = BR_OP_OR,
+				[BR_OP_XORI]      = BR_OP_XOR,
+				[BR_OP_SHLI]      = BR_OP_SHL,
+				[BR_OP_SHRI]      = BR_OP_SHR,
+				[BR_OP_SHRSI]     = BR_OP_SHRS,
+				[BR_OP_NOT]       = BR_OP_NOT,
+				[BR_OP_ADDIAT8]   = BR_OP_ADD,
+				[BR_OP_ADDIAT16]  = BR_OP_ADD,
+				[BR_OP_ADDIAT32]  = BR_OP_ADD,
+				[BR_OP_ADDIATP]   = BR_OP_ADD,
+				[BR_OP_ADDIAT64]  = BR_OP_ADD,
+				[BR_OP_SUBIAT8]   = BR_OP_SUB,
+				[BR_OP_SUBIAT16]  = BR_OP_SUB,
+				[BR_OP_SUBIAT32]  = BR_OP_SUB,
+				[BR_OP_SUBIATP]   = BR_OP_SUB,
+				[BR_OP_SUBIAT64]  = BR_OP_SUB,
+				[BR_OP_MULIAT8]   = BR_OP_MUL,
+				[BR_OP_MULIAT16]  = BR_OP_MUL,
+				[BR_OP_MULIAT32]  = BR_OP_MUL,
+				[BR_OP_MULIATP]   = BR_OP_MUL,
+				[BR_OP_MULIAT64]  = BR_OP_MUL,
+				[BR_OP_DIVIAT8]   = BR_OP_DIV,
+				[BR_OP_DIVIAT16]  = BR_OP_DIV,
+				[BR_OP_DIVIAT32]  = BR_OP_DIV,
+				[BR_OP_DIVIATP]   = BR_OP_DIV,
+				[BR_OP_DIVIAT64]  = BR_OP_DIV,
+				[BR_OP_DIVSIAT8]  = BR_OP_DIVS,
+				[BR_OP_DIVSIAT16] = BR_OP_DIVS,
+				[BR_OP_DIVSIAT32] = BR_OP_DIVS,
+				[BR_OP_DIVSIATP]  = BR_OP_DIVS,
+				[BR_OP_DIVSIAT64] = BR_OP_DIVS,
+				[BR_OP_MODIAT8]   = BR_OP_MOD,
+				[BR_OP_MODIAT16]  = BR_OP_MOD,
+				[BR_OP_MODIAT32]  = BR_OP_MOD,
+				[BR_OP_MODIATP]   = BR_OP_MOD,
+				[BR_OP_MODIAT64]  = BR_OP_MOD,
+				[BR_OP_MODSIAT8]  = BR_OP_MODS,
+				[BR_OP_MODSIAT16] = BR_OP_MODS,
+				[BR_OP_MODSIAT32] = BR_OP_MODS,
+				[BR_OP_MODSIATP]  = BR_OP_MODS,
+				[BR_OP_MODSIAT64] = BR_OP_MODS,
+				[BR_OP_ANDIAT8]   = BR_OP_AND,
+				[BR_OP_ANDIAT16]  = BR_OP_AND,
+				[BR_OP_ANDIAT32]  = BR_OP_AND,
+				[BR_OP_ANDIATP]   = BR_OP_AND,
+				[BR_OP_ANDIAT64]  = BR_OP_AND,
+				[BR_OP_ORIAT8]    = BR_OP_OR,
+				[BR_OP_ORIAT16]   = BR_OP_OR,
+				[BR_OP_ORIAT32]   = BR_OP_OR,
+				[BR_OP_ORIATP]    = BR_OP_OR,
+				[BR_OP_ORIAT64]   = BR_OP_OR,
+				[BR_OP_XORIAT8]   = BR_OP_XOR,
+				[BR_OP_XORIAT16]  = BR_OP_XOR,
+				[BR_OP_XORIAT32]  = BR_OP_XOR,
+				[BR_OP_XORIATP]   = BR_OP_XOR,
+				[BR_OP_XORIAT64]  = BR_OP_XOR,
+				[BR_OP_SHLIAT8]   = BR_OP_SHL,
+				[BR_OP_SHLIAT16]  = BR_OP_SHL,
+				[BR_OP_SHLIAT32]  = BR_OP_SHL,
+				[BR_OP_SHLIATP]   = BR_OP_SHL,
+				[BR_OP_SHLIAT64]  = BR_OP_SHL,
+				[BR_OP_SHRIAT8]   = BR_OP_SHR,
+				[BR_OP_SHRIAT16]  = BR_OP_SHR,
+				[BR_OP_SHRIAT32]  = BR_OP_SHR,
+				[BR_OP_SHRIATP]   = BR_OP_SHR,
+				[BR_OP_SHRIAT64]  = BR_OP_SHR,
+				[BR_OP_SHRSIAT8]  = BR_OP_SHRS,
+				[BR_OP_SHRSIAT16] = BR_OP_SHRS,
+				[BR_OP_SHRSIAT32] = BR_OP_SHRS,
+				[BR_OP_SHRSIATP]  = BR_OP_SHRS,
+				[BR_OP_SHRSIAT64] = BR_OP_SHRS,
+				[BR_OP_NOTAT8]    = BR_OP_NOT,
+				[BR_OP_NOTAT16]   = BR_OP_NOT,
+				[BR_OP_NOTAT32]   = BR_OP_NOT,
+				[BR_OP_NOTATP]    = BR_OP_NOT,
+				[BR_OP_NOTAT64]   = BR_OP_NOT
 			};
 			static const char* native_op[] = {
-				[BRB_OP_ADD]  = "\tadd\tx8, x8, %s\n",
-				[BRB_OP_SUB]  = "\tsub\tx8, x8, %s\n",
-				[BRB_OP_MUL]  = "\tmul\tx8, x8, %s\n",
-				[BRB_OP_DIV]  = "\tudiv\tx8, x8, %s\n",
-				[BRB_OP_DIVS] = "\tsdiv\tx8, x8, %s\n",
-				[BRB_OP_MOD]  = "\tudiv\tx14, x8, %s\n"
+				[BR_OP_ADD]  = "\tadd\tx8, x8, %s\n",
+				[BR_OP_SUB]  = "\tsub\tx8, x8, %s\n",
+				[BR_OP_MUL]  = "\tmul\tx8, x8, %s\n",
+				[BR_OP_DIV]  = "\tudiv\tx8, x8, %s\n",
+				[BR_OP_DIVS] = "\tsdiv\tx8, x8, %s\n",
+				[BR_OP_MOD]  = "\tudiv\tx14, x8, %s\n"
 						"\tmsub\tx8, x14, x10, x8\n",
-				[BRB_OP_MODS] = "\tsdiv\tx14, x8, %s\n"
+				[BR_OP_MODS] = "\tsdiv\tx14, x8, %s\n"
 						"\tmsub\tx8, x14, x10, x8\n",
-				[BRB_OP_AND]  = "\tand\tx8, x8, %s\n",
-				[BRB_OP_OR]   = "\torr\tx8, x8, %s\n",
-				[BRB_OP_XOR]  = "\teor\tx8, x8, %s\n",
-				[BRB_OP_SHL]  = "\tlsl\tx8, x8, %s\n",
-				[BRB_OP_SHR]  = "\tlsr\tx8, x8, %s\n",
-				[BRB_OP_SHRS] = "\tasr\tx8, x8, %s\n",
-				[BRB_OP_NOT]  = "\tmvn\tx8, x8%s\n"
+				[BR_OP_AND]  = "\tand\tx8, x8, %s\n",
+				[BR_OP_OR]   = "\torr\tx8, x8, %s\n",
+				[BR_OP_XOR]  = "\teor\tx8, x8, %s\n",
+				[BR_OP_SHL]  = "\tlsl\tx8, x8, %s\n",
+				[BR_OP_SHR]  = "\tlsr\tx8, x8, %s\n",
+				[BR_OP_SHRS] = "\tasr\tx8, x8, %s\n",
+				[BR_OP_NOT]  = "\tmvn\tx8, x8%s\n"
 			};
 			static const arm64_ImmValueRule op2_placement[] = {
-				[BRB_OP_ADD]  = ARM64_ADDSUB_RULE,
-				[BRB_OP_SUB]  = ARM64_ADDSUB_RULE,
-				[BRB_OP_MUL]  = ARM64_REGONLY_RULE,
-				[BRB_OP_DIV]  = ARM64_REGONLY_RULE,
-				[BRB_OP_DIVS] = ARM64_REGONLY_RULE,
-				[BRB_OP_MOD]  = ARM64_REGONLY_RULE,
-				[BRB_OP_MODS] = ARM64_REGONLY_RULE,
-				[BRB_OP_AND]  = ARM64_REGONLY_RULE,
-				[BRB_OP_OR]   = ARM64_REGONLY_RULE,
-				[BRB_OP_XOR]  = ARM64_REGONLY_RULE,
-				[BRB_OP_SHL]  = ARM64_ADDSUB_RULE,
-				[BRB_OP_SHR]  = ARM64_ADDSUB_RULE,
-				[BRB_OP_SHRS] = ARM64_ADDSUB_RULE,
-				[BRB_OP_NOT]  = ARM64_NOVALUE_RULE
+				[BR_OP_ADD]  = ARM64_ADDSUB_RULE,
+				[BR_OP_SUB]  = ARM64_ADDSUB_RULE,
+				[BR_OP_MUL]  = ARM64_REGONLY_RULE,
+				[BR_OP_DIV]  = ARM64_REGONLY_RULE,
+				[BR_OP_DIVS] = ARM64_REGONLY_RULE,
+				[BR_OP_MOD]  = ARM64_REGONLY_RULE,
+				[BR_OP_MODS] = ARM64_REGONLY_RULE,
+				[BR_OP_AND]  = ARM64_REGONLY_RULE,
+				[BR_OP_OR]   = ARM64_REGONLY_RULE,
+				[BR_OP_XOR]  = ARM64_REGONLY_RULE,
+				[BR_OP_SHL]  = ARM64_ADDSUB_RULE,
+				[BR_OP_SHR]  = ARM64_ADDSUB_RULE,
+				[BR_OP_SHRS] = ARM64_ADDSUB_RULE,
+				[BR_OP_NOT]  = ARM64_NOVALUE_RULE
 			};
 			arm64_RegCtx reg_ctx = {0};
-			size_t op_size = BRB_getStackItemRTSize(&ctx->builder, proc_id, op_id, 0);
+			size_t op_size = BR_getStackItemRTSize(&ctx->builder, proc_id, op_id, 0);
 			return acc
 				+ getStackAddr_arm64(ctx, sp, vframe_offset_before, 9, &reg_ctx, addr_rules[op_size], sizeof(offset_s), offset_s)
-				+ (BRB_GET_ADDR_OP_TYPE(op->type) == 0 ? 0
+				+ (BR_GET_ADDR_OP_TYPE(op->type) == 0 ? 0
 					: fprintf(ctx->dst, "\tldr\tx11, %s\n", offset_s))
-				+ fprintf(ctx->dst, "\tldr%s8, %s\n", op_postfix[op_size], BRB_GET_ADDR_OP_TYPE(op->type) == 0 ? offset_s : "[x11]")
+				+ fprintf(ctx->dst, "\tldr%s8, %s\n", op_postfix[op_size], BR_GET_ADDR_OP_TYPE(op->type) == 0 ? offset_s : "[x11]")
 				+ compileIntLiteral_arm64(dst, op->operand_u, 10, op2_placement[base_op[op->type]], sizeof(value_s), value_s)
 				+ fprintf(ctx->dst, native_op[base_op[op->type]], value_s)
-				+ (BRB_GET_ADDR_OP_TYPE(op->type) == 0 ? 0
+				+ (BR_GET_ADDR_OP_TYPE(op->type) == 0 ? 0
 					: fprintf(ctx->dst, "\tstr%s8, [x11]\n", op_postfix[op_size]))
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 9, (reg_ctx.last_use = true, &reg_ctx), addr_rules[op_size], sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr%s8, %s\n", op_postfix[op_size], offset_s);
 		}
-		case BRB_OP_DROP:
-		case BRB_OP_NEW:
+		case BR_OP_DROP:
+		case BR_OP_NEW:
 			return acc;
-		case BRB_OP_ZERO: {
+		case BR_OP_ZERO: {
 			arm64_RegCtx reg_ctx = {0};
-			size_t span = BRB_getTypeRTSize(&ctx->builder.module, op->operand_type), orig_span = span;
+			size_t span = BR_getTypeRTSize(&ctx->builder.module, op->operand_type), orig_span = span;
 			if (span >= 32) acc += fprintf(ctx->dst, "\teor\tv0.16b, v0.16b, v0.16b\n");
 			while (span >= 32) {
 				acc += getStackAddr_arm64(ctx, sp, vframe_offset + (orig_span - span), 8, &reg_ctx, AOR_LDP128, sizeof(offset_s), offset_s)
@@ -593,28 +593,28 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 					+ fprintf(ctx->dst, "\tstrb\twzr, %s\n", offset_s);
 			return acc;
 		}
-		case BRB_OP_GET:
-		case BRB_OP_SETAT:
-		case BRB_OP_GETFROM:
-		case BRB_OP_COPY: {
+		case BR_OP_GET:
+		case BR_OP_SETAT:
+		case BR_OP_GETFROM:
+		case BR_OP_COPY: {
 			static const bool output_to_stack[] = {
-				[BRB_OP_GET]     = true,
-				[BRB_OP_SETAT]   = false,
-				[BRB_OP_GETFROM] = true,
-				[BRB_OP_COPY]    = false
+				[BR_OP_GET]     = true,
+				[BR_OP_SETAT]   = false,
+				[BR_OP_GETFROM] = true,
+				[BR_OP_COPY]    = false
 			};
 			static const bool input_from_stack[] = {
-				[BRB_OP_GET]     = true,
-				[BRB_OP_SETAT]   = true,
-				[BRB_OP_GETFROM] = false,
-				[BRB_OP_COPY]    = false
+				[BR_OP_GET]     = true,
+				[BR_OP_SETAT]   = true,
+				[BR_OP_GETFROM] = false,
+				[BR_OP_COPY]    = false
 			};
-			size_t  span = BRB_getStackItemRTSize(&ctx->builder, proc_id, op_id, 0),
+			size_t  span = BR_getStackItemRTSize(&ctx->builder, proc_id, op_id, 0),
 				orig_span = span;
 			arm64_RegCtx reg_ctx = {0};
 			uint8_t n_regs = 0;
-			if (op->type != BRB_OP_GETFROM)
-				vframe_offset_before += op->type == BRB_OP_GET ? BRB_getStackItemRTOffset(&ctx->builder, proc_id, op_id - 1, op->operand_u) : 8;
+			if (op->type != BR_OP_GETFROM)
+				vframe_offset_before += op->type == BR_OP_GET ? BR_getStackItemRTOffset(&ctx->builder, proc_id, op_id - 1, op->operand_u) : 8;
 			if (span > 511) // 511 bytes is the maximum size of the object that can be copied without using `memcpy`
 				return acc
 					+ (output_to_stack[op->type]
@@ -678,7 +678,7 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 			if (!output_to_stack[op->type])
 				acc += getStackAddr_arm64(ctx, sp, vframe_offset_before - 8, 8, &reg_ctx, AOR_LDR64, sizeof(offset_s), offset_s)
 					+ fprintf(ctx->dst, "\tldr\tx8, %s\n", offset_s)
-					+ (op->type != BRB_OP_COPY ? 0
+					+ (op->type != BR_OP_COPY ? 0
 						: fprintf(ctx->dst, "\tmov\tx14, x8\n"));
 			while (span >= 32) {
 				uint8_t reg1 = n_regs++;
@@ -722,23 +722,23 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BRB_id proc_id, uint32
 					? getStackAddr_arm64(ctx, sp, vframe_offset_before + (orig_span - span), 8, &reg_ctx, AOR_LDR8, sizeof(offset_s), offset_s)
 						+ fprintf(ctx->dst, "\tstrb\tw11, %s\n", offset_s)
 					: fprintf(ctx->dst, "\tstrb\tw11, [x8]\n");
-			if (op->type == BRB_OP_COPY)
+			if (op->type == BR_OP_COPY)
 				acc += getStackAddr_arm64(ctx, sp, vframe_offset, 8, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
 					+ fprintf(ctx->dst, "\tldr\tx14, %s\n", offset_s);
 			return acc;
 		}
-		case BRB_N_OPS:
+		case BR_N_OPS:
 		default:
 			assert(false, "invalid operation type %u", op->type);
 	}
 }
 
-long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
+long BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst)
 {
 	arm64_CodegenCtx ctx = {.dst = dst};
-	BRB_Error err = BRB_analyzeModule(module, &ctx.builder);
+	BR_Error err = BR_analyzeModule(module, &ctx.builder);
 	if (err.type) {
-		BRB_printErrorMsg(stderr, err, "error while analyzing module");
+		BR_printErrorMsg(stderr, err, "error while analyzing module");
 		abort();
 	}
 // adding macros for the pseudo-instructions `ldpb` and `ldrh` which load respectively 2 bytes or half-words from memory into 2 registers
@@ -751,13 +751,13 @@ long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
 		"\tldrh\t\\ra, \\rs, \\off\n"
 		"\tlsr\t\\rb, \\ra, 8\n"
 		".endmacro\n"));
-	arrayForeach (BRB_DataBlock, block, module->seg_data) {
+	arrayForeach (BR_DataBlock, block, module->seg_data) {
 		acc += fputstr(dst, ".bss\n")
 			+ printLabel(dst, block->name, "_")
 			+ fprintf(dst, ":\n"
 				"\t.zero\t%zu\n"
 				".text\n"
-				".align 4\n", BRB_getMaxStackRTSize(&ctx.builder, ~(block - module->seg_data.data)))
+				".align 4\n", BR_getMaxStackRTSize(&ctx.builder, ~(block - module->seg_data.data)))
 			+ printLabel(dst, block->name, ".brb_db_impl_")
 			+ fputstr(dst, ":\n"
 				"\tadrp\tx12, ")
@@ -768,9 +768,9 @@ long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
 			+ fputstr(dst, "@PAGEOFF\n");
 		size_t sizes[block->body.length + 1],
 			max_size = 0;
-		sizes[0] = BRB_getStackRTSize(&ctx.builder, block - module->seg_data.data, UINT32_MAX);
+		sizes[0] = BR_getStackRTSize(&ctx.builder, block - module->seg_data.data, UINT32_MAX);
 		for (uint32_t i = 1; i <= block->body.length; ++i) {
-			sizes[i] = BRB_getStackRTSize(&ctx.builder, ~(block - module->seg_data.data), i - 1) - sizes[0];
+			sizes[i] = BR_getStackRTSize(&ctx.builder, ~(block - module->seg_data.data), i - 1) - sizes[0];
 			if (sizes[i] > max_size) max_size = sizes[i];
 		}
 		sizes[0] = 0;
@@ -782,7 +782,7 @@ long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
 	}
 
 	if (!module->seg_data.length) acc += fputstr(dst, ".text\n");
-	arrayForeach (BRB_Proc, proc, module->seg_exec) {
+	arrayForeach (BR_Proc, proc, module->seg_exec) {
 // making the label global if the proc is the entry point
 		const bool is_entry = module->exec_entry_point == (uintptr_t)(proc - module->seg_exec.data);
 // generating the label
@@ -794,7 +794,7 @@ long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
 				+ fputstr(dst, "\n"
 					"\tmov\tx28, x1\n"
 					"\tmov\tx27, x0\n");
-			arrayForeach (BRB_DataBlock, block, module->seg_data) {
+			arrayForeach (BR_DataBlock, block, module->seg_data) {
 				acc += fputstr(dst, "\tbl\t")
 					+ printLabel(dst, block->name, ".brb_db_impl_")
 					+ fputstr(dst, "\n");
@@ -803,9 +803,9 @@ long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
 // pre-computing the stack frame size after each operation in the procedure
 		size_t sizes[proc->body.length + 1],
 			max_size = 0;
-		sizes[0] = BRB_getStackRTSize(&ctx.builder, proc - module->seg_exec.data, UINT32_MAX);
+		sizes[0] = BR_getStackRTSize(&ctx.builder, proc - module->seg_exec.data, UINT32_MAX);
 		for (uint32_t i = 1; i <= proc->body.length; ++i) {
-			sizes[i] = BRB_getStackRTSize(&ctx.builder, proc - module->seg_exec.data, i - 1) - sizes[0];
+			sizes[i] = BR_getStackRTSize(&ctx.builder, proc - module->seg_exec.data, i - 1) - sizes[0];
 			if (sizes[i] > max_size) max_size = sizes[i];
 		}
 		max_size = alignby(max_size, ARM64_STACK_ALIGNMENT);
@@ -822,12 +822,12 @@ long BRB_compileModule_darwin_arm64(const BRB_Module* module, FILE* dst)
 			  "\tbl\t_exit\n"
 			: "\tret\n");
 	}
-	BRB_Module _;
-	err = BRB_extractModule(ctx.builder, &_);
-	assert(!err.type, "%s", BRB_getErrorMsg(err, "error while analyzing module for native assembly generation"))
-	BRB_deallocDataBlocks(&_);
-	BRB_deallocProcs(&_);
-	BRB_deallocStructs(&_);
+	BR_Module _;
+	err = BR_extractModule(ctx.builder, &_);
+	assert(!err.type, "%s", BR_getErrorMsg(err, "error while analyzing module for native assembly generation"))
+	BR_deallocDataBlocks(&_);
+	BR_deallocProcs(&_);
+	BR_deallocStructs(&_);
 
 	return acc;
 }

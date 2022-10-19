@@ -1,12 +1,12 @@
 // implementation for loading BRB modules from `.brb` files
-#include <brb.h>
+#include <br.h>
 #include <errno.h>
 
 typedef struct {
-	BRB_ModuleBuilder builder;
+	BR_ModuleBuilder* builder;
 	FILE* src;
 	long n_fetched;
-} BRB_ModuleLoader;
+} BR_ModuleLoader;
 
 static uint8_t loadInt8(FILE* fd, long* n_fetched)
 {
@@ -111,140 +111,140 @@ static void load2Ints(FILE* fd, uint64_t* x, uint64_t* y, long* n_fetched)
 	}
 }
 
-static BRB_Type loadType(FILE* src, long* n_fetched)
+static BR_Type loadType(FILE* src, long* n_fetched)
 {
 	uint8_t hb = loadHalfByte(src, n_fetched);
-	BRB_Type res = {
+	BR_Type res = {
 		.kind = 1 << hb,
 		.n_items = loadInt(src, n_fetched),
 	};
-	if (res.kind == BRB_TYPE_STRUCT)
+	if (res.kind == BR_TYPE_STRUCT)
 		res.struct_id = loadInt(src, n_fetched);
 	return res;
 }
 
-static BRB_Error loadDataBlockDecl(BRB_ModuleLoader* loader, uint32_t* n_pieces_p)
+static BR_Error loadDataBlockDecl(BR_ModuleLoader* loader, uint32_t* n_pieces_p)
 {
 // loading the flags
 	bool is_mutable = loadHalfByte(loader->src, &loader->n_fetched);
 // loading the name ID
 	const char* name = (const char*)loadInt(loader->src, &loader->n_fetched);
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DB_NAME};
+	if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_DB_NAME};
 // loading the body size
-	BRB_id db_id;
+	BR_id db_id;
 	*n_pieces_p = loadInt(loader->src, &loader->n_fetched);
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_DB_BODY_SIZE};
-	return BRB_addDataBlock(&loader->builder, &db_id, name, is_mutable, *n_pieces_p);
+	if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_DB_BODY_SIZE};
+	return BR_addDataBlock(loader->builder, &db_id, name, is_mutable, *n_pieces_p);
 }
 
-static BRB_Error loadOp(BRB_ModuleLoader* loader, BRB_id proc_id)
+static BR_Error loadOp(BR_ModuleLoader* loader, BR_id proc_id)
 {
-	BRB_Op op;
+	BR_Op op;
 // loading the type
 	op.type = loadInt8(loader->src, &loader->n_fetched);
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_OPCODE};
-	if (op.type >= BRB_N_OPS) return (BRB_Error){.type = BRB_ERR_INVALID_OPCODE, .opcode = op.type};
+	if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_OPCODE};
+	if (op.type >= BR_N_OPS) return (BR_Error){.type = BR_ERR_INVALID_OPCODE, .opcode = op.type};
 // loading the operand, if needed
-	switch (BRB_GET_OPERAND_TYPE(op.type)) {
-		case BRB_OPERAND_INT8:
+	switch (BR_GET_OPERAND_TYPE(op.type)) {
+		case BR_OPERAND_INT8:
 			op.operand_u = loadInt8(loader->src, &loader->n_fetched);
 			break;
-		case BRB_OPERAND_INT:
-		case BRB_OPERAND_BUILTIN:
-		case BRB_OPERAND_VAR_NAME:
-		case BRB_OPERAND_SYSCALL_NAME:
+		case BR_OPERAND_INT:
+		case BR_OPERAND_BUILTIN:
+		case BR_OPERAND_VAR_NAME:
+		case BR_OPERAND_SYSCALL_NAME:
 			op.operand_u = loadInt(loader->src, &loader->n_fetched);
 			break;
-		case BRB_OPERAND_DB_NAME:
+		case BR_OPERAND_DB_NAME:
 			op.operand_s = ~loadInt(loader->src, &loader->n_fetched);
 			break;
-		case BRB_OPERAND_TYPE:
+		case BR_OPERAND_TYPE:
 			op.operand_type = loadType(loader->src, &loader->n_fetched);
-		case BRB_OPERAND_NONE:
+		case BR_OPERAND_NONE:
 			break;
 		default:
 			assert(false, "invalid operation type info");
 	}
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_OPERAND, .opcode = op.type};
-	return BRB_addOp(&loader->builder, proc_id, op);
+	if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_OPERAND, .opcode = op.type};
+	return BR_addOp(loader->builder, proc_id, op);
 }
 
-static BRB_Error loadProcDecl(BRB_ModuleLoader* loader, uint32_t* n_ops_p)
+static BR_Error loadProcDecl(BR_ModuleLoader* loader, uint32_t* n_ops_p)
 {
 // loading the return type
-	BRB_Type ret_type = loadType(loader->src, &loader->n_fetched);
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_RET_TYPE};
+	BR_Type ret_type = loadType(loader->src, &loader->n_fetched);
+	if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_PROC_RET_TYPE};
 // loading the name ID and amount of arguments
 	uint64_t n_args, proc_name;
 	load2Ints(loader->src, &proc_name, &n_args, &loader->n_fetched);
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_NAME};
+	if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_PROC_NAME};
 // loading the arguments
-	BRB_Type args[n_args];
+	BR_Type args[n_args];
 	for (size_t i = 0; i < n_args; ++i) {
 		args[i] = loadType(loader->src, &loader->n_fetched);
-		if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_ARG};
+		if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_PROC_ARG};
 	}
 // loading the body size
-	BRB_id proc_id;
+	BR_id proc_id;
 	*n_ops_p = loadInt(loader->src, &loader->n_fetched);
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_PROC_BODY_SIZE};
-	return BRB_addProc(&loader->builder, &proc_id, (char*)proc_name, n_args, args, ret_type, *n_ops_p);
+	if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_PROC_BODY_SIZE};
+	return BR_addProc(loader->builder, &proc_id, (char*)proc_name, n_args, args, ret_type, *n_ops_p);
 }
 
-static BRB_Error loadStruct(BRB_ModuleLoader* loader)
+static BR_Error loadStruct(BR_ModuleLoader* loader)
 {
 	uint64_t name_id, n_fields;
 	load2Ints(loader->src, &name_id, &n_fields, &loader->n_fetched);
-	if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_STRUCT_DECL};
-	BRB_Type fields[n_fields];
+	if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_STRUCT_DECL};
+	BR_Type fields[n_fields];
 	for (uint64_t i = 0; i < n_fields; ++i) {
 		fields[i] = loadType(loader->src, &loader->n_fetched);
-		if (loader->n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_STRUCT_FIELD};
+		if (loader->n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_STRUCT_FIELD};
 	}
-	BRB_id struct_id;
-	return BRB_addStruct(&loader->builder, &struct_id, (char*)name_id, n_fields, fields);
+	BR_id struct_id;
+	return BR_addStruct(loader->builder, &struct_id, (char*)name_id, n_fields, fields);
 }
 
 typedef const char** field;
 declArray(field);
 defArray(field);
 
-static fieldArray getNameFields(BRB_Module* module)
+static fieldArray getNameFields(BR_Module* module)
 {
 	fieldArray res = fieldArray_new(-(int64_t)module->seg_data.length - module->seg_exec.length);
-	arrayForeach (BRB_DataBlock, block, module->seg_data) {
+	arrayForeach (BR_DataBlock, block, module->seg_data) {
 		fieldArray_append(&res, &block->name);
 	}
-	arrayForeach (BRB_Proc, proc, module->seg_exec) {
+	arrayForeach (BR_Proc, proc, module->seg_exec) {
 		fieldArray_append(&res, &proc->name);
 	}
-	arrayForeach (BRB_Struct, _struct, module->seg_typeinfo) {
+	arrayForeach (BR_Struct, _struct, module->seg_typeinfo) {
 		fieldArray_append(&res, &_struct->name);
 	}
 	return res;
 }
 
-BRB_Error BRB_loadModule(FILE* src, BRB_Module* dst)
+BR_Error BR_loadFromBytecode(FILE* src, BR_ModuleBuilder* dst)
 {
-	BRB_ModuleLoader loader = {0};
-	BRB_Error err;
+	if (dst->error.type) return dst->error;
+	BR_ModuleLoader loader = {.builder = dst};
+	BR_Error err;
 	loader.src = src;
-	BRB_initModuleBuilder(&loader.builder);
 // loading the header
-	char header[BRB_HEADER_SIZE];
+	char header[BR_HEADER_SIZE];
 	if (!fread(header, sizeof(header), 1, src))
-		return (BRB_Error){.type = BRB_ERR_NO_HEADER};
+		return (BR_Error){.type = BR_ERR_NO_HEADER};
 	loader.n_fetched += sizeof(header);
-	if (*(uint64_t*)header != *(uint64_t*)BRB_V1_HEADER.data)
-		return (BRB_Error){.type = BRB_ERR_INVALID_HEADER};
+	if (*(uint64_t*)header != *(uint64_t*)BR_V1_HEADER.data)
+		return (BR_Error){.type = BR_ERR_INVALID_HEADER};
 // loading the amount of data blocks, procedures and structs
 	uint64_t n_structs = loadInt(src, &loader.n_fetched),
 		n_dbs, n_procs;
 	load2Ints(src, &n_dbs, &n_procs, &loader.n_fetched);
-	if (loader.n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_SEG_SIZES};
-	if ((err = BRB_preallocDataBlocks(&loader.builder, n_dbs)).type) return err;
-	if ((err = BRB_preallocProcs(&loader.builder, n_procs)).type) return err;
-	if ((err = BRB_preallocStructs(&loader.builder, n_structs)).type) return err;
+	if (loader.n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_SEG_SIZES};
+	if ((err = BR_preallocDataBlocks(loader.builder, n_dbs)).type) return err;
+	if ((err = BR_preallocProcs(loader.builder, n_procs)).type) return err;
+	if ((err = BR_preallocStructs(loader.builder, n_structs)).type) return err;
 // loading the structs 
 	for (uint32_t i = 0; i < n_structs; ++i) {
 		if ((err = loadStruct(&loader)).type) return err;
@@ -260,12 +260,12 @@ BRB_Error BRB_loadModule(FILE* src, BRB_Module* dst)
 		if ((err = loadProcDecl(&loader, &n_ops_per_proc[i])).type) return err;
 	}
 // loading the execution entry point
-	loader.builder.module.exec_entry_point = loadInt(src, &loader.n_fetched);
-	if (loader.n_fetched < 0) return (BRB_Error){.type = BRB_ERR_NO_ENTRY};
+	loader.builder->module.exec_entry_point = loadInt(src, &loader.n_fetched);
+	if (loader.n_fetched < 0) return (BR_Error){.type = BR_ERR_NO_ENTRY};
 // loading the operations for the data blocks
 	for (size_t i = 0; i < (size_t)n_dbs; ++i) {
 		repeat (n_pieces_per_db[i]) {
-			if ((err = loadOp(&loader, ~(BRB_id)i)).type) return err;
+			if ((err = loadOp(&loader, ~(BR_id)i)).type) return err;
 		}
 	}
 // loading the operations for the procedures
@@ -275,18 +275,18 @@ BRB_Error BRB_loadModule(FILE* src, BRB_Module* dst)
 		}
 	}
 // loading the names
-	fieldArray unresolved = getNameFields(&loader.builder.module);
+	fieldArray unresolved = getNameFields(&loader.builder->module);
 	uint32_t resolved = 0;
 	sbuf name = {0};
 	for (uint32_t i = 0; true; ++i) {
 		name.length = getdelim(&name.data, &name.length, '\0', src);
 		if ((ssize_t)name.length < 0) {
 			if (ferror(src) || errno)
-				return (BRB_Error){.type = BRB_ERR_INVALID_NAME};
+				return (BR_Error){.type = BR_ERR_INVALID_NAME};
 			break;
 		}
 		if (name.data[name.length - 1] != '\0')
-			return (BRB_Error){.type = BRB_ERR_INVALID_NAME};
+			return (BR_Error){.type = BR_ERR_INVALID_NAME};
 		arrayForeach (field, name_p, unresolved) {
 			if ((uintptr_t)**name_p == i) {
 				**name_p = strdup(name.data);
@@ -297,8 +297,8 @@ BRB_Error BRB_loadModule(FILE* src, BRB_Module* dst)
 	sfree(&name);
 	if (resolved != unresolved.length) {
 		fieldArray_clear(&unresolved);
-		return (BRB_Error){.type = BRB_ERR_NAMES_NOT_RESOLVED};
+		return (BR_Error){.type = BR_ERR_NAMES_NOT_RESOLVED};
 	}
 	fieldArray_clear(&unresolved);
-	return BRB_extractModule(loader.builder, dst);
+	return (BR_Error){0};
 }
