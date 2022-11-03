@@ -1,74 +1,124 @@
 #ifndef _DATASETS_H
 #define _DATASETS_H
 
+#ifdef DS_NOSTDLIB
+/*
+if you want to use the library without a standard library, you need to define at least the following symbols from the standard library:
+	types: size_t, uint32_t, int64_t, va_list, bool;
+	functions: va_start, va_arg, va_end, memcpy, memmove;
+	constants: true, false;
+*/
+#else
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdarg.h>
-#include <br_utils.h>
-#include <math.h>
+#endif // DS_NOSTDLIB
 
 #define DS_DEF static __attribute__((unused))
+#define _DS_CAT(x, y) x##y
+#define DS_CAT(x, y) _DS_CAT(x, y)
+#define DS_TEMP DS_CAT(_ds_t, __LINE__)
 
-#define arrayForeach(T, item, array) \
-const T##Array TEMPVAR=(array);for(T*item=TEMPVAR.data;(uint64_t)(item-TEMPVAR.data)<TEMPVAR.length;++item)
-#define arrayRevForeach(T, item, array) \
-const T##Array TEMPVAR=(array);if(TEMPVAR.length)for(T*item=TEMPVAR.data+TEMPVAR.length-1;item>=TEMPVAR.data;--item)
-#define chainForeach(T, item, chain) \
-const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.start->value;item!=&TEMPVAR.end->next->value;item=&((T##Node*)((void**)item-1))->next->value)
-#define chainRevForeach(T, item, chain) \
-const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;item!=&TEMPVAR.start->prev->value;item=&((T##Node*)((void**)item-1))->prev->value)
+static inline void nothing(void){}
+ 
+#define arrayForeach(T, item, array) arrayForeach_as(T, T##Array, item, array)
+#define arrayForeach_as(T, name, item, array) \
+	nothing(); \
+ 	const name DS_TEMP = (array); \
+ 	for(T* item = DS_TEMP.data; (size_t)(item - DS_TEMP.data) < DS_TEMP.length; ++item)
+#define arrayRevForeach(T, item, arrayRev) arrayRevForeach_as(T, T##Array, item, arrayRev)
+#define arrayRevForeach_as(T, name, item, array) \
+	nothing(); \
+	const name DS_TEMP = (array); \
+	if (DS_TEMP.length) \
+		for (T* item = DS_TEMP.data + DS_TEMP.length - 1; item >= DS_TEMP.data; --item)
+#define chainForeach(T, item, chain) chainForeach_as(T, T##Chain, item, chain)
+#define chainForeach_as(T, name, item, chain) \
+	nothing(); \
+	const name DS_TEMP = (chain); \
+	if (DS_TEMP.start) \
+		for (T* item = &DS_TEMP.start->data; item != &DS_TEMP.end->next->data; item = &((name##Node*)((void**)item - 1))->next->data)
+#define chainRevForeach(T, item, chainRev) chainRevForeach_as(T, T##Chain, item, chainRev)
+#define chainRevForeach_as(T, name, item, chain) \
+	nothing(); \
+	const name DS_TEMP = (chain); \
+	if (DS_TEMP.start) \
+		for (T* item = &DS_TEMP.end->data; item != &DS_TEMP.start->prev->data; item = &((name##Node*)((void**)item - 1))->prev->data)
 
-#define repeat(n) for(uint64_t TEMPVAR = (n); TEMPVAR > 0; --TEMPVAR)
+#define repeat(n) for(int64_t DS_TEMP = (n); DS_TEMP > 0; --DS_TEMP)
+#define ARRAY_GROWTH(x) (((x) / 2) | 1)
 
-#define _str(T) #T
-#define ARRAY_GROWTH(x) (unsigned)ceilf((float)(x) / 2.0)
+typedef void* (*ds_alloc_f)(size_t n_bytes);
+typedef void* (*ds_realloc_f)(void* ptr, size_t n_bytes_old, size_t n_bytes_new);
+typedef void* (*ds_dealloc_f)(void* ptr, size_t n_bytes);
 
-#define arrayhead(array) ((array).data + (array).length - 1)
-#define declArray(T) \
-	typedef struct { uint32_t length; uint32_t cap; T* data; } T##Array; \
-	DS_DEF T##Array T##Array_new(int64_t n, ...); \
-	DS_DEF T* T##Array_append(T##Array* array, T object); \
-	DS_DEF T* T##Array_prepend(T##Array* array, T object); \
-	DS_DEF T* T##Array_extend(T##Array* array, T##Array sub); \
-	DS_DEF T* T##Array_get(T##Array array, int64_t index); \
-	DS_DEF T* T##Array_set(T##Array* array, int64_t index, T object); \
-	DS_DEF inline T##Array T##Array_slice(T##Array array, int64_t start, uint32_t length); \
-	DS_DEF T* T##Array_move(T##Array* array, int64_t index, uint32_t n, T dst[]); \
-	DS_DEF bool T##Array_del(T##Array* array, int64_t index, uint32_t n); \
-	DS_DEF T T##Array_pop(T##Array* array, int64_t index); \
-	DS_DEF bool T##Array_insert(T##Array* array, T##Array sub, int64_t index); \
-	DS_DEF bool T##Array_clear(T##Array* array); \
-	DS_DEF T* T##Array_incrlen(T##Array* array, uint32_t n); \
-	DS_DEF T##Array T##Array_copy(T##Array array); \
-	DS_DEF bool T##Array_incrcap(T##Array* array, uint32_t new_cap); \
+#define ds_defaultAlloc(n_bytes) malloc(n_bytes)
+#define ds_defaultRealloc(ptr, n_bytes_old, n_bytes_new) realloc(ptr, n_bytes_new)
+#define ds_defaultDealloc(ptr, n_bytes) free(ptr)
 
 #define defArray(T) \
-	DS_DEF T##Array T##Array_new(int64_t n, ...) { \
+	declArray(T); \
+	implArray(T)
+#define defArray_as(T, name) \
+	declArray_as(T, name); \
+	implArray_as(T, name)
+#define defArray_customAllocator(T, _alloc_f, _realloc_f, _dealloc_f) \
+	declArray(T); \
+	implArray_customAllocator(T, _alloc_f, _realloc_f, _dealloc_f) 
+#define defArray_customAllocator_as(T, name, _alloc_f, _realloc_f, _dealloc_f) \
+	declArray_as(T, name); \
+	implArray_customAllocator_as(T, name, _alloc_f, _realloc_f, _dealloc_f)
+
+#define arrayhead(array) ((array).data + (array).length - 1)
+#define declArray(T) declArray_as(T, T##Array)
+#define declArray_as(T, name) \
+	typedef struct { uint32_t length; uint32_t cap; T* data; } name; \
+	DS_DEF name name##_new(int64_t n, ...); \
+	DS_DEF T* name##_append(name* array, T object); \
+	DS_DEF T* name##_prepend(name* array, T object); \
+	DS_DEF T* name##_extend(name* array, name sub); \
+	DS_DEF T* name##_get(name array, int64_t index); \
+	DS_DEF T* name##_set(name* array, int64_t index, T object); \
+	DS_DEF inline name name##_slice(name array, int64_t start, uint32_t length); \
+	DS_DEF T* name##_move(name* array, int64_t index, uint32_t n, T dst[]); \
+	DS_DEF bool name##_del(name* array, int64_t index, uint32_t n); \
+	DS_DEF T name##_pop(name* array, int64_t index); \
+	DS_DEF bool name##_insert(name* array, name sub, int64_t index); \
+	DS_DEF bool name##_clear(name* array); \
+	DS_DEF T* name##_incrlen(name* array, uint32_t n); \
+	DS_DEF name name##_copy(name array); \
+	DS_DEF bool name##_incrcap(name* array, uint32_t new_cap); \
+
+#define implArray(T) implArray_customAllocator_as(T, T##Array, ds_defaultAlloc, ds_defaultRealloc, ds_defaultDealloc)
+#define implArray_as(T, name) implArray_customAllocator_as(T, name, ds_defaultAlloc, ds_defaultRealloc, ds_defaultDealloc)
+#define implArray_customAllocator(T, _alloc_f, _realloc_f, _dealloc_f) implArray_customAllocator_as(T, T##Array, _alloc_f, _realloc_f, _dealloc_f)
+#define implArray_customAllocator_as(T, name, _alloc_f, _realloc_f, _dealloc_f) \
+	DS_DEF name name##_new(int64_t n, ...) { \
 		va_list args; \
 		va_start(args, n); \
-		T##Array res; \
+		name res; \
 		res.length = n < 0 ? 0 : n; \
 		if (n < 0) n = -n; \
 		res.cap = n + ARRAY_GROWTH(n); \
-		res.data = malloc(res.cap * sizeof(T)); \
+		res.data = _alloc_f(res.cap * sizeof(T)); \
 		for (uint32_t i = 0; i < res.length; ++i) { \
 			res.data[i] = va_arg(args, T); \
 		} \
 		va_end(args); \
 		return res; \
 	} \
-	DS_DEF T* T##Array_append(T##Array* array, T object) { \
+	DS_DEF T* name##_append(name* array, T object) { \
 		if (array->cap < ++array->length) \
-			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) { \
+			if (!name##_incrcap(array, ARRAY_GROWTH(array->length))) { \
 				--array->length; \
 				return NULL; \
 			} \
 		return memcpy(&array->data[array->length - 1], &object, sizeof(T)); \
 	} \
-	DS_DEF T* T##Array_prepend(T##Array* array, T object) { \
+	DS_DEF T* name##_prepend(name* array, T object) { \
 		if (array->cap < ++array->length) \
-			if (!T##Array_incrcap(array, ARRAY_GROWTH(array->length))) { \
+			if (!name##_incrcap(array, ARRAY_GROWTH(array->length))) { \
 				--array->length; \
 				return NULL; \
 			} \
@@ -78,32 +128,32 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 			sizeof(T) \
 		); \
 	} \
-	DS_DEF T* T##Array_extend(T##Array* array, T##Array sub) { \
+	DS_DEF T* name##_extend(name* array, name sub) { \
 		if (array->cap < (array->length += sub.length)) \
-			if (!T##Array_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) { \
+			if (!name##_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) { \
 				array->length -= sub.length; \
 				return NULL; \
 			} \
-		return memcpy(array->data + array->length, sub.data, sub.length * sizeof(T)); \
+		return memcpy(array->data + array->length - sub.length, sub.data, sub.length * sizeof(T)); \
 	} \
-	DS_DEF T* T##Array_get(T##Array array, int64_t index) { \
+	DS_DEF T* name##_get(name array, int64_t index) { \
 		index = index >= 0 ? index : array.length + index; \
 		if ((uint64_t)index >= array.length) return NULL; \
 		return array.data + index; \
 	} \
-	DS_DEF T* T##Array_set(T##Array* array, int64_t index, T object) { \
+	DS_DEF T* name##_set(name* array, int64_t index, T object) { \
 		index = index >= 0 ? index : array->length + index; \
 		if ((uint64_t)index >= array->length) return NULL; \
 		array->data[index] = object; \
 		return &array->data[index]; \
 	} \
-	DS_DEF T* T##Array_move(T##Array* array, int64_t index, uint32_t n, T dst[]) { \
+	DS_DEF T* name##_move(name* array, int64_t index, uint32_t n, T dst[]) { \
 		index = index >= 0 ? index : array->length + index; \
 		if (index + n > array->length) return NULL; \
 		memmove(dst, array->data + index, n * sizeof(T)); \
 		memmove(array->data + index, array->data + index + n, ((array->length -= n) - index) * sizeof(T)); \
 		if (array->cap > array->length + ARRAY_GROWTH(array->length)) { \
-			void* res = realloc(array->data, (array->cap -= n) * sizeof(T)); \
+			void* res = _realloc_f(array->data, array->cap * sizeof(T), (array->cap -= n) * sizeof(T)); \
 			if (res || !array->length) { \
 				array->data = res; \
 				return dst; \
@@ -114,11 +164,11 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		} \
 		return dst; \
 	} \
-	DS_DEF bool T##Array_del(T##Array* array, int64_t index, uint32_t n) { \
+	DS_DEF bool name##_del(name* array, int64_t index, uint32_t n) { \
 		T deleted[n]; \
 		index = index >= 0 ? index : array->length + index; \
 		if (index + n > array->length) return false; \
-		if (!T##Array_move(array, index, n, deleted)) { \
+		if (!name##_move(array, index, n, deleted)) { \
 			for (uint64_t i = index; i < (uint32_t)(index + n); ++i) { \
 				array->data[i + n] = array->data[i]; \
 				array->data[i] = deleted[i - index]; \
@@ -127,16 +177,16 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		} \
 		return true; \
 	} \
-	DS_DEF T T##Array_pop(T##Array* array, int64_t index) { \
+	DS_DEF T name##_pop(name* array, int64_t index) { \
 		T res = (T){0}; \
-		if (!T##Array_move(array, index, 1, &res)) return (T){0}; \
+		if (!name##_move(array, index, 1, &res)) return (T){0}; \
 		return res; \
 	} \
-	DS_DEF bool T##Array_insert(T##Array* array, T##Array sub, int64_t index) { \
+	DS_DEF bool name##_insert(name* array, name sub, int64_t index) { \
 		index = index >= 0 ? index : array->length + index; \
 		if ((uint64_t)index >= array->length) return false; \
 		if (array->cap < (array->length += sub.length - 1)) \
-			if (!T##Array_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) { \
+			if (!name##_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) { \
 				array->length -= sub.length - 1; \
 				return false; \
 			} \
@@ -148,31 +198,31 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		} \
 		return true; \
 	} \
-	DS_DEF T* T##Array_incrlen(T##Array* array, uint32_t n) { \
+	DS_DEF T* name##_incrlen(name* array, uint32_t n) { \
 		if ((array->length += n) > array->cap) \
-			if (!T##Array_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) return NULL; \
+			if (!name##_incrcap(array, array->length - array->cap + ARRAY_GROWTH(array->length))) return NULL; \
 		return &array->data[array->length - n]; \
 	} \
-	DS_DEF bool T##Array_clear(T##Array* array) { \
+	DS_DEF bool name##_clear(name* array) { \
 		if (!array->length) return true; \
-		free(array->data); \
-		*array = (T##Array){0}; \
+		_dealloc_f(array->data, array->cap * sizeof(T)); \
+		*array = (name){0}; \
 		return true; \
 	} \
-	DS_DEF inline T##Array T##Array_slice(T##Array array, int64_t start, uint32_t length) { \
+	DS_DEF inline name name##_slice(name array, int64_t start, uint32_t length) { \
 		if (start < 0) start = array.length - start;\
 		array.data += start; \
 		array.length = length; \
 		array.cap = 0; \
 		return array; \
 	} \
-	DS_DEF T##Array T##Array_copy(T##Array array) { \
-		array.data = memcpy(malloc(array.length * sizeof(T)), array.data, array.length * sizeof(T)); \
+	DS_DEF name name##_copy(name array) { \
+		array.data = memcpy(_alloc_f(array.length * sizeof(T)), array.data, array.length * sizeof(T)); \
 		array.cap = array.length; \
 		return array; \
 	} \
-	DS_DEF bool T##Array_incrcap(T##Array* array, uint32_t n) { \
-		register T* new_ptr = realloc(array->data, (array->cap += n) * sizeof(T)); \
+	DS_DEF bool name##_incrcap(name* array, uint32_t n) { \
+		register T* new_ptr = _realloc_f(array->data, array->cap * sizeof(T), (array->cap += n) * sizeof(T)); \
 		if (!new_ptr) { \
 			array->cap -= n; \
 			return false; \
@@ -181,55 +231,73 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		return true; \
 	} \
 
-#define declChain(T) \
-	typedef struct T##_node { struct T##_node* prev; T value; struct T##_node* next; } T##Node; \
-	typedef struct T##_chain { T##Node* start; T##Node* end; } T##Chain; \
-	DS_DEF T##Chain T##Chain_new(uint64_t n, ...); \
-	DS_DEF T* T##Chain_append(T##Chain* chain, T object); \
-	DS_DEF T* T##Chain_extend(T##Chain* chain, T##Chain sub); \
-	DS_DEF T T##Chain_get(T##Chain chain, int64_t index); \
-	DS_DEF T* T##Chain_getref(T##Chain chain, int64_t index); \
-	DS_DEF void T##Chain_set(T##Chain* chain, int64_t index, T object); \
-	DS_DEF T T##Chain_pop(T##Chain* chain, int64_t index); \
-	DS_DEF bool T##Chain_insert(T##Chain* chain, T##Chain sub, int64_t index); \
-	DS_DEF bool T##Chain_clear(T##Chain* chain); \
-	DS_DEF inline T##Chain T##Chain_slice(T##Chain chain, int64_t start, int64_t end); \
-
 #define defChain(T) \
-	DS_DEF T##Chain T##Chain_new(uint64_t n, ...) { \
-		if (n == 0) return (T##Chain){0}; \
+	declChain(T); \
+	implChain(T)
+#define defChain_as(T, name) \
+	declChain_as(T, name); \
+	implChain_as(T, name)
+#define defChain_customAllocator(T, _alloc_f, _dealloc_f) \
+	declChain(T); \
+	implChain_customAllocator(T, _alloc_f, _dealloc_f) 
+#define defChain_customAllocator_as(T, name, _alloc_f, _dealloc_f) \
+	declChain_as(T, name); \
+	implChain_customAllocator_as(T, name, _alloc_f, _dealloc_f)
+
+#define declChain(T) declChain_as(T, T##Chain)
+#define declChain_as(T, name) \
+	typedef struct name##Node name##Node; \
+	struct name##Node { name##Node* prev; T data; name##Node* next; }; \
+	typedef struct { name##Node* start; name##Node* end; } name; \
+	DS_DEF name name##_new(uint64_t n, ...); \
+	DS_DEF T* name##_append(name* chain, T object); \
+	DS_DEF T* name##_extend(name* chain, name sub); \
+	DS_DEF T name##_get(name chain, int64_t index); \
+	DS_DEF T* name##_getref(name chain, int64_t index); \
+	DS_DEF void name##_set(name* chain, int64_t index, T object); \
+	DS_DEF T name##_pop(name* chain, int64_t index); \
+	DS_DEF bool name##_insert(name* chain, name sub, int64_t index); \
+	DS_DEF bool name##_clear(name* chain); \
+	DS_DEF inline name name##_slice(name chain, int64_t start, int64_t end) \
+
+#define implChain(T) implChain_customAllocator_as(T, T##Chain, ds_defaultAlloc, ds_defaultDealloc)
+#define implChain_as(T) implChain_customAllocator_as(T, name, ds_defaultAlloc, ds_defaultDealloc)
+#define implChain_customAllocator(T, _alloc_f, _dealloc_f) implChain_customAllocator_as(T, T##Chain, _alloc_f, _dealloc_f)
+#define implChain_customAllocator_as(T, name, _alloc_f, _dealloc_f) \
+	DS_DEF name name##_new(uint64_t n, ...) { \
+		if (n == 0) return (name){0}; \
 		va_list args; \
 		va_start(args, n); \
-		T##Chain res; \
-		T##Node* _res = malloc(sizeof(T##Node)); \
+		name res; \
+		name##Node* _res = _alloc_f(sizeof(name##Node)); \
 		_res->prev = NULL; \
-		_res->value = va_arg(args, T); \
+		_res->data = va_arg(args, T); \
 		_res->next = NULL; \
 		res.start = res.end = _res; \
 		for (uint64_t i = 1; i < n; ++i) { \
-			_res = malloc(sizeof(T##Node));  \
+			_res = _alloc_f(sizeof(name##Node));  \
 			_res->prev = res.end; \
-			_res->value = va_arg(args, T); \
+			_res->data = va_arg(args, T); \
 			_res->next = NULL; \
 			res.end->next = _res; \
 			res.end = _res; \
 		} \
 		return res; \
 	} \
-	DS_DEF T* T##Chain_append(T##Chain* chain, T obj) { \
-		T##Node* _res = malloc(sizeof(T##Node)); \
+	DS_DEF T* name##_append(name* chain, T obj) { \
+		name##Node* _res = _alloc_f(sizeof(name##Node)); \
 		if (!_res) return NULL; \
 		_res->prev = chain->end; \
 		_res->next = NULL; \
-		_res->value = obj; \
+		_res->data = obj; \
 		if (!chain->start) { \
 			chain->start = _res; \
 		} else chain->end->next = _res; \
 		chain->end = _res; \
-		return &chain->end->value; \
+		return &chain->end->data; \
 	} \
-	DS_DEF T##Node* T##Chain_getnode(T##Chain chain, int64_t index) { \
-		T##Node* res; \
+	DS_DEF name##Node* name##_getnode(name chain, int64_t index) { \
+		name##Node* res; \
 		if (index >= 0) { \
 			res = chain.start; \
 			for (uint64_t i = 0; i < (uint64_t)index && res != NULL; ++i) res = res->next; \
@@ -240,20 +308,20 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		} \
 		return res; \
 	} \
-	DS_DEF T T##Chain_get(T##Chain chain, int64_t index) { \
-		T##Node* res = T##Chain_getnode(chain, index); \
-		return res ? res->value : (T){0}; \
+	DS_DEF T name##_get(name chain, int64_t index) { \
+		name##Node* res = name##_getnode(chain, index); \
+		return res ? res->data : (T){0}; \
 	} \
-	DS_DEF T* T##Chain_getref(T##Chain chain, int64_t index) { \
-		T##Node* res = T##Chain_getnode(chain, index); \
-		return res ? &res->value : NULL; \
+	DS_DEF T* name##_getref(name chain, int64_t index) { \
+		name##Node* res = name##_getnode(chain, index); \
+		return res ? &res->data : NULL; \
 	} \
-	DS_DEF void T##Chain_set(T##Chain* chain, int64_t index, T object) { \
-		T##Node* res = T##Chain_getnode(*chain, index); \
-		res->value = object; \
+	DS_DEF void name##_set(name* chain, int64_t index, T object) { \
+		name##Node* res = name##_getnode(*chain, index); \
+		res->data = object; \
 	} \
-	DS_DEF bool T##Chain_insert(T##Chain* chain, T##Chain sub, int64_t index) { \
-		T##Node* prev = T##Chain_getnode(*chain, index); \
+	DS_DEF bool name##_insert(name* chain, name sub, int64_t index) { \
+		name##Node* prev = name##_getnode(*chain, index); \
 		if (!sub.start) return true; \
 		if (!chain->start) { \
 			chain->start = sub.start; \
@@ -274,35 +342,35 @@ const T##Chain TEMPVAR=(chain);if(TEMPVAR.start)for(T*item=&TEMPVAR.end->value;i
 		} \
 		return true; \
 	} \
-	DS_DEF T T##Chain_pop(T##Chain* chain, int64_t index) { \
-		T##Node* node = T##Chain_getnode(*chain, index); \
+	DS_DEF T name##_pop(name* chain, int64_t index) { \
+		name##Node* node = name##_getnode(*chain, index); \
 		if (node == chain->start) chain->start = chain->start->next; \
 		if (node == chain->end) chain->end = chain->end->prev; \
 		if (node->prev) node->prev->next = node->next; \
 		if (node->next) node->next->prev = node->prev; \
-		T res = node->value; \
-		free(node); \
+		T res = node->data; \
+		_dealloc_f(node, sizeof(name##Node)); \
 		return res; \
 	} \
-	DS_DEF uint64_t T##Chain_length(T##Chain chain) { \
+	DS_DEF uint64_t name##_length(name chain) { \
 		uint64_t res = 0; \
-		chainForeach(T, item, chain) res += 1; \
+		chainForeach_as(T, name, item, chain) res += 1; \
 		return res; \
 	} \
-	DS_DEF bool T##Chain_clear(T##Chain* chain) { \
+	DS_DEF bool name##_clear(name* chain) { \
 		if (!chain->end) return true; \
-		T##Node* nextnode; \
-		for (T##Node* node = chain->start; node != NULL; node = nextnode) { \
+		name##Node* nextnode; \
+		for (name##Node* node = chain->start; node != NULL; node = nextnode) { \
 			nextnode = node->next; \
-			free(node); \
+			_dealloc_f(node, sizeof(name##Node)); \
 		} \
 		chain->end = NULL; \
 		chain->start = NULL; \
 		return true; \
 	} \
-	DS_DEF inline T##Chain T##Chain_slice(T##Chain chain, int64_t start, int64_t end) { \
-		T##Node* first = T##Chain_getnode(chain, start); \
-		chain.end = T##Chain_getnode(chain, end); \
+	DS_DEF inline name name##_slice(name chain, int64_t start, int64_t end) { \
+		name##Node* first = name##_getnode(chain, start); \
+		chain.end = name##_getnode(chain, end); \
 		chain.start = first; \
 		return chain; \
 	} \

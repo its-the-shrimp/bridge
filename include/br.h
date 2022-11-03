@@ -495,7 +495,7 @@ typedef struct {
 } BR_Module;
 
 #define BR_HEADER_SIZE 8
-#define BR_V1_HEADER fromcstr("BRBv1\0\0\0")
+#define BR_V1_HEADER sbuf_fromcstr("BRBv1\0\0\0")
 
 typedef enum {
 	BR_ERR_OK,
@@ -630,7 +630,7 @@ typedef struct {
 } BR_ProcessInfo;
 
 // exEcutes the command in a subshell and returns the IO descriptors and the exitcode of the process
-bool BR_execProcess(char* command, BR_ProcessInfo* info);
+bool BR_execProcess(char* argv[], BR_ProcessInfo* info);
 // same as execProcess(), but command is provided in the form of a sized buffer
 bool BR_execProcess_s(sbuf command, BR_ProcessInfo* info);
 
@@ -685,20 +685,32 @@ typedef struct {
 typedef int64_t BR_id; // an ID of either a procedure or a data block
 #define BR_INVALID_ID INT64_MIN
 
-typedef enum {BR_CERR_OK} BR_CompilationErrorType;
+typedef enum {
+	BR_CERR_OK,
+	BR_CERR_OPERATOR_EXPECTED,
+	BR_CERR_OPERAND_EXPECTED,
+	BR_CERR_EXTRA_BRACKET,
+	BR_CERR_PREP_FAILURE,
+	BR_CERR_UNCLOSED_BRACKET,
+	BR_CERR_MISMATCHED_BRACKET,
+	BR_CERR_MULTIPLE_EXPRS_IN_BRACKETS
+} BR_CompilationErrorType;
 
 typedef struct {
 	BR_CompilationErrorType type;
-	BRP_TokenLoc loc;
+	BRP_Token loc;
+	BRP_Token other_loc;
+	BRP* prep;
 } BR_CompilationError;
 
 // implemented in `src/libbr_core.c`
 void     BR_printErrorMsg(FILE* dst, BR_Error err, const char* prefix);
-char*    BR_getErrorMsg(BR_Error err, const char* prefix);
 FILE*    BR_findModule(const char* module_name, const char* search_paths[]);
 
 BR_Error BR_initModuleBuilder(BR_ModuleBuilder* builder);
 BR_Error BR_analyzeModule(const BR_Module* module, BR_ModuleBuilder* dst);
+void     BR_delModuleBuilder(BR_ModuleBuilder builder);
+void     BR_delModule(BR_Module module);
 BR_Error BR_extractModule(BR_ModuleBuilder builder, BR_Module* dst);
 BR_Error BR_setEntryPoint(BR_ModuleBuilder* builder, size_t proc_id);
 BR_Error BR_addOp(BR_ModuleBuilder* builder, BR_id proc_id, BR_Op op);
@@ -706,27 +718,27 @@ BR_Error BR_addOp(BR_ModuleBuilder* builder, BR_id proc_id, BR_Op op);
 BR_Error BR_preallocStructs(BR_ModuleBuilder* builder, uint32_t n_structs_hint);
 void     BR_deallocStructs(BR_Module* module);
 BR_Error BR_addStruct(BR_ModuleBuilder* builder, BR_id* struct_id_p, const char* name, uint32_t n_fields, BR_Type* fields);
-BR_id    BR_getStructIdByName(BR_Module* module, const char* name);
+BR_id    BR_getStructIdByName(const BR_Module* module, const char* name);
 
 BR_Error BR_preallocProcs(BR_ModuleBuilder* builder, uint32_t n_procs_hint);
 void     BR_deallocProcs(BR_Module* module);
-BR_Error BR_addProc(BR_ModuleBuilder* builder, BR_id* proc_id_p, const char* name, size_t n_args, BR_Type* args, BR_Type ret_type, uint32_t n_ops_hint);
-BR_id    BR_getProcIdByName(BR_Module* module, const char* name); // returns BR_INVALID_ID on error
+BR_Error BR_addProc(BR_ModuleBuilder* builder, BR_id* proc_id_p, const char* name, size_t n_args, const BR_Type* args, BR_Type ret_type, uint32_t n_ops_hint);
+BR_id    BR_getProcIdByName(const BR_Module* module, const char* name); // returns BR_INVALID_ID on error
 
 BR_Error BR_preallocDataBlocks(BR_ModuleBuilder* builder, uint32_t n_dbs_hint);
 void     BR_deallocDataBlocks(BR_Module* module);
 BR_Error BR_addDataBlock(BR_ModuleBuilder* builder, BR_id* db_id_p, const char* name, bool is_mutable, uint32_t n_pieces_hint);
-BR_id    BR_getDataBlockIdByName(BR_Module* module, const char* name); // returns BR_INVALID_ID on error
+BR_id    BR_getDataBlockIdByName(const BR_Module* module, const char* name); // returns BR_INVALID_ID on error
 
 BR_Op*   BR_getOp(BR_Module* module, BR_id proc_id, uint32_t op_id);
 BR_Error BR_labelStackItem(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, uint32_t item_id, const char* name);
-bool     BR_getStackItemType(BR_ModuleBuilder* builder, BR_Type* dst, BR_id proc_id, uint32_t op_id, uint32_t item_id);
-size_t   BR_getStackItemRTOffset(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, size_t item_id); // if `item_id` is not SIZE_MAX, returns SIZE_MAX on error
-size_t   BR_getStackRTSize(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id);
-size_t   BR_getMaxStackRTSize(BR_ModuleBuilder* builder, BR_id proc_id);
-size_t   BR_getStackItemRTSize(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
-size_t   BR_getStackItemIdByName(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, const char* name); // returns SIZE_MAX on error
-size_t   BR_getTypeRTSize(BR_Module* module, BR_Type type);
+bool     BR_getStackItemType(const BR_ModuleBuilder* builder, BR_Type* dst, BR_id proc_id, uint32_t op_id, uint32_t item_id);
+size_t   BR_getStackItemRTOffset(const BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, size_t item_id); // if `item_id` is not SIZE_MAX, returns SIZE_MAX on error
+size_t   BR_getStackRTSize(const BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id);
+size_t   BR_getMaxStackRTSize(const BR_ModuleBuilder* builder, BR_id proc_id);
+size_t   BR_getStackItemRTSize(const BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, uint32_t item_id); // returns SIZE_MAX on error
+size_t   BR_getStackItemIdByName(const BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, const char* name); // returns SIZE_MAX on error
+size_t   BR_getTypeRTSize(const BR_Module* module, BR_Type type);
 
 // implemented in `src/libbr_write.c`
 long     BR_writeModule(BR_Module src, FILE* dst);
@@ -746,10 +758,11 @@ long     BR_printType(BR_Type type, FILE* dst);
 long     BR_disassembleModule(const BR_Module* module, FILE* dst);
 
 // implemented in `src/libbr_native_codegen.c`
-long     BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst);
+long     BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst, char** entry_point_name);
 
 // implemented in `src/libbr_compiler.c`
 BR_CompilationError BR_loadFromSource(FILE* input, const char* input_name, BR_ModuleBuilder* dst);
+void                BR_printCompilationErrorMsg(FILE* dst, BR_CompilationError err, const char* prefix);
 
 // TODO: add the `const`s wherever possible
 #endif // _BRIDGE_

@@ -61,8 +61,5 @@ if is_outdated(LIB/"libbrb.dylib", *SRC.glob("brb_*"), *INCLUDE.glob("*")):
 	exec_cmd("cc", *CFLAGS, "-shared", "-o", LIB/"libbr.dylib", *PWD.glob("libbr_*.o"))
 	for path in PWD.glob("libbr_*.o"): path.unlink()
 
-# if is_outdated(BIN/"bridge", SRC/"brc.c", *INCLUDE.glob("*")):
-#	exec_cmd("cc", *CFLAGS, *LFLAGS, "-o", BIN/"bridge", SRC/"brc.c")
-
-#if is_outdated(BIN/"brbd", SRC/"brbd.c", *INCLUDE.glob("*")):
-#	exec_cmd("cc", *CFLAGS, *LFLAGS, "-o", BIN/"brbd", SRC/"brbd.c")
+if is_outdated(BIN/"bridge", SRC/"bridge.c", *INCLUDE.glob("*")):
+      exec_cmd("cc", *CFLAGS, *LFLAGS, "-o", BIN/"bridge", SRC/"bridge.c")

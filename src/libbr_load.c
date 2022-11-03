@@ -205,9 +205,7 @@ static BR_Error loadStruct(BR_ModuleLoader* loader)
 	return BR_addStruct(loader->builder, &struct_id, (char*)name_id, n_fields, fields);
 }
 
-typedef const char** field;
-declArray(field);
-defArray(field);
+defArray_as(const char**, fieldArray);
 
 static fieldArray getNameFields(BR_Module* module)
 {
@@ -287,14 +285,14 @@ BR_Error BR_loadFromBytecode(FILE* src, BR_ModuleBuilder* dst)
 		}
 		if (name.data[name.length - 1] != '\0')
 			return (BR_Error){.type = BR_ERR_INVALID_NAME};
-		arrayForeach (field, name_p, unresolved) {
+		arrayForeach_as (const char**, fieldArray, name_p, unresolved) {
 			if ((uintptr_t)**name_p == i) {
 				**name_p = strdup(name.data);
 				++resolved;
 			}
 		}
 	}
-	sfree(&name);
+	sbuf_dealloc(&name);
 	if (resolved != unresolved.length) {
 		fieldArray_clear(&unresolved);
 		return (BR_Error){.type = BR_ERR_NAMES_NOT_RESOLVED};

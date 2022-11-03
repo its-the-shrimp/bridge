@@ -7,10 +7,10 @@
 
 static long printLabel(FILE* dst, const char* label, const char* prefix)
 {
-	return fputstr(dst, "\"")
-		+ fputstr(dst, prefix)
-		+ fputstresc(dst, label, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE)
-		+ fputstr(dst, "\"");
+	return str_fput(dst, "\"")
+		+ str_fput(dst, prefix)
+		+ str_fputesc(dst, label, SBUF_BFMT_HEX | SBUF_BFMT_ESC_DQUOTE)
+		+ str_fput(dst, "\"");
 }
 
 typedef struct { // a rule specifying what literal values are allowed
@@ -219,9 +219,9 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BR_id proc_id, uint32_
 	char offset_s[32], value_s[32];
 	switch (op->type) {
 		case BR_OP_NOP:
-			return acc + fputstr(dst, "\tnop\n");
+			return acc + str_fput(dst, "\tnop\n");
 		case BR_OP_END:
-			return acc + fputstr(dst,
+			return acc + str_fput(dst,
 				"\tmov\tx0,\t0\n"
 				"\tmov\tx16,\t1\n"
 				"\tsvc\t0\n");
@@ -256,18 +256,18 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BR_id proc_id, uint32_
 				+ fprintf(ctx->dst, "\tstr\tx8, %s\n", offset_s);
 		}
 		case BR_OP_DBADDR: // TODO: utilize arm64 `adr` instruction for data blocks that are put into the `text` segment
-			return fputstr(ctx->dst, "\tadrp\tx8, ")
+			return str_fput(ctx->dst, "\tadrp\tx8, ")
 				+ printLabel(ctx->dst, ctx->builder.module.seg_data.data[~op->operand_s].name, "_")
-				+ fputstr(ctx->dst, "@PAGE\n\tadd\tx8, x8, ")
+				+ str_fput(ctx->dst, "@PAGE\n\tadd\tx8, x8, ")
 				+ printLabel(ctx->dst, ctx->builder.module.seg_data.data[~op->operand_s].name, "_")
-				+ fputstr(ctx->dst, "@PAGEOFF\n")
+				+ str_fput(ctx->dst, "@PAGEOFF\n")
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 9, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr\tx8, %s\n", offset_s);
 		case BR_OP_SYS: {
 			static sbuf sys_to_proc_name[] = {
-				[BR_SYS_EXIT] = fromcstr("\tbl\t_exit\n"),
-				[BR_SYS_WRITE] = fromcstr("\tbl\t_write\n"),
-				[BR_SYS_READ] = fromcstr("\tbl\t_read\n")
+				[BR_SYS_EXIT] = sbuf_fromcstr("\tbl\t_exit\n"),
+				[BR_SYS_WRITE] = sbuf_fromcstr("\tbl\t_write\n"),
+				[BR_SYS_READ] = sbuf_fromcstr("\tbl\t_read\n")
 			};
 			arm64_RegCtx reg_ctx = {0};
 			for (uint8_t i = 0; i < BR_syscallNArgs[op->operand_u]; ++i) {
@@ -275,7 +275,7 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BR_id proc_id, uint32_
 					+ fprintf(dst, "\tldr\tx%hhu, %s\n", i, offset_s);
 			}
 			return acc
-				+ fputsbuf(dst, sys_to_proc_name[op->operand_u])
+				+ sbuf_fput(dst, sys_to_proc_name[op->operand_u])
 				+ (op->operand_u == BR_SYS_EXIT ? 0
 					: getStackAddr_arm64(ctx, sp, vframe_offset, 8, NULL, AOR_LDR64, sizeof(offset_s), offset_s)
 						+ fprintf(dst, "\tstr\tx0, %s\n", offset_s));
@@ -299,21 +299,21 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BR_id proc_id, uint32_
 		case BR_OP_SHR:
 		case BR_OP_SHRS: {
 			static const sbuf native_op[] = {
-				[BR_OP_ADD]  = fromcstr("\tadd\tx9, x9, x10\n"),
-				[BR_OP_SUB]  = fromcstr("\tsub\tx9, x9, x10\n"),
-				[BR_OP_MUL]  = fromcstr("\tmul\tx9, x9, x10\n"),
-				[BR_OP_DIV]  = fromcstr("\tudiv\tx9, x9, x10\n"),
-				[BR_OP_DIVS] = fromcstr("\tsdiv\tx9, x9, x10\n"),
-				[BR_OP_MOD]  = fromcstr("\tudiv\tx11, x9, x10\n"
+				[BR_OP_ADD]  = sbuf_fromcstr("\tadd\tx9, x9, x10\n"),
+				[BR_OP_SUB]  = sbuf_fromcstr("\tsub\tx9, x9, x10\n"),
+				[BR_OP_MUL]  = sbuf_fromcstr("\tmul\tx9, x9, x10\n"),
+				[BR_OP_DIV]  = sbuf_fromcstr("\tudiv\tx9, x9, x10\n"),
+				[BR_OP_DIVS] = sbuf_fromcstr("\tsdiv\tx9, x9, x10\n"),
+				[BR_OP_MOD]  = sbuf_fromcstr("\tudiv\tx11, x9, x10\n"
 							 "\tmsub\tx9, x11, x10, x9\n"),
-				[BR_OP_MODS] = fromcstr("\tsdiv\tx11, x9, x10\n"
+				[BR_OP_MODS] = sbuf_fromcstr("\tsdiv\tx11, x9, x10\n"
 							 "\tmsub\tx9, x11, x10, x9\n"),
-				[BR_OP_AND]  = fromcstr("\tand\tx9, x9, x10\n"),
-				[BR_OP_OR]   = fromcstr("\torr\tx9, x9, x10\n"),
-				[BR_OP_XOR]  = fromcstr("\teor\tx9, x9, x10\n"),
-				[BR_OP_SHL]  = fromcstr("\tlsl\tx9, x9, x10\n"),
-				[BR_OP_SHR]  = fromcstr("\tlsr\tx9, x9, x10\n"),
-				[BR_OP_SHRS] = fromcstr("\tasr\tx9, x9, x10\n")
+				[BR_OP_AND]  = sbuf_fromcstr("\tand\tx9, x9, x10\n"),
+				[BR_OP_OR]   = sbuf_fromcstr("\torr\tx9, x9, x10\n"),
+				[BR_OP_XOR]  = sbuf_fromcstr("\teor\tx9, x9, x10\n"),
+				[BR_OP_SHL]  = sbuf_fromcstr("\tlsl\tx9, x9, x10\n"),
+				[BR_OP_SHR]  = sbuf_fromcstr("\tlsr\tx9, x9, x10\n"),
+				[BR_OP_SHRS] = sbuf_fromcstr("\tasr\tx9, x9, x10\n")
 			};
 			arm64_RegCtx reg_ctx = {0};
 			size_t  main_op_size = BR_getStackItemRTSize(&ctx->builder, proc_id, op_id - 1, 0),
@@ -324,7 +324,7 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BR_id proc_id, uint32_
 				return acc
 					+ getStackAddr_arm64(ctx, sp, vframe_offset_before, 8, &reg_ctx, rule, sizeof(offset_s), offset_s)
 					+ fprintf(ctx->dst, "\tldp%s9, %c10, %s\n", op_postfix[main_op_size], reg_type, offset_s)
-					+ fputsbuf(dst, native_op[op->type])
+					+ sbuf_fput(dst, native_op[op->type])
 					+ getStackAddr_arm64(ctx, sp, vframe_offset, 8, &reg_ctx, rule, sizeof(offset_s), offset_s)
 					+ fprintf(ctx->dst, "\tstr\t%c9, %s\n", reg_type, offset_s);
 			}
@@ -333,7 +333,7 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BR_id proc_id, uint32_
 				+ fprintf(ctx->dst, "\tldr%s9, %s\n", op_postfix[main_op_size], offset_s)
 				+ getStackAddr_arm64(ctx, sp, vframe_offset_before + main_op_size, 8, &reg_ctx, addr_rules[op2_size], sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tldr%s10, %s\n", op_postfix[op2_size], offset_s)
-				+ fputsbuf(ctx->dst, native_op[op->type])
+				+ sbuf_fput(ctx->dst, native_op[op->type])
 				+ getStackAddr_arm64(ctx, sp, vframe_offset, 8, &reg_ctx, addr_rules[main_op_size], sizeof(offset_s), offset_s)
 				+ fprintf(ctx->dst, "\tstr%s9, %s\n", op_postfix[main_op_size], offset_s);
 		}
@@ -733,7 +733,15 @@ static long compileOp_darwin_arm64(arm64_CodegenCtx* ctx, BR_id proc_id, uint32_
 	}
 }
 
-long BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst)
+static char* getErrorMsg(BR_Error err, const char* prefix) {
+	sbuf res = {0};
+	FILE* stream = open_memstream(&res.data, &res.length);
+	BR_printErrorMsg(stream, err, prefix);
+	fclose(stream);
+	return res.data;
+}
+
+long BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst, char** entry_point_name)
 {
 	arm64_CodegenCtx ctx = {.dst = dst};
 	BR_Error err = BR_analyzeModule(module, &ctx.builder);
@@ -742,7 +750,7 @@ long BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst)
 		abort();
 	}
 // adding macros for the pseudo-instructions `ldpb` and `ldrh` which load respectively 2 bytes or half-words from memory into 2 registers
-	long acc = fputsbuf(dst, fromcstr(
+	long acc = sbuf_fput(dst, sbuf_fromcstr(
 		".macro\tldph ra, rb, rs, off=0\n"
 		"\tldr\t\\ra, \\rs, \\off\n"
 		"\tlsr\t\\rb, \\ra, 16\n"
@@ -752,20 +760,20 @@ long BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst)
 		"\tlsr\t\\rb, \\ra, 8\n"
 		".endmacro\n"));
 	arrayForeach (BR_DataBlock, block, module->seg_data) {
-		acc += fputstr(dst, ".bss\n")
+		acc += str_fput(dst, ".bss\n")
 			+ printLabel(dst, block->name, "_")
 			+ fprintf(dst, ":\n"
 				"\t.zero\t%zu\n"
 				".text\n"
 				".align 4\n", BR_getMaxStackRTSize(&ctx.builder, ~(block - module->seg_data.data)))
 			+ printLabel(dst, block->name, ".brb_db_impl_")
-			+ fputstr(dst, ":\n"
+			+ str_fput(dst, ":\n"
 				"\tadrp\tx12, ")
 			+ printLabel(dst, block->name, "_")
-			+ fputstr(dst, "@PAGE\n"
+			+ str_fput(dst, "@PAGE\n"
 				"\tadd\tx12, x12, ")
 			+ printLabel(dst, block->name, "_")
-			+ fputstr(dst, "@PAGEOFF\n");
+			+ str_fput(dst, "@PAGEOFF\n");
 		size_t sizes[block->body.length + 1],
 			max_size = 0;
 		sizes[0] = BR_getStackRTSize(&ctx.builder, block - module->seg_data.data, UINT32_MAX);
@@ -778,26 +786,27 @@ long BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst)
 		for (uint32_t i = 0; i < block->body.length; ++i) {
 			acc += compileOp_darwin_arm64(&ctx, ~(block - module->seg_data.data), i, max_size - sizes[i + 1], max_size - sizes[i], dst);
 		}
-		acc += fputstr(dst, "\tret\n");
+		acc += str_fput(dst, "\tret\n");
 	}
 
-	if (!module->seg_data.length) acc += fputstr(dst, ".text\n");
+	if (!module->seg_data.length) acc += str_fput(dst, ".text\n");
 	arrayForeach (BR_Proc, proc, module->seg_exec) {
 // making the label global if the proc is the entry point
 		const bool is_entry = module->exec_entry_point == (uintptr_t)(proc - module->seg_exec.data);
 // generating the label
 		acc += printLabel(dst, proc->name, "_")
-			+ fputstr(dst, ":\n");
+			+ str_fput(dst, ":\n");
 		if (is_entry) {
-			acc += fputstr(dst, ".global ")
+			if (entry_point_name) *entry_point_name = sbuf_tostr(sbuf_fromcstr("_"), sbuf_fromstr((char*)proc->name));
+			acc += str_fput(dst, ".global ")
 				+ printLabel(dst, proc->name, "_")
-				+ fputstr(dst, "\n"
+				+ str_fput(dst, "\n"
 					"\tmov\tx28, x1\n"
 					"\tmov\tx27, x0\n");
 			arrayForeach (BR_DataBlock, block, module->seg_data) {
-				acc += fputstr(dst, "\tbl\t")
+				acc += str_fput(dst, "\tbl\t")
 					+ printLabel(dst, block->name, ".brb_db_impl_")
-					+ fputstr(dst, "\n");
+					+ str_fput(dst, "\n");
 			}
 		}
 // pre-computing the stack frame size after each operation in the procedure
@@ -817,14 +826,14 @@ long BR_compileModule_darwin_arm64(const BR_Module* module, FILE* dst)
 		for (uint32_t i = 0; i < proc->body.length; ++i) {
 			acc += compileOp_darwin_arm64(&ctx, proc - module->seg_exec.data, i, max_size - sizes[i + 1], max_size - sizes[i], dst);
 		}
-		acc += fputstr(dst, is_entry
+		acc += str_fput(dst, is_entry
 			? "\tmov\tx0, 0\n"
 			  "\tbl\t_exit\n"
 			: "\tret\n");
 	}
 	BR_Module _;
 	err = BR_extractModule(ctx.builder, &_);
-	assert(!err.type, "%s", BR_getErrorMsg(err, "error while analyzing module for native assembly generation"))
+	assert(!err.type, "%s", getErrorMsg(err, "error while analyzing module for native assembly generation"))
 	BR_deallocDataBlocks(&_);
 	BR_deallocProcs(&_);
 	BR_deallocStructs(&_);

@@ -1,16 +1,14 @@
 // implementation for writing BRB modules into `.brb` files
 #include <br.h>
 
-defArray(BR_Op);
-defArray(BR_DataBlock);
+implArray(BR_Op);
+implArray(BR_DataBlock);
 
-typedef const char* str;
-declArray(str);
-defArray(str);
+defArray_as(const char*, nameArray);
 typedef struct {
 	BR_Module* src;
 	FILE* dst;
-	strArray names;
+	nameArray names;
 } BR_ModuleWriter;
 
 static inline int writeInt8(FILE* fd, uint8_t x)
@@ -176,10 +174,10 @@ static long writeType(FILE* dst, BR_Type type)
 
 static uint32_t getNameId(BR_ModuleWriter* writer, const char* name)
 {
-	arrayForeach (str, iter, writer->names) {
-		if (streq(name, *iter)) return iter - writer->names.data;
+	arrayForeach_as (const char*, nameArray, iter, writer->names) {
+		if (str_eq(name, *iter)) return iter - writer->names.data;
 	}
-	strArray_append(&writer->names, name);
+	nameArray_append(&writer->names, name);
 	return writer->names.length - 1;
 }
 
@@ -245,7 +243,7 @@ long BR_writeModule(BR_Module src, FILE* dst)
 		.dst = dst
 	};
 // writing the header
-	long acc = fputsbuf(dst, BR_V1_HEADER)
+	long acc = sbuf_fput(dst, BR_V1_HEADER)
 // writing the amount of structs
 		+ writeIntOnly(dst, src.seg_typeinfo.length)
 // writing the amount of data blocks and procedures
@@ -279,9 +277,9 @@ long BR_writeModule(BR_Module src, FILE* dst)
 // writing names
 // TODO: don't save names of internal procedures and data blocks to reduce bytecode size
 // TODO: add an option to not save the names of structs
-	arrayForeach (str, name, writer.names) {
+	arrayForeach_as (const char*, nameArray, name, writer.names) {
 		acc += fwrite(*name, 1, strlen(*name) + 1, dst);
 	}
-	strArray_clear(&writer.names);
+	nameArray_clear(&writer.names);
 	return acc;
 }

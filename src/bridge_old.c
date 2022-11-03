@@ -2,8 +2,7 @@
 #include <errno.h>
 #include <signal.h>
 
-defArray(sbuf);
-declArray(int);
+implArray(sbuf);
 defArray(int);
 
 #define STR_PREFIX "._s"

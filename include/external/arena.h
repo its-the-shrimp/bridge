@@ -60,6 +60,7 @@ void free_region(Region *r);
 void *arena_alloc(Arena *a, size_t size_bytes);
 void arena_reset(Arena *a);
 void arena_free(Arena *a);
+void arena_log(Arena *a);
 
 #endif // ARENA_H_
 
@@ -70,28 +71,28 @@ void arena_free(Arena *a);
 // It should be up to new_region() to decide the actual capacity to allocate
 Region *new_region(size_t capacity)
 {
-    size_t size_bytes = sizeof(Region) + sizeof(uintptr_t)*capacity;
-    // TODO: it would be nice if we could guarantee that the regions are allocated by ARENA_BACKEND_LIBC_MALLOC are page aligned
-    Region *r = malloc(size_bytes);
-    ARENA_ASSERT(r);
-    r->next = NULL;
-    r->count = 0;
-    r->capacity = capacity;
-    return r;
+	size_t size_bytes = sizeof(Region) + sizeof(uintptr_t)*capacity;
+// TODO: it would be nice if we could guarantee that the regions are allocated by ARENA_BACKEND_LIBC_MALLOC are page aligned
+	Region *r = malloc(size_bytes);
+	ARENA_ASSERT(r);
+	r->next = NULL;
+	r->count = 0;
+	r->capacity = capacity;
+	return r;
 }
 
 void free_region(Region *r)
 {
-    free(r);
+	free(r);
 }
 #elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP
-#  error "TODO: Linux mmap backend is not implemented yet"
+#	error "TODO: Linux mmap backend is not implemented yet"
 #elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC
-#  error "TODO: Win32 VirtualAlloc backend is not implemented yet"
+#	error "TODO: Win32 VirtualAlloc backend is not implemented yet"
 #elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE
-#  error "TODO: WASM __heap_base backend is not implemented yet"
+#	error "TODO: WASM __heap_base backend is not implemented yet"
 #else
-#  error "Unknown Arena backend"
+#	error "Unknown Arena backend"
 #endif
 
 // TODO: add debug statistic collection mode for arena
@@ -131,23 +132,35 @@ void *arena_alloc(Arena *a, size_t size_bytes)
 
 void arena_reset(Arena *a)
 {
-    for (Region *r = a->begin; r != NULL; r = r->next) {
-        r->count = 0;
-    }
-
-    a->end = a->begin;
+	for (Region *r = a->begin; r != NULL; r = r->next)
+	    r->count = 0;
+	a->end = a->begin;
 }
 
 void arena_free(Arena *a)
 {
-    Region *r = a->begin;
-    while (r) {
-        Region *r0 = r;
-        r = r->next;
-        free_region(r0);
-    }
-    a->begin = NULL;
-    a->end = NULL;
+	Region *r = a->begin;
+	while (r) {
+	    Region *r0 = r;
+	    r = r->next;
+	    free_region(r0);
+	}
+	a->begin = NULL;
+	a->end = NULL;
+}
+
+void arena_log(Arena *a)
+{
+	size_t n_regions = 0, total_allocated = 0, total_used = 0;
+	for (Region* r = a->begin; r; r = r->next) {
+		++n_regions;
+		total_allocated += r->capacity;
+		total_used += r->count;
+	}
+	printf("allocated %.2fKB (%.2fKB in use) in %zu region(s):\n",
+		total_allocated * sizeof(uintptr_t) / 1024.0, total_used * sizeof(uintptr_t) / 1024.0, n_regions);
+	for (Region* r = a->begin; r; r = r->next)
+		printf("\t@%p\t%zu chunks (%zu in use)\n", (void*)r->data, r->capacity, r->count);
 }
 
 #endif // ARENA_IMPLEMENTATION

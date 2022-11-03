@@ -2,7 +2,7 @@
 #include <br.h>
 #include <unistd.h>
 
-defArray(sbuf);
+implArray(sbuf);
 
 static void prepareOpForExec(BR_ModuleBuilder* builder, sbufArray seg_data, BR_id proc_id, uint32_t op_id)
 {
@@ -1083,7 +1083,7 @@ bool BR_execOp(BR_ExecEnv* env)
 
 static sbuf allocDataBlock(BR_ModuleBuilder* builder, BR_id db_id)
 {
-	return smalloc(BR_getMaxStackRTSize(builder, db_id));
+	return sbuf_alloc(BR_getMaxStackRTSize(builder, db_id));
 }
 
 BR_Error BR_execModule(BR_Module module, BR_ExecEnv* env, char* args[], size_t stack_size, const volatile bool* interruptor)
@@ -1102,7 +1102,7 @@ BR_Error BR_execModule(BR_Module module, BR_ExecEnv* env, char* args[], size_t s
 	if (*args) while (args[++env->exec_argc]);
 	env->exec_argv = malloc(env->exec_argc * sizeof(sbuf));
 	for (uint32_t i = 0; i < env->exec_argc; i += 1) {
-		env->exec_argv[i] = fromstr((char*)args[i]);
+		env->exec_argv[i] = sbuf_fromstr((char*)args[i]);
 		env->exec_argv[i].length += 1;
 	}
 // setting a default interruptor if the `interruptor` is NULL
@@ -1139,7 +1139,7 @@ BR_Error BR_execModule(BR_Module module, BR_ExecEnv* env, char* args[], size_t s
 	}
 // TODO: add recursive pre-evaluation of data blocks when one block is referencing another; this probably has to be done after `call`s and `ret`urns are added
 // allocating the stack
-	if (!(env->stack = smalloc(stack_size)).data)
+	if (!(env->stack = sbuf_alloc(stack_size)).data)
 		return (BR_Error){.type = BR_ERR_NO_MEMORY};
 	env->stack_head = env->stack.data + env->stack.length;
 // pre-evaluating operands of the operations for faster execution

@@ -52,8 +52,34 @@ void* reverseByteOrder(void* src, u64 length);
 #define CONCAT(x, y) _CONCAT(x, y)
 #define TEMPVAR CONCAT(_lc, __LINE__)
 
-#define LAZY_AND(x, y) ((bool)(x) ? (bool)(y) : false)
-#define LAZY_OR(x, y) ((bool)(x) ? true : (bool)(y))
+// variadic macros! (only up to 8 arguments, but we can expand it if needed)
+
+#define _NARGS(x,x8,x7,x6,x5,x4,x3,x2,x1,n,...) n
+#define NARGS(...) _NARGS(0,__VA_ARGS__,8,7,6,5,4,3,2,1,0)
+
+#define LAZY_AND_1(x) (x)
+#define LAZY_AND_2(x, y) ((x) ? (y) : false)
+#define LAZY_AND_3(x, ...) LAZY_AND_2(x, LAZY_AND_2(__VA_ARGS__))
+#define LAZY_AND_4(x, ...) LAZY_AND_2(x, LAZY_AND_3(__VA_ARGS__))
+#define LAZY_AND_5(x, ...) LAZY_AND_2(x, LAZY_AND_4(__VA_ARGS__))
+#define LAZY_AND_6(x, ...) LAZY_AND_2(x, LAZY_AND_5(__VA_ARGS__))
+#define LAZY_AND_7(x, ...) LAZY_AND_2(x, LAZY_AND_6(__VA_ARGS__))
+#define LAZY_AND_8(x, ...) LAZY_AND_2(x, LAZY_AND_7(__VA_ARGS__))
+#define _LAZY_AND_N(n, ...) LAZY_AND_##n(__VA_ARGS__)
+#define LAZY_AND_N(n, ...) _LAZY_AND_N(n, __VA_ARGS__)
+#define LAZY_AND(...) LAZY_AND_N(NARGS(__VA_ARGS__), __VA_ARGS__)
+
+#define LAZY_OR_1(x) (x)
+#define LAZY_OR_2(x, y) ((bool)(x) ? true : (bool)(y))
+#define LAZY_OR_3(x, ...) LAZY_OR_2(x, LAZY_OR_2(__VA_ARGS__))
+#define LAZY_OR_4(x, ...) LAZY_OR_2(x, LAZY_OR_3(__VA_ARGS__))
+#define LAZY_OR_5(x, ...) LAZY_OR_2(x, LAZY_OR_4(__VA_ARGS__))
+#define LAZY_OR_6(x, ...) LAZY_OR_2(x, LAZY_OR_5(__VA_ARGS__))
+#define LAZY_OR_7(x, ...) LAZY_OR_2(x, LAZY_OR_6(__VA_ARGS__))
+#define LAZY_OR_8(x, ...) LAZY_OR_2(x, LAZY_OR_7(__VA_ARGS__))
+#define _LAZY_OR_N(n, ...) LAZY_OR_##n(__VA_ARGS__)
+#define LAZY_OR_N(n, ...) _LAZY_OR_N(n, __VA_ARGS__)
+#define LAZY_OR(...) LAZY_OR_N(NARGS(__VA_ARGS__), __VA_ARGS__)
 
 // bit manipulation functions
 #define BIT(n) (1ULL << (n))
@@ -83,6 +109,7 @@ int LOWEST_SET_BIT(uint64_t bitset);
 }
 #define assert(expr, ...) _assert(expr, __FILE__, __LINE__, __func__, __VA_ARGS__)
 #define static_assert _Static_assert
+#define unreachable() assert(false, "congratulations, unreachable code is reached")
 
 void* memdup(const void* ptr, size_t size);
 #define objdup(T, obj) ((T*)memdup(&obj, sizeof(T)))

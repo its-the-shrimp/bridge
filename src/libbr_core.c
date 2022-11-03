@@ -14,132 +14,132 @@
 #include <external/arena.h>
 extern char** environ;
 
-defArray(BR_Struct);
-defArray(BR_Proc);
-defArray(BR_Type);
-defArray(BR_Op);
-defArray(BR_DataBlock);
-defArray(BR_StackNode);
-defArray(BR_StackNodeArray);
+implArray(BR_Struct);
+implArray(BR_Proc);
+implArray(BR_Type);
+implArray(BR_Op);
+implArray(BR_DataBlock);
+implArray(BR_StackNode);
+implArray(BR_StackNodeArray);
 
 #define BR_SNF_STACKFRAME 0x1
 
 const sbuf BR_opNames[]   = {
-	[BR_OP_NOP]       = fromcstr("nop"),
-	[BR_OP_END]       = fromcstr("end"),
-	[BR_OP_I8]        = fromcstr("i8"),
-	[BR_OP_I16]       = fromcstr("i16"),
-	[BR_OP_I32]       = fromcstr("i32"),
-	[BR_OP_PTR]       = fromcstr("ptr"),
-	[BR_OP_I64]       = fromcstr("i64"),
-	[BR_OP_ADDR]      = fromcstr("addr"),
-	[BR_OP_DBADDR]    = fromcstr("dbaddr"),
-	[BR_OP_SYS]       = fromcstr("sys"),
-	[BR_OP_BUILTIN]   = fromcstr("builtin"),
-	[BR_OP_ADD]       = fromcstr("add"),
-	[BR_OP_ADDI]      = fromcstr("add-i"),
-	[BR_OP_ADDIAT8]   = fromcstr("add-i@8"),
-	[BR_OP_ADDIAT16]  = fromcstr("add-i@16"),
-	[BR_OP_ADDIAT32]  = fromcstr("add-i@32"),
-	[BR_OP_ADDIATP]   = fromcstr("add-i@p"),
-	[BR_OP_ADDIAT64]  = fromcstr("add-i@64"),
-	[BR_OP_SUB]       = fromcstr("sub"),
-	[BR_OP_SUBI]      = fromcstr("sub-i"),
-	[BR_OP_SUBIAT8]   = fromcstr("sub-i@8"),
-	[BR_OP_SUBIAT16]  = fromcstr("sub-i@16"),
-	[BR_OP_SUBIAT32]  = fromcstr("sub-i@32"),
-	[BR_OP_SUBIATP]   = fromcstr("sub-i@p"),
-	[BR_OP_SUBIAT64]  = fromcstr("sub-i@64"),
-	[BR_OP_MUL]       = fromcstr("mul"),
-	[BR_OP_MULI]      = fromcstr("mul-i"),
-	[BR_OP_MULIAT8]   = fromcstr("mul-i@8"),
-	[BR_OP_MULIAT16]  = fromcstr("mul-i@16"),
-	[BR_OP_MULIAT32]  = fromcstr("mul-i@32"),
-	[BR_OP_MULIATP]   = fromcstr("mul-i@p"),
-	[BR_OP_MULIAT64]  = fromcstr("mul-i@64"),
-	[BR_OP_DIV]       = fromcstr("div"),
-	[BR_OP_DIVI]      = fromcstr("div-i"),
-	[BR_OP_DIVIAT8]   = fromcstr("div-i@8"),
-	[BR_OP_DIVIAT16]  = fromcstr("div-i@16"),
-	[BR_OP_DIVIAT32]  = fromcstr("div-i@32"),
-	[BR_OP_DIVIATP]   = fromcstr("div-i@p"),
-	[BR_OP_DIVIAT64]  = fromcstr("div-i@64"),
-	[BR_OP_DIVS]      = fromcstr("divs"),
-	[BR_OP_DIVSI]     = fromcstr("divs-i"),
-	[BR_OP_DIVSIAT8]  = fromcstr("divs-i@8"),
-	[BR_OP_DIVSIAT16] = fromcstr("divs-i@16"),
-	[BR_OP_DIVSIAT32] = fromcstr("divs-i@32"),
-	[BR_OP_DIVSIATP]  = fromcstr("divs-i@p"),
-	[BR_OP_DIVSIAT64] = fromcstr("divs-i@64"),
-	[BR_OP_MOD]       = fromcstr("mod"),
-	[BR_OP_MODI]      = fromcstr("mod-i"),
-	[BR_OP_MODIAT8]   = fromcstr("mod-i@8"),
-	[BR_OP_MODIAT16]  = fromcstr("mod-i@16"),
-	[BR_OP_MODIAT32]  = fromcstr("mod-i@32"),
-	[BR_OP_MODIATP]   = fromcstr("mod-i@p"),
-	[BR_OP_MODIAT64]  = fromcstr("mod-i@64"),
-	[BR_OP_MODS]      = fromcstr("mods"),
-	[BR_OP_MODSI]     = fromcstr("mods-i"),
-	[BR_OP_MODSIAT8]  = fromcstr("mods-i@8"),
-	[BR_OP_MODSIAT16] = fromcstr("mods-i@16"),
-	[BR_OP_MODSIAT32] = fromcstr("mods-i@32"),
-	[BR_OP_MODSIATP]  = fromcstr("mods-i@p"),
-	[BR_OP_MODSIAT64] = fromcstr("mods-i@64"),
-	[BR_OP_AND]       = fromcstr("and"),
-	[BR_OP_ANDI]      = fromcstr("and-i"),
-	[BR_OP_ANDIAT8]   = fromcstr("and-i@8"),
-	[BR_OP_ANDIAT16]  = fromcstr("and-i@16"),
-	[BR_OP_ANDIAT32]  = fromcstr("and-i@32"),
-	[BR_OP_ANDIATP]   = fromcstr("and-i@p"),
-	[BR_OP_ANDIAT64]  = fromcstr("and-i@64"),
-	[BR_OP_OR]        = fromcstr("or"),
-	[BR_OP_ORI]       = fromcstr("or-i"),
-	[BR_OP_ORIAT8]    = fromcstr("or-i@8"),
-	[BR_OP_ORIAT16]   = fromcstr("or-i@16"),
-	[BR_OP_ORIAT32]   = fromcstr("or-i@32"),
-	[BR_OP_ORIATP]    = fromcstr("or-i@p"),
-	[BR_OP_ORIAT64]   = fromcstr("or-i@64"),
-	[BR_OP_XOR]       = fromcstr("xor"),
-	[BR_OP_XORI]      = fromcstr("xor-i"),
-	[BR_OP_XORIAT8]   = fromcstr("xor-i@8"),
-	[BR_OP_XORIAT16]  = fromcstr("xor-i@16"),
-	[BR_OP_XORIAT32]  = fromcstr("xor-i@32"),
-	[BR_OP_XORIATP]   = fromcstr("xor-i@p"),
-	[BR_OP_XORIAT64]  = fromcstr("xor-i@64"),
-	[BR_OP_SHL]       = fromcstr("shl"),
-	[BR_OP_SHLI]      = fromcstr("shl-i"),
-	[BR_OP_SHLIAT8]   = fromcstr("shl-i@8"),
-	[BR_OP_SHLIAT16]  = fromcstr("shl-i@16"),
-	[BR_OP_SHLIAT32]  = fromcstr("shl-i@32"),
-	[BR_OP_SHLIATP]   = fromcstr("shl-i@p"),
-	[BR_OP_SHLIAT64]  = fromcstr("shl-i@64"),
-	[BR_OP_SHR]       = fromcstr("shr"),
-	[BR_OP_SHRI]      = fromcstr("shr-i"),
-	[BR_OP_SHRIAT8]   = fromcstr("shr-i@8"),
-	[BR_OP_SHRIAT16]  = fromcstr("shr-i@16"),
-	[BR_OP_SHRIAT32]  = fromcstr("shr-i@32"),
-	[BR_OP_SHRIATP]   = fromcstr("shr-i@p"),
-	[BR_OP_SHRIAT64]  = fromcstr("shr-i@64"),
-	[BR_OP_SHRS]      = fromcstr("shrs"),
-	[BR_OP_SHRSI]     = fromcstr("shrs-i"),
-	[BR_OP_SHRSIAT8]  = fromcstr("shrs-i@8"),
-	[BR_OP_SHRSIAT16] = fromcstr("shrs-i@16"),
-	[BR_OP_SHRSIAT32] = fromcstr("shrs-i@32"),
-	[BR_OP_SHRSIATP]  = fromcstr("shrs-i@p"),
-	[BR_OP_SHRSIAT64] = fromcstr("shrs-i@64"),
-	[BR_OP_NOT]       = fromcstr("not"),
-	[BR_OP_NOTAT8]    = fromcstr("not-@8"),
-	[BR_OP_NOTAT16]   = fromcstr("not-@16"),
-	[BR_OP_NOTAT32]   = fromcstr("not-@32"),
-	[BR_OP_NOTATP]    = fromcstr("not-@p"),
-	[BR_OP_NOTAT64]   = fromcstr("not-@64"),
-	[BR_OP_DROP]      = fromcstr("drop"),
-	[BR_OP_NEW]       = fromcstr("new"),
-	[BR_OP_ZERO]      = fromcstr("zero"),
-	[BR_OP_GET]       = fromcstr("get"),
-	[BR_OP_SETAT]     = fromcstr("set-at"),
-	[BR_OP_GETFROM]   = fromcstr("get-from"),
-	[BR_OP_COPY]      = fromcstr("copy"),
+	[BR_OP_NOP]       = sbuf_fromcstr("nop"),
+	[BR_OP_END]       = sbuf_fromcstr("end"),
+	[BR_OP_I8]        = sbuf_fromcstr("i8"),
+	[BR_OP_I16]       = sbuf_fromcstr("i16"),
+	[BR_OP_I32]       = sbuf_fromcstr("i32"),
+	[BR_OP_PTR]       = sbuf_fromcstr("ptr"),
+	[BR_OP_I64]       = sbuf_fromcstr("i64"),
+	[BR_OP_ADDR]      = sbuf_fromcstr("addr"),
+	[BR_OP_DBADDR]    = sbuf_fromcstr("dbaddr"),
+	[BR_OP_SYS]       = sbuf_fromcstr("sys"),
+	[BR_OP_BUILTIN]   = sbuf_fromcstr("builtin"),
+	[BR_OP_ADD]       = sbuf_fromcstr("add"),
+	[BR_OP_ADDI]      = sbuf_fromcstr("add-i"),
+	[BR_OP_ADDIAT8]   = sbuf_fromcstr("add-i@8"),
+	[BR_OP_ADDIAT16]  = sbuf_fromcstr("add-i@16"),
+	[BR_OP_ADDIAT32]  = sbuf_fromcstr("add-i@32"),
+	[BR_OP_ADDIATP]   = sbuf_fromcstr("add-i@p"),
+	[BR_OP_ADDIAT64]  = sbuf_fromcstr("add-i@64"),
+	[BR_OP_SUB]       = sbuf_fromcstr("sub"),
+	[BR_OP_SUBI]      = sbuf_fromcstr("sub-i"),
+	[BR_OP_SUBIAT8]   = sbuf_fromcstr("sub-i@8"),
+	[BR_OP_SUBIAT16]  = sbuf_fromcstr("sub-i@16"),
+	[BR_OP_SUBIAT32]  = sbuf_fromcstr("sub-i@32"),
+	[BR_OP_SUBIATP]   = sbuf_fromcstr("sub-i@p"),
+	[BR_OP_SUBIAT64]  = sbuf_fromcstr("sub-i@64"),
+	[BR_OP_MUL]       = sbuf_fromcstr("mul"),
+	[BR_OP_MULI]      = sbuf_fromcstr("mul-i"),
+	[BR_OP_MULIAT8]   = sbuf_fromcstr("mul-i@8"),
+	[BR_OP_MULIAT16]  = sbuf_fromcstr("mul-i@16"),
+	[BR_OP_MULIAT32]  = sbuf_fromcstr("mul-i@32"),
+	[BR_OP_MULIATP]   = sbuf_fromcstr("mul-i@p"),
+	[BR_OP_MULIAT64]  = sbuf_fromcstr("mul-i@64"),
+	[BR_OP_DIV]       = sbuf_fromcstr("div"),
+	[BR_OP_DIVI]      = sbuf_fromcstr("div-i"),
+	[BR_OP_DIVIAT8]   = sbuf_fromcstr("div-i@8"),
+	[BR_OP_DIVIAT16]  = sbuf_fromcstr("div-i@16"),
+	[BR_OP_DIVIAT32]  = sbuf_fromcstr("div-i@32"),
+	[BR_OP_DIVIATP]   = sbuf_fromcstr("div-i@p"),
+	[BR_OP_DIVIAT64]  = sbuf_fromcstr("div-i@64"),
+	[BR_OP_DIVS]      = sbuf_fromcstr("divs"),
+	[BR_OP_DIVSI]     = sbuf_fromcstr("divs-i"),
+	[BR_OP_DIVSIAT8]  = sbuf_fromcstr("divs-i@8"),
+	[BR_OP_DIVSIAT16] = sbuf_fromcstr("divs-i@16"),
+	[BR_OP_DIVSIAT32] = sbuf_fromcstr("divs-i@32"),
+	[BR_OP_DIVSIATP]  = sbuf_fromcstr("divs-i@p"),
+	[BR_OP_DIVSIAT64] = sbuf_fromcstr("divs-i@64"),
+	[BR_OP_MOD]       = sbuf_fromcstr("mod"),
+	[BR_OP_MODI]      = sbuf_fromcstr("mod-i"),
+	[BR_OP_MODIAT8]   = sbuf_fromcstr("mod-i@8"),
+	[BR_OP_MODIAT16]  = sbuf_fromcstr("mod-i@16"),
+	[BR_OP_MODIAT32]  = sbuf_fromcstr("mod-i@32"),
+	[BR_OP_MODIATP]   = sbuf_fromcstr("mod-i@p"),
+	[BR_OP_MODIAT64]  = sbuf_fromcstr("mod-i@64"),
+	[BR_OP_MODS]      = sbuf_fromcstr("mods"),
+	[BR_OP_MODSI]     = sbuf_fromcstr("mods-i"),
+	[BR_OP_MODSIAT8]  = sbuf_fromcstr("mods-i@8"),
+	[BR_OP_MODSIAT16] = sbuf_fromcstr("mods-i@16"),
+	[BR_OP_MODSIAT32] = sbuf_fromcstr("mods-i@32"),
+	[BR_OP_MODSIATP]  = sbuf_fromcstr("mods-i@p"),
+	[BR_OP_MODSIAT64] = sbuf_fromcstr("mods-i@64"),
+	[BR_OP_AND]       = sbuf_fromcstr("and"),
+	[BR_OP_ANDI]      = sbuf_fromcstr("and-i"),
+	[BR_OP_ANDIAT8]   = sbuf_fromcstr("and-i@8"),
+	[BR_OP_ANDIAT16]  = sbuf_fromcstr("and-i@16"),
+	[BR_OP_ANDIAT32]  = sbuf_fromcstr("and-i@32"),
+	[BR_OP_ANDIATP]   = sbuf_fromcstr("and-i@p"),
+	[BR_OP_ANDIAT64]  = sbuf_fromcstr("and-i@64"),
+	[BR_OP_OR]        = sbuf_fromcstr("or"),
+	[BR_OP_ORI]       = sbuf_fromcstr("or-i"),
+	[BR_OP_ORIAT8]    = sbuf_fromcstr("or-i@8"),
+	[BR_OP_ORIAT16]   = sbuf_fromcstr("or-i@16"),
+	[BR_OP_ORIAT32]   = sbuf_fromcstr("or-i@32"),
+	[BR_OP_ORIATP]    = sbuf_fromcstr("or-i@p"),
+	[BR_OP_ORIAT64]   = sbuf_fromcstr("or-i@64"),
+	[BR_OP_XOR]       = sbuf_fromcstr("xor"),
+	[BR_OP_XORI]      = sbuf_fromcstr("xor-i"),
+	[BR_OP_XORIAT8]   = sbuf_fromcstr("xor-i@8"),
+	[BR_OP_XORIAT16]  = sbuf_fromcstr("xor-i@16"),
+	[BR_OP_XORIAT32]  = sbuf_fromcstr("xor-i@32"),
+	[BR_OP_XORIATP]   = sbuf_fromcstr("xor-i@p"),
+	[BR_OP_XORIAT64]  = sbuf_fromcstr("xor-i@64"),
+	[BR_OP_SHL]       = sbuf_fromcstr("shl"),
+	[BR_OP_SHLI]      = sbuf_fromcstr("shl-i"),
+	[BR_OP_SHLIAT8]   = sbuf_fromcstr("shl-i@8"),
+	[BR_OP_SHLIAT16]  = sbuf_fromcstr("shl-i@16"),
+	[BR_OP_SHLIAT32]  = sbuf_fromcstr("shl-i@32"),
+	[BR_OP_SHLIATP]   = sbuf_fromcstr("shl-i@p"),
+	[BR_OP_SHLIAT64]  = sbuf_fromcstr("shl-i@64"),
+	[BR_OP_SHR]       = sbuf_fromcstr("shr"),
+	[BR_OP_SHRI]      = sbuf_fromcstr("shr-i"),
+	[BR_OP_SHRIAT8]   = sbuf_fromcstr("shr-i@8"),
+	[BR_OP_SHRIAT16]  = sbuf_fromcstr("shr-i@16"),
+	[BR_OP_SHRIAT32]  = sbuf_fromcstr("shr-i@32"),
+	[BR_OP_SHRIATP]   = sbuf_fromcstr("shr-i@p"),
+	[BR_OP_SHRIAT64]  = sbuf_fromcstr("shr-i@64"),
+	[BR_OP_SHRS]      = sbuf_fromcstr("shrs"),
+	[BR_OP_SHRSI]     = sbuf_fromcstr("shrs-i"),
+	[BR_OP_SHRSIAT8]  = sbuf_fromcstr("shrs-i@8"),
+	[BR_OP_SHRSIAT16] = sbuf_fromcstr("shrs-i@16"),
+	[BR_OP_SHRSIAT32] = sbuf_fromcstr("shrs-i@32"),
+	[BR_OP_SHRSIATP]  = sbuf_fromcstr("shrs-i@p"),
+	[BR_OP_SHRSIAT64] = sbuf_fromcstr("shrs-i@64"),
+	[BR_OP_NOT]       = sbuf_fromcstr("not"),
+	[BR_OP_NOTAT8]    = sbuf_fromcstr("not-@8"),
+	[BR_OP_NOTAT16]   = sbuf_fromcstr("not-@16"),
+	[BR_OP_NOTAT32]   = sbuf_fromcstr("not-@32"),
+	[BR_OP_NOTATP]    = sbuf_fromcstr("not-@p"),
+	[BR_OP_NOTAT64]   = sbuf_fromcstr("not-@64"),
+	[BR_OP_DROP]      = sbuf_fromcstr("drop"),
+	[BR_OP_NEW]       = sbuf_fromcstr("new"),
+	[BR_OP_ZERO]      = sbuf_fromcstr("zero"),
+	[BR_OP_GET]       = sbuf_fromcstr("get"),
+	[BR_OP_SETAT]     = sbuf_fromcstr("set-at"),
+	[BR_OP_GETFROM]   = sbuf_fromcstr("get-from"),
+	[BR_OP_COPY]      = sbuf_fromcstr("copy"),
 };
 static_assert(sizeof(BR_opNames) / sizeof(BR_opNames[0]) == BR_N_OPS, "not all BRB operations have their names defined");
 
@@ -265,9 +265,9 @@ const uint64_t BR_opFlags[] = {
 static_assert(sizeof(BR_opFlags) / sizeof(BR_opFlags[0]) == BR_N_OPS, "not all BRB operations have their flags defined");
 
 const sbuf BR_syscallNames[] = {
-	[BR_SYS_EXIT]  = fromcstr("exit"),
-	[BR_SYS_WRITE] = fromcstr("write"),
-	[BR_SYS_READ]  = fromcstr("read")
+	[BR_SYS_EXIT]  = sbuf_fromcstr("exit"),
+	[BR_SYS_WRITE] = sbuf_fromcstr("write"),
+	[BR_SYS_READ]  = sbuf_fromcstr("read")
 };
 static_assert(sizeof(BR_syscallNames) / sizeof(BR_syscallNames[0]) == BR_N_SYSCALLS, "not all BRB syscalls have their names defined");
 
@@ -280,10 +280,10 @@ const uintptr_t BR_builtinValues[] = {
 static_assert(sizeof(BR_builtinValues) / sizeof(BR_builtinValues[0]) == BR_N_BUILTINS, "not all BRB built-ins have their runtime values defined");
 
 const sbuf BR_builtinNames[] = {
-	[BR_BUILTIN_NULL] = fromcstr("NULL"),
-	[BR_BUILTIN_STDIN] = fromcstr("STDIN"),
-	[BR_BUILTIN_STDOUT] = fromcstr("STDOUT"),
-	[BR_BUILTIN_STDERR] = fromcstr("STDERR"),
+	[BR_BUILTIN_NULL] = sbuf_fromcstr("NULL"),
+	[BR_BUILTIN_STDIN] = sbuf_fromcstr("STDIN"),
+	[BR_BUILTIN_STDOUT] = sbuf_fromcstr("STDOUT"),
+	[BR_BUILTIN_STDERR] = sbuf_fromcstr("STDERR"),
 };
 static_assert(sizeof(BR_builtinNames) / sizeof(BR_builtinNames[0]) == BR_N_BUILTINS, "not all BRB built-ins have their names defined");
 
@@ -295,16 +295,16 @@ const size_t BR_syscallNArgs[] = {
 static_assert(sizeof(BR_syscallNArgs) / sizeof(BR_syscallNArgs[0]) == BR_N_SYSCALLS, "not all BRB syscalls have their prototype defined");
 
 const sbuf BR_typeNames[] = {
-	[BR_TYPE_DYNAMIC] = fromcstr("__dynamic"),
-	[BR_TYPE_I8]      = fromcstr("i8"),
-	[BR_TYPE_I16]     = fromcstr("i16"),
-	[BR_TYPE_I32]     = fromcstr("i32"),
-	[BR_TYPE_PTR]     = fromcstr("ptr"),
-	[BR_TYPE_I64]     = fromcstr("i64"),
-	[BR_TYPE_VOID]    = fromcstr("void"),
-	[BR_TYPE_STRUCT]  = fromcstr("struct"),
-	[BR_TYPE_INT]     = fromcstr("__int"),
-	[BR_TYPE_ANY]     = fromcstr("__any")
+	[BR_TYPE_DYNAMIC] = sbuf_fromcstr("__dynamic"),
+	[BR_TYPE_I8]      = sbuf_fromcstr("i8"),
+	[BR_TYPE_I16]     = sbuf_fromcstr("i16"),
+	[BR_TYPE_I32]     = sbuf_fromcstr("i32"),
+	[BR_TYPE_PTR]     = sbuf_fromcstr("ptr"),
+	[BR_TYPE_I64]     = sbuf_fromcstr("i64"),
+	[BR_TYPE_VOID]    = sbuf_fromcstr("void"),
+	[BR_TYPE_STRUCT]  = sbuf_fromcstr("struct"),
+	[BR_TYPE_INT]     = sbuf_fromcstr("__int"),
+	[BR_TYPE_ANY]     = sbuf_fromcstr("__any")
 };
 static_assert(sizeof(BR_typeNames) / sizeof(BR_typeNames[0]) == BR_N_TYPE_KINDS, "not all BRB types have their names defined");
 
@@ -320,7 +320,7 @@ float BR_endTimerAt(struct timespec* src)
 	return (newtime.tv_sec - src->tv_sec) * 1000 + (newtime.tv_nsec - src->tv_nsec) / (float)1e6;
 }
 
-bool BR_execProcess(char* command, BR_ProcessInfo* info)
+bool BR_execProcess(char* argv[], BR_ProcessInfo* info)
 {
 	pid_t pid;
 	int out_pipe[2], err_pipe[2], local_errno, exit_status;
@@ -352,8 +352,6 @@ bool BR_execProcess(char* command, BR_ProcessInfo* info)
 		}
 	}
 
-	char* argv[] = { "sh", "-c", command, NULL };
-
 	if ((local_errno = posix_spawn(&pid, "/bin/sh", &file_actions, NULL, argv, environ))) {
 		errno = local_errno;
 		return false;
@@ -377,14 +375,6 @@ bool BR_execProcess(char* command, BR_ProcessInfo* info)
 	info->exitcode = info->exited ? WEXITSTATUS(exit_status) : WTERMSIG(exit_status);
 
 	return true;
-}
-
-bool BR_execProcess_s(sbuf command, BR_ProcessInfo* info)
-{
-	char temp[command.length + 1];
-	memcpy(temp, command.data, command.length);
-	temp[command.length] = '\0';
-	return BR_execProcess(temp, info);
 }
 
 bool BR_isPathDir(char* path)
@@ -412,39 +402,39 @@ char* BR_getFileExt(const char* path)
 sbuf BR_getFileExt_s(sbuf path)
 {
 	sbuf noext;
-	if (!sbufsplitr(&path, &noext, fromcstr(".")).data) return fromcstr("");
+	if (!sbuf_rsplit(&path, &noext, sbuf_fromcstr(".")).data) return sbuf_fromcstr("");
 	return path;
 }
 
 char* BR_setFileExt(const char* path, const char* ext)
 {
-	sbuf src = fromstr((char*)path);
+	sbuf src = sbuf_fromstr((char*)path);
 	sbuf noext;
-	sbufsplitr(&src, &noext, fromcstr("."));
-	return *ext ? tostr(noext, fromcstr("."), fromstr((char*)ext)) : tostr(noext);
+	sbuf_rsplit(&src, &noext, sbuf_fromcstr("."));
+	return *ext ? sbuf_tostr(noext, sbuf_fromcstr("."), sbuf_fromstr((char*)ext)) : sbuf_tostr(noext);
 }
 
 sbuf BR_setFileExt_s(sbuf path, sbuf ext)
 {
 	sbuf noext;
-	sbufsplitr(&path, &noext, fromcstr("."));
-	return ext.length ? sbufconcat(noext, fromcstr("."), ext) : sbufcopy(noext);
+	sbuf_rsplit(&path, &noext, sbuf_fromcstr("."));
+	return ext.length ? sbuf_concat(noext, sbuf_fromcstr("."), ext) : sbuf_copy(noext);
 }
 
 char* BR_fileBaseName(const char* path)
 {
-	sbuf src = fromstr((char*)path);
+	sbuf src = sbuf_fromstr((char*)path);
 	sbuf res;
-	if (sbufeq(sbufsplitr(&src, &res, fromcstr("."), PATHSEP), fromcstr("."))) {
-		return tostr(sbufsplitr(&res, &src, PATHSEP).length ? res : src);
-	} else return tostr(src.length ? src : res);
+	if (sbuf_eq(sbuf_rsplit(&src, &res, sbuf_fromcstr("."), SBUF_PATHSEP), sbuf_fromcstr("."))) {
+		return sbuf_tostr(sbuf_rsplit(&res, &src, SBUF_PATHSEP).length ? res : src);
+	} else return sbuf_tostr(src.length ? src : res);
 }
 
 sbuf BR_fileBaseName_s(sbuf path)
 {
 	sbuf res;
-	if (sbufeq(sbufsplitr(&path, &res, fromcstr("."), PATHSEP), fromcstr("."))) {
-		return sbufsplitr(&res, &path, PATHSEP).length ? res : path;
+	if (sbuf_eq(sbuf_rsplit(&path, &res, sbuf_fromcstr("."), SBUF_PATHSEP), sbuf_fromcstr("."))) {
+		return sbuf_rsplit(&res, &path, SBUF_PATHSEP).length ? res : path;
 	} else return path.length ? path : res;
 }
 
@@ -459,7 +449,7 @@ void BR_printErrorMsg(FILE* dst, BR_Error err, const char* prefix)
 	switch (err.type) {
 		case BR_ERR_INVALID_HEADER:
 			fputs("invalid module header: \"", dst);
-			fputsbufesc(dst, (sbuf){ .data = err.header, .length = BR_HEADER_SIZE }, BYTEFMT_HEX | BYTEFMT_ESC_DQUOTE);
+			sbuf_fputesc(dst, (sbuf){ .data = err.header, .length = BR_HEADER_SIZE }, SBUF_BFMT_HEX | SBUF_BFMT_ESC_DQUOTE);
 			fputs("\"\n", dst);
 			break;
 		case BR_ERR_NO_HEADER:
@@ -478,7 +468,7 @@ void BR_printErrorMsg(FILE* dst, BR_Error err, const char* prefix)
 			fprintf(dst, "invalid operation type: %u\n", err.opcode);
 			break;
 		case BR_ERR_NO_OPERAND:
-			fprintf(dst, "unexpected end of input while loading operand of an operation `%.*s`\n", unpack(BR_opNames[err.opcode]));
+			fprintf(dst, "unexpected end of input while loading operand of an operation `%.*s`\n", sbuf_unpack(BR_opNames[err.opcode]));
 			break;
 		case BR_ERR_INVALID_NAME:
 			fputs("invalid name found\n", dst);
@@ -491,13 +481,13 @@ void BR_printErrorMsg(FILE* dst, BR_Error err, const char* prefix)
 				fprintf(dst, "attempted to label head of an empty stack\n");
 			} else fprintf(dst,
 				"stack underflow for operation `%.*s`: expected %u items, instead got %u\n",
-				unpack(BR_opNames[err.opcode]),
+				sbuf_unpack(BR_opNames[err.opcode]),
 				err.expected_stack_length,
 				err.actual_stack_length
 			);
 			break;
 		case BR_ERR_OPERAND_OUT_OF_RANGE:
-			fprintf(dst, "operand %llu is out of range for operation `%.*s`\n", err.operand, unpack(BR_opNames[err.opcode]));
+			fprintf(dst, "operand %llu is out of range for operation `%.*s`\n", err.operand, sbuf_unpack(BR_opNames[err.opcode]));
 			break;
 		case BR_ERR_NO_PROC_RET_TYPE:
 			fprintf(dst, "unexpected end of input while loading return type of a procedure\n");
@@ -560,7 +550,7 @@ void BR_printErrorMsg(FILE* dst, BR_Error err, const char* prefix)
 			fprintf(dst, "array types must be denoted the following way: T[n]\n");
 			break;
 		case BR_ERR_TYPE_MISMATCH:
-			fprintf(dst, "argument #%u for a `%.*s` operation is expected to be of type `", err.arg_id, unpack(BR_opNames[err.opcode]));
+			fprintf(dst, "argument #%u for a `%.*s` operation is expected to be of type `", err.arg_id, sbuf_unpack(BR_opNames[err.opcode]));
 			BR_printType(err.expected_type, dst);
 			fputs("` instead got an argument of type `", dst);
 			BR_printType(err.actual_type, dst);
@@ -617,14 +607,6 @@ void BR_printErrorMsg(FILE* dst, BR_Error err, const char* prefix)
 	}
 }
 
-char* BR_getErrorMsg(BR_Error err, const char* prefix) {
-	sbuf res = {0};
-	FILE* stream = open_memstream(&res.data, &res.length);
-	BR_printErrorMsg(stream, err, prefix);
-	fclose(stream);
-	return res.data;
-}
-
 BR_Error BR_initModuleBuilder(BR_ModuleBuilder* builder)
 {
 	*builder = (BR_ModuleBuilder){0};
@@ -663,9 +645,22 @@ BR_Error BR_analyzeModule(const BR_Module* module, BR_ModuleBuilder* dst)
 	return BR_setEntryPoint(dst, module->exec_entry_point);
 }
 
+void BR_delModuleBuilder(BR_ModuleBuilder builder)
+{
+	BR_Module stub;
+	BR_extractModule(builder, &stub);
+	BR_delModule(stub);
+}
+
+void BR_delModule(BR_Module module)
+{
+	BR_deallocProcs(&module);
+	BR_deallocDataBlocks(&module);
+	BR_deallocStructs(&module);
+}
+
 BR_Error BR_extractModule(BR_ModuleBuilder builder, BR_Module* dst)
 {
-	if (builder.error.type) return builder.error;
 	arrayForeach (BR_StackNodeArray, proc_info, builder.procs) {
 		BR_StackNodeArray_clear(proc_info);
 	}
@@ -676,7 +671,7 @@ BR_Error BR_extractModule(BR_ModuleBuilder builder, BR_Module* dst)
 	BR_StackNodeArrayArray_clear(&builder.data_blocks);
 	arena_free(&builder.arena);
 	*dst = builder.module;
-	return (BR_Error){0};
+	return builder.error;
 }
 
 BR_Error BR_setEntryPoint(BR_ModuleBuilder* builder, size_t proc_id)
@@ -748,7 +743,7 @@ static void __unused printStack(BR_StackNode head)
 	putchar('[');
 	while (head) {
 		BR_printType(head->type, stdout);
-		if (head->prev) putstr(", ");
+		if (head->prev) str_put(", ");
 		head = head->prev;
 	}
 	putchar(']');
@@ -789,7 +784,7 @@ static BR_Error changeStack(BR_StackNodeArray* stack, BR_Op op, size_t n_in, BR_
 	return (BR_Error){.type = BR_StackNodeArray_append(stack, node) ? 0 : BR_ERR_NO_MEMORY};
 }
 
-BR_Error BR_addProc(BR_ModuleBuilder* builder, BR_id* proc_id_p, const char* name, size_t n_args, BR_Type* args, BR_Type ret_type, uint32_t n_ops_hint)
+BR_Error BR_addProc(BR_ModuleBuilder* builder, BR_id* proc_id_p, const char* name, size_t n_args, const BR_Type* args, BR_Type ret_type, uint32_t n_ops_hint)
 {
 	if (builder->error.type) return builder->error;
 	BR_Error err;
@@ -799,7 +794,7 @@ BR_Error BR_addProc(BR_ModuleBuilder* builder, BR_id* proc_id_p, const char* nam
 		|| !BR_StackNodeArrayArray_append(&builder->procs, (BR_StackNodeArray){0}))
 		return builder->error = (BR_Error){.type = BR_ERR_NO_MEMORY};
 // copying the argumants
-	if (!(arrayhead(builder->module.seg_exec)->args = BR_TypeArray_copy((BR_TypeArray){ .data = args, .length = n_args })).data)
+	if (!(arrayhead(builder->module.seg_exec)->args = BR_TypeArray_copy((BR_TypeArray){ .data = (BR_Type*)args, .length = n_args })).data)
 		return builder->error = (BR_Error){.type = BR_ERR_NO_MEMORY};
 // validating the arguments
 	arrayForeach (BR_Type, arg, arrayhead(builder->module.seg_exec)->args) {
@@ -1483,10 +1478,10 @@ BR_Error BR_addDataBlock(BR_ModuleBuilder* builder, BR_id* db_id_p, const char* 
 	return (BR_Error){0};
 }
 
-BR_id BR_getDataBlockIdByName(BR_Module* module, const char* name)
+BR_id BR_getDataBlockIdByName(const BR_Module* module, const char* name)
 {
 	arrayForeach (BR_DataBlock, block, module->seg_data) {
-		if (streq(block->name, name)) return ~(block - module->seg_data.data);
+		if (str_eq(block->name, name)) return ~(block - module->seg_data.data);
 	}
 	return BR_INVALID_ID;
 }
@@ -1509,7 +1504,7 @@ static size_t getTypeAlignment(BR_Module* module, BR_Type type)
 	return values[type.kind];
 }
 
-size_t BR_getTypeRTSize(BR_Module* module, BR_Type type)
+size_t BR_getTypeRTSize(const BR_Module* module, BR_Type type)
 {
 	if (type.kind == BR_TYPE_STRUCT)
 		return type.struct_id >= module->seg_typeinfo.length
@@ -1527,7 +1522,7 @@ size_t BR_getTypeRTSize(BR_Module* module, BR_Type type)
 	return type.n_items * coeffs[type.kind];
 }
 
-size_t BR_getStackItemRTOffset(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, size_t item_id)
+size_t BR_getStackItemRTOffset(const BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, size_t item_id)
 {
 	const bool strict = item_id != SIZE_MAX;
 	BR_StackNodeArray* vframe;
@@ -1553,12 +1548,12 @@ size_t BR_getStackItemRTOffset(BR_ModuleBuilder* builder, BR_id proc_id, uint32_
 	return item_id && strict ? SIZE_MAX : res;
 }
 
-size_t BR_getStackRTSize(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id)
+size_t BR_getStackRTSize(const BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id)
 {
 	return BR_getStackItemRTOffset(builder, proc_id, op_id, SIZE_MAX);
 }
 
-size_t BR_getMaxStackRTSize(BR_ModuleBuilder* builder, BR_id proc_id)
+size_t BR_getMaxStackRTSize(const BR_ModuleBuilder* builder, BR_id proc_id)
 {
 	size_t res = 0, i = -1;
 	while (true) {
@@ -1569,7 +1564,7 @@ size_t BR_getMaxStackRTSize(BR_ModuleBuilder* builder, BR_id proc_id)
 	return res;
 }
 
-bool BR_getStackItemType(BR_ModuleBuilder* builder, BR_Type* dst, BR_id proc_id, uint32_t op_id, uint32_t item_id)
+bool BR_getStackItemType(const BR_ModuleBuilder* builder, BR_Type* dst, BR_id proc_id, uint32_t op_id, uint32_t item_id)
 {
 	BR_StackNodeArray* vframe;
 	if (proc_id < 0) {
@@ -1588,22 +1583,22 @@ bool BR_getStackItemType(BR_ModuleBuilder* builder, BR_Type* dst, BR_id proc_id,
 	return true;
 }
 
-size_t BR_getStackItemRTSize(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, uint32_t item_id)
+size_t BR_getStackItemRTSize(const BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, uint32_t item_id)
 {
 	BR_Type res;
 	if (!BR_getStackItemType(builder, &res, proc_id, op_id, item_id)) return SIZE_MAX;
 	return BR_getTypeRTSize(&builder->module, res);
 }
 
-BR_id BR_getProcIdByName(BR_Module* module, const char* name)
+BR_id BR_getProcIdByName(const BR_Module* module, const char* name)
 {
 	arrayForeach (BR_Proc, proc, module->seg_exec) {
-		if (streq(name, proc->name)) return proc - module->seg_exec.data;
+		if (str_eq(name, proc->name)) return proc - module->seg_exec.data;
 	}
 	return BR_INVALID_ID;
 }
 
-size_t BR_getStackItemIdByName(BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, const char* name)
+size_t BR_getStackItemIdByName(const BR_ModuleBuilder* builder, BR_id proc_id, uint32_t op_id, const char* name)
 {
 	BR_StackNodeArray* vframe;
 	if (proc_id < 0) {
@@ -1617,7 +1612,7 @@ size_t BR_getStackItemIdByName(BR_ModuleBuilder* builder, BR_id proc_id, uint32_
 	if (++op_id >= vframe->length) return SIZE_MAX;
 	size_t res = 0;
 	for (BR_StackNode node = vframe->data[op_id]; node; node = node->prev) {
-		if (node->name ? streq(name, node->name) : false) return res;
+		if (node->name ? str_eq(name, node->name) : false) return res;
 		++res;
 	}
 	return SIZE_MAX;
@@ -1713,10 +1708,10 @@ void BR_deallocStructs(BR_Module* module)
 	BR_StructArray_clear(&module->seg_typeinfo);
 }
 
-BR_id BR_getStructIdByName(BR_Module* module, const char* name)
+BR_id BR_getStructIdByName(const BR_Module* module, const char* name)
 {
 	arrayForeach (BR_Struct, obj, module->seg_typeinfo) {
-		if (streq(obj->name, name)) return obj - module->seg_typeinfo.data;
+		if (str_eq(obj->name, name)) return obj - module->seg_typeinfo.data;
 	}
 	return BR_INVALID_ID;
 }
