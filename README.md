@@ -1,3 +1,5 @@
+## Warning
+The project is abandoned, I'll get to make my own programming language someday, but I'll consider this as a failed attempt.
 # BRidge
 
 BRidge is a procedural and object-oriented statically typed language with the ability to run both natively and in its own runtime environment.
